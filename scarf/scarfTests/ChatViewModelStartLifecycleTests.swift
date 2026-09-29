@@ -50,6 +50,11 @@ import ScarfCore
             /// SUCCEED here and be caught by the sentMethods
             /// assertions, not masked by a transport error.
             case loadNotRestorable(sessionId: String)
+            /// Like `loadNotRestorable`, but `session/load` answers with a
+            /// JSON-RPC error — a real failure, NOT Hermes's not-restorable
+            /// answer — so a resume must fail rather than fall back to
+            /// `session/new` (#146).
+            case loadRPCError(sessionId: String)
             /// Like `happy`, but `session/set_model` answers with the
             /// JSON-RPC error Hermes >= v0.21.4 raises for a model
             /// switch while a turn is running (`acp_adapter/server.py:1026`
@@ -137,8 +142,12 @@ import ScarfCore
                 default:
                     reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
                 }
-            case .loadNotRestorable(let sessionId):
+            case .loadNotRestorable(let sessionId), .loadRPCError(let sessionId):
+                let rpcError: Bool = if case .loadRPCError = behavior { true } else { false }
                 switch method {
+                case "session/load" where rpcError:
+                    reply(["jsonrpc": "2.0", "id": id,
+                           "error": ["code": -32603, "message": "Internal error"]])
                 case "session/load":
                     // Hermes 0.17/0.18 wire shape for "session not
                     // restorable": result is an empty dict.

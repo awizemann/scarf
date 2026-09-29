@@ -402,6 +402,10 @@ struct UsageEventWireFormatTests {
     @Test("tokens ScarfCore emits through the string seam match the enum's raw values")
     func packageEmittedTokensMatchVocabulary() {
         #expect(UsageEvent.ReconnectTrigger.manual.rawValue == "manual")
+        #expect(UsageEvent.SessionResumeFallbackKind.nonACPSource.rawValue
+                == SessionResume.analyticsKind(for: .nonACPSource("webui")))
+        #expect(UsageEvent.SessionResumeFallbackKind.newSessionFallback.rawValue
+                == SessionResume.analyticsKind(for: .notRestorable))
         #expect(UsageEvent.SessionResumeFallbackKind.slashCommandFallback.rawValue
                 == "slash_command_fallback")
         #expect(UsageEvent.SessionResumeFallbackKind.historyFallback.rawValue

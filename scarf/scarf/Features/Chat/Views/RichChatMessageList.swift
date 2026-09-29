@@ -47,6 +47,10 @@ struct RichChatMessageList: View {
     /// `WorkingElapsedIndicator`'s own `TimelineView`, so this list's
     /// body is never re-evaluated by the clock.
     var workingSince: Date? = nil
+    /// A resume that continued as a new session (#146): rendered right
+    /// after the replayed history (`anchorGroupIndex`), or ahead of the
+    /// groups when that turn is outside the render window.
+    var resumeNotice: RichChatViewModel.ResumeContinuityNotice? = nil
 
     /// Scrolling strategy: plain `VStack` (not `LazyVStack`) plus
     /// `.defaultScrollAnchor(.bottom)`.
@@ -131,6 +135,13 @@ struct RichChatMessageList: View {
                         .padding(.vertical, 4)
                     }
 
+                    let noticeAnchorGroupId = resumeNotice
+                        .flatMap { $0.anchorGroupIndex(in: groups) }
+                        .map { groups[$0].id }
+                    if let resumeNotice, noticeAnchorGroupId == nil {
+                        ResumeContinuityNoticeRow(text: resumeNotice.text)
+                    }
+
                     ForEach(groups) { group in
                         // A group whose every message is density-hidden must
                         // not render at all: a zero-height row still collects
@@ -159,6 +170,9 @@ struct RichChatMessageList: View {
                             )
                             .equatable()
                             .id("group-\(group.id)")
+                        }
+                        if let resumeNotice, group.id == noticeAnchorGroupId {
+                            ResumeContinuityNoticeRow(text: resumeNotice.text)
                         }
                     }
 

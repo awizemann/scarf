@@ -355,6 +355,56 @@ public final class RichChatViewModel {
 
     public var messages: [HermesMessage] = []
     public var currentSession: HermesSession?
+
+    /// A resume that continued as a NEW session (#146) — shown in the
+    /// transcript for as long as this chat stays on it, so the replayed
+    /// history never passes for context the model still has.
+    public struct ResumeContinuityNotice: Equatable, Sendable {
+        public let text: String
+        /// The last state.db row of the replayed history when the notice
+        /// was raised: views render the notice right after it, i.e. between
+        /// the old transcript and the new session's turns. Nil when no
+        /// history row was loaded — render it ahead of the transcript.
+        public let afterMessageId: Int?
+
+        public init(text: String, afterMessageId: Int?) {
+            self.text = text
+            self.afterMessageId = afterMessageId
+        }
+
+        /// Index of the message the notice renders after: the last
+        /// state.db row at or before the anchor (the anchor itself may be a
+        /// tool row a list folds away). Nil → render ahead of the list.
+        public func anchorIndex(in messages: [HermesMessage]) -> Int? {
+            guard let anchor = afterMessageId else { return nil }
+            return messages.lastIndex { $0.id > 0 && $0.id <= anchor }
+        }
+
+        /// Group-list form of ``anchorIndex(in:)`` for the Mac transcript,
+        /// which renders turns: the last group holding a state.db row at or
+        /// before the anchor. Nil (no anchor, or the anchor's turn is
+        /// outside the render window) → render ahead of the groups.
+        public func anchorGroupIndex(in groups: [MessageGroup]) -> Int? {
+            guard let anchor = afterMessageId else { return nil }
+            return groups.lastIndex { group in
+                group.allMessages.contains { $0.id > 0 && $0.id <= anchor }
+                    || group.toolResults.values.contains { $0.id > 0 && $0.id <= anchor }
+            }
+        }
+    }
+
+    /// Cleared only by ``reset()`` — i.e. when the chat moves to another
+    /// session — never by `setSessionId`, which the fallback itself calls.
+    public private(set) var resumeContinuityNotice: ResumeContinuityNotice?
+
+    /// Raise the continuity notice, anchored after the last history row
+    /// (positive ids are state.db rows; local echoes are negative).
+    public func showResumeContinuityNotice(_ text: String) {
+        resumeContinuityNotice = ResumeContinuityNotice(
+            text: text,
+            afterMessageId: messages.last(where: { $0.id > 0 })?.id
+        )
+    }
     public var messageGroups: [MessageGroup] = []
     /// Trailing-window cap on how many `messageGroups` the chat list
     /// renders at once. Sits on top of `HistoryPageSize.initial` (which
@@ -2140,6 +2190,7 @@ public final class RichChatViewModel {
         messageGroups = []
         renderWindow = RenderWindow.initial
         currentSession = nil
+        resumeContinuityNotice = nil
         lastKnownFingerprint = nil
         sessionId = nil
         originSessionId = nil

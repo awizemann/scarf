@@ -575,8 +575,11 @@ struct BotConversationTests {
             let payload: String
             switch method {
             case "session/load":
-                // The failure main Chat legitimately falls back from.
-                payload = #"{"jsonrpc":"2.0","id":\#(id),"error":{"code":-32603,"message":"session is not restorable"}}"#
+                // The failure main Chat legitimately falls back from: Hermes's
+                // not-restorable answer is `{}` (load_session returns None,
+                // acp_adapter/server.py:616-624 @ v0.21.5). A JSON-RPC error
+                // is NOT a fallback since #146 — it fails the start instead.
+                payload = #"{"jsonrpc":"2.0","id":\#(id),"result":{}}"#
             case "session/new":
                 payload = #"{"jsonrpc":"2.0","id":\#(id),"result":{"sessionId":"\#(Self.fallbackSessionId)"}}"#
             default:

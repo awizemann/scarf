@@ -423,8 +423,11 @@ nonisolated extension UsageEvent {
 
     enum SessionResumeFallbackKind: String, CaseIterable, Sendable {
         case newSessionFallback = "new_session_fallback"
-        // The three below are emitted by `ScarfCore` through the string seam;
-        // present for vocabulary completeness.
+        // The ones below — and, since #146, `new_session_fallback` too — are
+        // emitted by `ScarfCore` through the string seam
+        // (`SessionResume.analyticsKind(for:)`); present for vocabulary
+        // completeness.
+        case nonACPSource = "non_acp_source"
         case slashCommandFallback = "slash_command_fallback"
         case historyFallback = "history_fallback"
         case sparseTranscript = "sparse_transcript"

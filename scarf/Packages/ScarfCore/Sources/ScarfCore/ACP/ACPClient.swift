@@ -526,7 +526,7 @@ public actor ACPClient {
             #if canImport(os)
             logger.warning("session/load returned null/empty for \(sessionId) — not restorable; caller should fall back to a new session")
             #endif
-            throw ACPClientError.invalidResponse("session/load returned null/empty — session \(sessionId) is not restorable")
+            throw ACPClientError.sessionNotRestorable(sessionId: sessionId)
         }
         let loadedId = (dict["sessionId"] as? String) ?? sessionId
         currentSessionId = loadedId
@@ -1136,6 +1136,14 @@ public enum ACPClientError: Error, LocalizedError {
     case rpcError(code: Int, message: String, details: String? = nil)
     case processTerminated(exitCode: Int32?, stderrTail: String)
     case requestTimeout(method: String)
+    /// `session/load` answered `null` / `{}`: Hermes could not restore the
+    /// id into the ACP runtime (`load_session` returns None when
+    /// `update_cwd` finds nothing, acp_adapter/server.py:616-624; `_restore`
+    /// refuses any row whose `source != "acp"`, acp_adapter/session.py:428
+    /// @ v0.21.5). The ONE load failure a resume may answer with a fresh
+    /// session — every other error is transient or real and must surface
+    /// (`SessionResume.isNotRestorable`, #146).
+    case sessionNotRestorable(sessionId: String)
 
     public var errorDescription: String? {
         switch self {
@@ -1158,6 +1166,8 @@ public enum ACPClientError: Error, LocalizedError {
             let tailPart = Self.summaryLine(fromStderrTail: tail).map { " — \($0)" } ?? ""
             return "ACP process terminated unexpectedly (\(exitPart))\(tailPart)"
         case .requestTimeout(let method): return "ACP request '\(method)' timed out"
+        case .sessionNotRestorable(let id):
+            return "session/load returned null/empty — session \(id) is not restorable"
         }
     }
 

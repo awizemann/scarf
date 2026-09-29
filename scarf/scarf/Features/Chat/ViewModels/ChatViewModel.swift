@@ -1470,18 +1470,19 @@ final class ChatViewModel {
 
                 let resolvedSessionId: String
                 var loadedHead: String?
+                var fallback: SessionResume.FallbackReason?
                 if let existing = sessionToResume {
                     acpStatus = ACPPhase.loadingSession
-                    do {
-                        let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: existing)
-                        resolvedSessionId = loaded.sessionId
-                        loadedHead = loaded.provenance?.currentHermesSessionId
-                    } catch {
-                        guard startStillCurrent(intent, client: client) else { return }
-                        logger.info("Session \(existing) not found in ACP, creating new session")
-                        acpStatus = ACPPhase.creatingNewSession
-                        resolvedSessionId = try await client.newSession(cwd: cwd)
-                    }
+                    // #146: never `session/load` a session Hermes can't
+                    // restore, and answer ONLY a not-restorable load with a
+                    // new session — any other error fails this start
+                    // (outer catch) instead of silently losing context.
+                    let outcome = try await resolveResume(
+                        client: client, cwd: cwd, sessionId: existing, intent: intent)
+                    guard startStillCurrent(intent, client: client) else { return }
+                    resolvedSessionId = outcome.sessionId
+                    loadedHead = outcome.loadedHead
+                    fallback = outcome.fallbackReason
                 } else {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
@@ -1511,6 +1512,7 @@ final class ChatViewModel {
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 noteLoadedHead(loadedHead)
+                if let fallback { showResumeFallbackNotice(fallback) }
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
                 disarmStartWatchdog()
@@ -1537,6 +1539,17 @@ final class ChatViewModel {
                 sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
                 releaseHeldSends(for: client, turnAlreadyRunning: true)
             } catch {
+                // The process died while reopening a session: that is a
+                // dropped connection, and the reconnect ladder (load-only,
+                // carries the held sends) is the recovery — hand over now
+                // rather than racing the event loop's EOF for it. Pre-#146
+                // the catch-all `session/new` attempt's extra hop happened
+                // to let the EOF win.
+                if sessionToResume != nil, acpClient === client,
+                   startStillCurrent(intent, client: nil),
+                   handOffDeadStartToReconnect(after: error) {
+                    return
+                }
                 // Superseded start (a newer click, or the watchdog):
                 // the newer path owns the shared state — just make
                 // sure this attempt's spawn doesn't leak.
@@ -1545,6 +1558,7 @@ final class ChatViewModel {
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
                 disarmStartWatchdog()
+                stopWatchingFailedStart(after: error)
                 await recordACPFailure(error, client: client, context: "Auto-start ACP failed")
                 // Stop the client even though start failed — a spawn
                 // that got as far as opening the channel would
@@ -2344,25 +2358,17 @@ final class ChatViewModel {
                 let resolvedSessionId: String
                 if let sessionId {
                     acpStatus = ACPPhase.loadingSession
-                    var loadedHead: String?
-                    do {
-                        let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
-                        resolvedSessionId = loaded.sessionId
-                        loadedHead = loaded.provenance?.currentHermesSessionId
-                    } catch {
-                        guard startStillCurrent(intent, client: client) else { return }
-                        logger.info("Session \(sessionId) not found in ACP, creating new session with history")
-                        // Sessions Hermes never ACP-persisted (cron runs, CLI
-                        // sessions) can't be `session/load`ed; we open a fresh
-                        // one in the same cwd and replay the transcript from
-                        // state.db. Worth measuring — it's the difference
-                        // between a resume and a new context wearing a
-                        // resume's clothes.
-                        Analytics.record(.sessionResumeFallback(kind: .newSessionFallback))
-                        acpStatus = ACPPhase.creatingNewSession
-                        resolvedSessionId = try await client.newSession(cwd: cwd)
-                    }
+                    // Sessions Hermes never ACP-persisted (webui, cron, CLI,
+                    // gateway) can't be `session/load`ed: open a fresh one
+                    // in the same cwd, replay the transcript from state.db,
+                    // and SAY so in the transcript (#146) — a new context
+                    // must not wear a resume's clothes. Any load error other
+                    // than not-restorable fails the start (outer catch).
+                    let outcome = try await resolveResume(
+                        client: client, cwd: cwd, sessionId: sessionId, intent: intent)
                     guard startStillCurrent(intent, client: client) else { return }
+                    resolvedSessionId = outcome.sessionId
+                    let loadedHead = outcome.loadedHead
                     // Surface "Loading history…" before the (potentially
                     // 30s) message-history fetch fires. Pre-fix the user
                     // saw "Loading session…" through start(), then jump
@@ -2383,6 +2389,8 @@ final class ChatViewModel {
                             transcriptLineage(for: sessionId), for: sessionId, addingLoadedHead: loadedHead)
                     )
                     guard startStillCurrent(intent, client: client) else { return }
+                    // After the history, so the notice anchors below it.
+                    if let fallback = outcome.fallbackReason { showResumeFallbackNotice(fallback) }
                 } else {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
@@ -2524,6 +2532,7 @@ final class ChatViewModel {
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
                 disarmStartWatchdog()
+                stopWatchingFailedStart(after: error)
                 await recordACPFailure(error, client: client, context: "Failed to start ACP session")
                 // Stop the client even though start failed — pre-fix
                 // this path leaked the spawned `hermes acp` process
@@ -2625,6 +2634,36 @@ final class ChatViewModel {
                 }
             }
         }
+    }
+
+    /// A start that failed AFTER arming its event loop / health monitor
+    /// (a `session/load` error, a failed `session/new`) is about to stop its
+    /// own client. Disarm them first: the stream's EOF would otherwise read
+    /// as a dropped connection, and `handleConnectionDied` would overwrite
+    /// the failure with a reconnect ladder that re-sends the same failing
+    /// load (#146 — the error must surface, with its retry).
+    ///
+    /// Not when the process itself died: that EOF IS a dropped connection,
+    /// and the reconnect ladder is the recovery that carries held sends
+    /// over (ChatReconnectHoldR17Tests).
+    /// A resume whose `hermes acp` died mid-start (`processTerminated`):
+    /// end the start and run the connection-died path, whose reconnect
+    /// ladder reloads the same session and carries held sends. True when
+    /// handed over.
+    private func handOffDeadStartToReconnect(after error: Error) -> Bool {
+        guard case ACPClientError.processTerminated = error else { return false }
+        isStartingSession = false
+        disarmStartWatchdog()
+        handleConnectionDied()
+        return true
+    }
+
+    private func stopWatchingFailedStart(after error: Error) {
+        if case ACPClientError.processTerminated = error { return }
+        acpEventTask?.cancel()
+        acpEventTask = nil
+        healthMonitorTask?.cancel()
+        healthMonitorTask = nil
     }
 
     private func handleConnectionDied() {
@@ -3532,6 +3571,46 @@ final class ChatViewModel {
         richChatViewModel.noteSessionRotation(to: head)
         SessionLineageIndex.shared.record(server: context.id, lineage: richChatViewModel.transcriptSessionIds)
         scheduleSessionsRefresh()
+    }
+
+    /// The resume step both session-start paths share (#146): read the
+    /// session's `source` (read-only, off-main), skip `session/load` for a
+    /// source Hermes can't restore, and fall back to `session/new` only on
+    /// the not-restorable answer (`SessionResume.resolve`). Other load
+    /// errors propagate to the caller's failure path.
+    private func resolveResume(
+        client: ACPClient, cwd: String, sessionId: String, intent: Int
+    ) async throws -> SessionResume.Outcome {
+        // The sidebar row already carries `sessions.source` for a listed
+        // session — skip the state.db round trip (an SSH hop on a remote).
+        let listed = recentSessions.first { $0.id == sessionId }?.source
+        let source: String?
+        if let listed { source = listed } else {
+            source = await SessionResume.fetchSource(context: context, sessionId: sessionId)
+        }
+        return try await SessionResume.resolve(
+            sessionId: sessionId,
+            source: source,
+            load: { id in
+                let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: id)
+                return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
+            },
+            newSession: { [weak self] in
+                if let self, self.startStillCurrent(intent, client: client) {
+                    self.acpStatus = ACPPhase.creatingNewSession
+                }
+                return try await client.newSession(cwd: cwd)
+            }
+        )
+    }
+
+    /// Raise the persistent transcript notice for a resume that continued
+    /// as a new session. The Kanban sentence rides along only where the
+    /// chat shows the session-scoped badge that loses the old id's tasks.
+    private func showResumeFallbackNotice(_ reason: SessionResume.FallbackReason) {
+        let showsKanbanBadge = capabilitiesStore?.capabilities.hasKanbanSessionFilter ?? false
+        richChatViewModel.showResumeContinuityNotice(
+            SessionResume.notice(for: reason, mentionsKanban: showsKanbanBadge))
     }
 
     /// The compression chain `sessionId` belongs to (root first), from the
