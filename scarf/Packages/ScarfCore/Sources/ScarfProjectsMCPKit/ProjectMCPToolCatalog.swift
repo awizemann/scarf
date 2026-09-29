@@ -41,6 +41,13 @@ public enum ProjectMCPToolCatalog {
                 Everything Scarf knows about one project: its registry row, its canonical record, \
                 whether its dashboard parses, and its slash commands. Accepts a display name or \
                 an absolute path.
+
+                When present, also returns `kanbanTenant` (only when the project's \
+                .scarf/manifest.json has minted one) — pass it as `--tenant <kanbanTenant>` to \
+                `hermes kanban create` so Kanban tasks land on this project's board instead of the \
+                global "Untagged" pile — and `cronNamePrefix` (only when the project has a stable \
+                id), the exact string a `hermes cron create --name` value must start with for \
+                Scarf to attribute that job to this project (its cron panel, archive/restore pause).
                 """,
             inputSchema: object(
                 properties: [

@@ -293,6 +293,39 @@ import Foundation
         }
     }
 
+    @Test("get returns cronNamePrefix always, and kanbanTenant only when the manifest mints one")
+    func getReportsKanbanTenantAndCronPrefix() throws {
+        try Self.withHarness { h in
+            _ = h.tools.call(name: "project_register", arguments: [
+                "name": .string("Demo"), "path": .string(h.projectRoot.path),
+            ])
+
+            // No manifest yet: cronNamePrefix is always present (a stable id
+            // exists from registration), kanbanTenant is absent.
+            let noManifest = try Self.payload(
+                h.tools.call(name: "project_get", arguments: ["project": .string("Demo")])
+            )
+            let record = ProjectStore(context: h.context).load(projectPath: h.projectRoot.path)
+            #expect(noManifest["cronNamePrefix"] == .string(
+                ProjectCronAttribution.projectTag(record!.id) + " "
+            ))
+            #expect(noManifest["kanbanTenant"] == nil)
+
+            // A manifest with a minted tenant surfaces it verbatim, ready to
+            // pass to `hermes kanban create --tenant`.
+            try FileManager.default.createDirectory(
+                atPath: h.projectRoot.path + "/.scarf", withIntermediateDirectories: true
+            )
+            try Self.write(
+                #"{"kanbanTenant": "demo-tenant"}"#, to: h.projectRoot.path + "/.scarf/manifest.json"
+            )
+            let withManifest = try Self.payload(
+                h.tools.call(name: "project_get", arguments: ["project": .string("Demo")])
+            )
+            #expect(withManifest["kanbanTenant"] == .string("demo-tenant"))
+        }
+    }
+
     // MARK: - project_update_dashboard
 
     @Test("a valid dashboard is written once, pretty-printed")
