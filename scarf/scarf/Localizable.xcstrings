@@ -615,6 +615,47 @@
         }
       }
     },
+    "Copy Suggested Prompt" : {
+      "comment" : "Button under the cron tenant warning; copies the corrected cron prompt to the clipboard.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorgeschlagenen Prompt kopieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copiar prompt sugerido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copier le prompt suggéré"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提案されたプロンプトをコピー"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copiar prompt sugerido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "复制建议的提示词"
+          }
+        }
+      }
+    },
     "Couldn’t read SOUL.md, so editing is off until Reload succeeds." : {
       "localizations" : {
         "de" : {
@@ -651,6 +692,170 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法读取 SOUL.md，在重新载入成功之前无法编辑。"
+          }
+        }
+      }
+    },
+    "Environment hint — sent to Hermes with each project chat (HERMES_ENVIRONMENT_HINT), not written to AGENTS.md." : {
+      "comment" : "Caption above the environment-hint preview in the project cockpit's Context panel (Hermes v0.16+).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Umgebungshinweis — wird bei jedem Projekt-Chat an Hermes gesendet (HERMES_ENVIRONMENT_HINT), nicht in AGENTS.md geschrieben."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indicación de entorno: se envía a Hermes con cada chat del proyecto (HERMES_ENVIRONMENT_HINT), no se escribe en AGENTS.md."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Indication d’environnement — envoyée à Hermes avec chaque discussion du projet (HERMES_ENVIRONMENT_HINT), et non écrite dans AGENTS.md."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "環境ヒント — プロジェクトのチャットごとに Hermes に送信されます（HERMES_ENVIRONMENT_HINT）。AGENTS.md には書き込まれません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dica de ambiente — enviada ao Hermes em cada chat do projeto (HERMES_ENVIRONMENT_HINT), não gravada no AGENTS.md."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "环境提示 — 随每个项目聊天发送给 Hermes（HERMES_ENVIRONMENT_HINT），不会写入 AGENTS.md。"
+          }
+        }
+      }
+    },
+    "Hide Suggested Prompt" : {
+      "comment" : "Button under the cron tenant warning; hides the corrected cron prompt.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorgeschlagenen Prompt ausblenden"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ocultar prompt sugerido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Masquer le prompt suggéré"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提案されたプロンプトを隠す"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ocultar prompt sugerido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏建议的提示词"
+          }
+        }
+      }
+    },
+    "Its prompt creates Kanban tasks without `--tenant`, and on this Hermes scheduled runs no longer see the project's tenant. Copy the suggested prompt into the job to keep its tasks on this project's board." : {
+      "comment" : "Explanation under the cron tenant warning in the project cockpit. `--tenant` is a CLI flag; keep it verbatim.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sein Prompt erstellt Kanban-Aufgaben ohne `--tenant`, und mit dieser Hermes-Version sehen geplante Läufe den Tenant des Projekts nicht mehr. Kopiere den vorgeschlagenen Prompt in den Job, damit seine Aufgaben auf dem Board dieses Projekts bleiben."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Su prompt crea tareas de Kanban sin `--tenant`, y con esta versión de Hermes las ejecuciones programadas ya no ven el tenant del proyecto. Copia el prompt sugerido en el trabajo para que sus tareas sigan en el tablero de este proyecto."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Son prompt crée des tâches Kanban sans `--tenant`, et avec cette version d’Hermes les exécutions planifiées ne voient plus le tenant du projet. Copiez le prompt suggéré dans la tâche pour garder ses tâches sur le tableau de ce projet."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブのプロンプトは `--tenant` なしで Kanban タスクを作成します。この Hermes では、スケジュール実行からプロジェクトのテナントが見えなくなりました。提案されたプロンプトをジョブにコピーすると、タスクがこのプロジェクトのボードに残ります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O prompt dele cria tarefas do Kanban sem `--tenant`, e nesta versão do Hermes as execuções agendadas não veem mais o tenant do projeto. Copie o prompt sugerido para o job para manter as tarefas no quadro deste projeto."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "它的提示词创建看板任务时没有使用 `--tenant`，而在此版本的 Hermes 上，计划运行已看不到项目的租户。将建议的提示词复制到该任务中，即可让其任务留在此项目的看板上。"
+          }
+        }
+      }
+    },
+    "Kanban tasks from this job will land under Untagged" : {
+      "comment" : "Warning title under a project cron job whose prompt creates Kanban tasks without --tenant (Hermes v0.16+).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kanban-Aufgaben aus diesem Job landen unter „Untagged“"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las tareas de Kanban de este trabajo acabarán en «Untagged»"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les tâches Kanban de cette tâche planifiée arriveront dans « Untagged »"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このジョブの Kanban タスクは「Untagged」に入ります"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As tarefas do Kanban deste job vão parar em “Untagged”"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此任务创建的看板任务将归入“Untagged”"
           }
         }
       }
@@ -1131,6 +1336,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已保存到 config.yaml,但无法从 .env 中移除 %@"
+          }
+        }
+      }
+    },
+    "Show Suggested Prompt" : {
+      "comment" : "Button under the cron tenant warning; reveals the corrected cron prompt.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorgeschlagenen Prompt anzeigen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostrar prompt sugerido"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Afficher le prompt suggéré"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提案されたプロンプトを表示"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mostrar prompt sugerido"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示建议的提示词"
           }
         }
       }

@@ -78,6 +78,13 @@ struct ProjectCockpitView: View {
             await vm.load()
             if vm.dashboard != nil { selectedPanel = .dashboard }
         }
+        .onChange(of: hintDeliveryConfirmed) {
+            // The version probe can answer after the cockpit opened (a slow
+            // first probe that failed and is re-detected, or a host
+            // up/downgrade picked up by a re-probe). No file changes, so
+            // the watcher below never fires for it (#142 P6).
+            Task { await viewModel?.capabilitiesChanged() }
+        }
         .onChange(of: fileWatcher.lastChangeDate) {
             // `.watcher`: short-circuits on an unchanged facet signature
             // (one batched stat instead of ~10 reads) and never triggers a
@@ -92,6 +99,14 @@ struct ProjectCockpitView: View {
         }) {
             ProjectDoctorSheet()
         }
+    }
+
+    /// Whether the store's CONFIRMED answer takes the environment hint —
+    /// the input `ProjectEnvironmentHint.delivery` gates on, observed so a
+    /// late probe re-renders the Context and Cron panels.
+    private var hintDeliveryConfirmed: Bool {
+        guard let store = capabilitiesStore, !store.isProvisional else { return false }
+        return store.capabilities.supportsEnvironmentHint
     }
 
     // MARK: - Health row
@@ -350,6 +365,7 @@ struct ProjectCockpitView: View {
         case .cron:
             CockpitCronPanel(
                 jobs: viewModel?.cronJobs ?? [],
+                tenantFixes: viewModel?.cronTenantFixes ?? [:],
                 zoneNote: viewModel?.cronZoneNote,
                 isLoading: viewModel?.isLoading ?? true
             )
@@ -562,6 +578,8 @@ private struct CockpitContextPanel: View {
 /// Cron jobs attributed to this project (`[proj:<id>]` / `[tmpl:<id>]`).
 private struct CockpitCronPanel: View {
     let jobs: [HermesCronJob]
+    /// Jobs whose Kanban tasks would land under "Untagged" (#142 P6).
+    let tenantFixes: [String: ProjectCockpitViewModel.CronTenantFix]
     /// The host zone for time-of-day schedules (S08-F3), `nil` when it is
     /// this Mac's.
     let zoneNote: String?
@@ -586,6 +604,9 @@ private struct CockpitCronPanel: View {
                             .foregroundStyle(.secondary)
                     }
                     .padding(.vertical, 2)
+                    if let fix = tenantFixes[job.id] {
+                        CronTenantWarning(fix: fix)
+                    }
                 }
                 .listStyle(.plain)
             } else if isLoading {
@@ -604,6 +625,61 @@ private struct CockpitCronPanel: View {
         CronScheduleFormatter.withZoneNote(
             job.schedule.display ?? job.schedule.expression ?? job.schedule.kind,
             for: job.schedule, zoneNote: zoneNote)
+    }
+}
+
+/// Under a cron job whose prompt creates Kanban tasks without `--tenant`
+/// (#142 P6): on Hermes v0.16+ the managed AGENTS.md block that told a
+/// workdir job the tenant is gone, and scheduled runs never get the chat's
+/// environment hint, so the tasks land under "Untagged". Scarf only offers
+/// the corrected prompt to copy — it never rewrites the job.
+private struct CronTenantWarning: View {
+    let fix: ProjectCockpitViewModel.CronTenantFix
+    @State private var showPrompt = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            HStack(alignment: .firstTextBaseline, spacing: ScarfSpace.s2) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(ScarfColor.warning)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Kanban tasks from this job will land under Untagged")
+                        .font(.caption.weight(.medium))
+                    Text("Its prompt creates Kanban tasks without `--tenant`, and on this Hermes scheduled runs no longer see the project's tenant. Copy the suggested prompt into the job to keep its tasks on this project's board.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            HStack(spacing: ScarfSpace.s2) {
+                Button("Copy Suggested Prompt") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(fix.suggestedPrompt, forType: .string)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                Button(showPrompt ? "Hide Suggested Prompt" : "Show Suggested Prompt") {
+                    showPrompt.toggle()
+                }
+                .buttonStyle(.borderless)
+                .controlSize(.small)
+            }
+            if showPrompt {
+                Text(fix.suggestedPrompt)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(ScarfSpace.s2)
+                    .background(ScarfColor.backgroundSecondary)
+                    .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
+            }
+        }
+        .padding(ScarfSpace.s2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ScarfColor.warning.opacity(0.14))
+        .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 }
 
