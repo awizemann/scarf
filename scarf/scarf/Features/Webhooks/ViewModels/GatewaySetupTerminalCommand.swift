@@ -72,7 +72,7 @@ enum GatewaySetupTerminalCommand {
         return "tell application \"Terminal\"\n  activate\n  do script \"\(line)\"\nend tell"
     }
 
-    static func singleQuote(_ word: String) -> String {
+    nonisolated static func singleQuote(_ word: String) -> String {
         "'" + word.replacingOccurrences(of: "'", with: "'\\''") + "'"
     }
 }

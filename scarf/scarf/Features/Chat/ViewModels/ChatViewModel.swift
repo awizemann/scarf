@@ -850,8 +850,7 @@ final class ChatViewModel {
     /// same server and model, so a user's context override still applies.
     func switchLlamaCppToCustom() {
         let svc = fileService
-        let apply: @Sendable ([LocalModelConfigPlan.Operation]) -> Bool =
-            modelConfigPlanApplier ?? { svc.applyModelConfigPlan($0) }
+        let injected = modelConfigPlanApplier
         Task { [weak self] in
             // Config read + up to six `hermes config set` spawns: a thread of
             // their own, not the cooperative pool (C10).
@@ -864,7 +863,9 @@ final class ChatViewModel {
                     apiKey: config.modelAPIKey,
                     apiMode: config.modelAPIMode
                 )).filter { $0 != .clear(key: "model.context_length") }
-                return !ops.isEmpty && apply(ops)
+                guard !ops.isEmpty else { return false }
+                if let injected { return injected(ops) }
+                return svc.applyModelConfigPlan(ops)
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
