@@ -319,7 +319,7 @@ public actor HermesDataService {
     /// Hermes pays exactly the same per-row cost in `list_sessions_rich`,
     /// and `messages.session_id` is indexed.
     private var sessionListColumns: String {
-        guard hasLastReadAtColumn else { return sessionColumns }
+        guard hasLastReadAtColumn else { return sessionColumns + branchLineageColumns }
         let a = hasListableChildSupport ? "s" : "sessions"
         let msgMax = "(SELECT MAX(_act_m.timestamp) FROM messages _act_m WHERE _act_m.session_id = \(a).id)"
         // The heartbeat column only exists from v0.20; without it the
@@ -328,7 +328,7 @@ public actor HermesDataService {
         let freshest: String = hasSessionActivityColumns
             ? "(SELECT MAX(_act_v.v) FROM (SELECT \(a).last_activity_at AS v UNION ALL SELECT \(msgMax)) _act_v)"
             : msgMax
-        return sessionColumns + ", COALESCE(\(freshest), \(a).started_at) AS last_active"
+        return sessionColumns + branchLineageColumns + ", COALESCE(\(freshest), \(a).started_at) AS last_active"
     }
 
     // MARK: - Session list predicate (Hermes parity)
@@ -380,11 +380,7 @@ public actor HermesDataService {
     private var sessionListPredicate: String {
         var clauses: [String] = [internalListingSourcesClause]
         if hasListableChildSupport {
-            let branch = """
-                \(Self.jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
-                OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
-                AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
-                """
+            let branch = Self.branchChildSQL
             clauses.append("(s.parent_session_id IS NULL OR \(branch) OR \(Self.resetChildSQL))")
             clauses.append("\(Self.jsonMarker("s.model_config", "$._delegate_from")) IS NULL")
         } else {
@@ -440,6 +436,36 @@ public actor HermesDataService {
         "json_extract(CASE WHEN json_valid(\(column)) THEN \(column) ELSE json_object() END, '\(path)')"
     }
 
+    /// Hermes's `_BRANCH_CHILD_SQL` (hermes_state_common.py:150-153 @
+    /// v0.21.5) against the outer alias `s`: the stable `_branched_from`
+    /// marker `/branch` writes into `model_config` (first tagged in
+    /// v2026.6.5), or the legacy heuristic — the parent ended with
+    /// `end_reason = 'branched'` (v2026.4.8+) before the child started.
+    /// Shared by the listing predicate, the subagent-child predicate and
+    /// `branchLineageColumns`, so all three agree on what a branch is.
+    private static let branchChildSQL = """
+        \(jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
+        OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
+        AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
+        """
+
+    /// Branch lineage for the LIST shapes (GitHub #145): `is_branch` is 1
+    /// when the row is a `/branch` child (`branchChildSQL`), and
+    /// `branch_parent_title` is the parent's title for those rows only.
+    /// Read by column NAME in `sessionFromRow`.
+    ///
+    /// Empty without listable-child support (no `model_config` / JSON1,
+    /// or the unaliased `sessions` FROM) — an older host's SELECT stays
+    /// byte-identical and every row decodes `isBranch = false` (C1/C4).
+    private var branchLineageColumns: String {
+        guard hasListableChildSupport else { return "" }
+        let isBranch = "(s.parent_session_id IS NOT NULL AND (\(Self.branchChildSQL)))"
+        return """
+            , CASE WHEN \(isBranch) THEN 1 ELSE 0 END AS is_branch, \
+            CASE WHEN \(isBranch) THEN (SELECT bp.title FROM sessions bp WHERE bp.id = s.parent_session_id) END AS branch_parent_title
+            """
+    }
+
     /// Hermes's `_RESET_CHILD_SQL` (hermes_state_common.py:139-143)
     /// against the outer alias `s`: the durable `_reset_from` marker,
     /// or the pre-marker heuristic — a child riding its parent's exact
@@ -466,11 +492,7 @@ public actor HermesDataService {
     /// rendered as a subagent run of the session it continued.
     private var subagentChildPredicate: String {
         guard hasListableChildSupport else { return "parent_session_id = ?" }
-        let branch = """
-            \(Self.jsonMarker("s.model_config", "$._branched_from")) IS NOT NULL \
-            OR EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
-            AND p.end_reason = 'branched' AND s.started_at >= p.ended_at)
-            """
+        let branch = Self.branchChildSQL
         let compression = """
             EXISTS (SELECT 1 FROM sessions p WHERE p.id = s.parent_session_id \
             AND p.end_reason = 'compression')
@@ -2694,7 +2716,7 @@ public actor HermesDataService {
             (statsSQL(since: statsSince), Self.statsParams(since: statsSince)),
             (
                 // `, id DESC`: see `sessionListSnapshot`.
-                "SELECT \(sessionColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
+                "SELECT \(sessionColumns)\(branchLineageColumns) FROM \(sessionListFrom) WHERE \(sessionListPredicate) ORDER BY started_at DESC, id DESC LIMIT ?",
                 [.integer(Int64(sessionLimit))]
             ),
             listedSessionPreviewStatement(limit: sessionLimit),
@@ -2800,7 +2822,7 @@ public actor HermesDataService {
         limit: Int = QueryDefaults.sessionLimit,
         includeUnreadActivity: Bool = true
     ) async -> SessionListSnapshot {
-        let columns = includeUnreadActivity ? sessionListColumns : sessionColumns
+        let columns = includeUnreadActivity ? sessionListColumns : sessionColumns + branchLineageColumns
         let statements: [(sql: String, params: [SQLValue])] = [
             (
                 // `, id DESC`: the preview statement repeats this listing as
@@ -3002,6 +3024,16 @@ public actor HermesDataService {
             guard let idx = row.columnIndex["last_active"] else { return nil }
             return row.date(at: idx)
         }()
+        // Branch lineage (#145) — present only on the list shapes of a
+        // host with listable-child support (`branchLineageColumns`).
+        let isBranch: Bool = {
+            guard let idx = row.columnIndex["is_branch"] else { return false }
+            return row.int(at: idx) != 0
+        }()
+        let branchParentTitle: String? = {
+            guard isBranch, let idx = row.columnIndex["branch_parent_title"] else { return nil }
+            return row.optionalString(at: idx)
+        }()
         return HermesSession(
             id: row.string(at: 0),
             source: row.string(at: 1),
@@ -3037,7 +3069,9 @@ public actor HermesDataService {
             lastActivityAt: lastActivityAt,
             lastActivityDescription: lastActivityDescription,
             lastReadAt: lastReadAt,
-            lastActive: lastActive
+            lastActive: lastActive,
+            isBranch: isBranch,
+            branchParentTitle: branchParentTitle
         )
     }
 

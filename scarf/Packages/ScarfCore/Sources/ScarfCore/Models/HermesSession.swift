@@ -92,6 +92,17 @@ public struct HermesSession: Identifiable, Sendable {
     /// attribution recorded against the root still finds this row.
     public let lineageIds: [String]
 
+    /// True when this row is a `/branch` child of another session
+    /// (GitHub #145) — Hermes's `_BRANCH_CHILD_SQL`: the `_branched_from`
+    /// marker (v2026.6.5+) or a parent ended `'branched'` (v2026.4.8+).
+    /// Decoded on the session-LIST shapes only, and only on hosts with
+    /// listable-child support; `false` everywhere else, so older hosts
+    /// and single-session fetches render exactly as before. Never set for
+    /// subagent, compression or reset children.
+    public let isBranch: Bool
+    /// The branch parent's title when `isBranch` and the parent has one.
+    public let branchParentTitle: String?
+
     public init(
         id: String,
         source: String,
@@ -121,7 +132,9 @@ public struct HermesSession: Identifiable, Sendable {
         lastActivityDescription: String? = nil,
         lastReadAt: Date? = nil,
         lastActive: Date? = nil,
-        lineageIds: [String] = []
+        lineageIds: [String] = [],
+        isBranch: Bool = false,
+        branchParentTitle: String? = nil
     ) {
         self.id = id
         self.source = source
@@ -152,6 +165,8 @@ public struct HermesSession: Identifiable, Sendable {
         self.lastReadAt = lastReadAt
         self.lastActive = lastActive
         self.lineageIds = lineageIds
+        self.isBranch = isBranch
+        self.branchParentTitle = branchParentTitle
     }
 
     /// The ids this row answers to: the whole compression chain when it
@@ -218,7 +233,9 @@ public struct HermesSession: Identifiable, Sendable {
             lastActivityDescription: tip.lastActivityDescription,
             lastReadAt: tip.lastReadAt,
             lastActive: tip.lastActive,
-            lineageIds: lineage
+            lineageIds: lineage,
+            isBranch: isBranch,
+            branchParentTitle: branchParentTitle
         )
     }
 
@@ -263,7 +280,9 @@ public struct HermesSession: Identifiable, Sendable {
             lastActivityDescription: lastActivityDescription,
             lastReadAt: lastReadAt,
             lastActive: lastActive,
-            lineageIds: lineageIds
+            lineageIds: lineageIds,
+            isBranch: isBranch,
+            branchParentTitle: branchParentTitle
         )
     }
 
@@ -365,7 +384,9 @@ public struct HermesSession: Identifiable, Sendable {
             lastActivityDescription: lastActivityDescription,
             lastReadAt: lastReadAt,
             lastActive: lastActive,
-            lineageIds: lineageIds
+            lineageIds: lineageIds,
+            isBranch: isBranch,
+            branchParentTitle: branchParentTitle
         )
     }
 }

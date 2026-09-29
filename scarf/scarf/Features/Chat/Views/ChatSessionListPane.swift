@@ -511,6 +511,10 @@ private struct ChatSessionRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .foregroundStyle(isActive ? ScarfColor.accentActive : ScarfColor.foregroundPrimary)
+                    // #145: branch mark — false without lineage data.
+                    if session.isBranch {
+                        SessionBranchBadge(session: session)
+                    }
                     Spacer(minLength: 0)
                     // v0.20.4: unread indicator — activity postdating
                     // Hermes's `last_read_at` watermark. Only rendered
