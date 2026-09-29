@@ -448,6 +448,16 @@ struct ChatView: View {
                 if controller.vm.hasMoreHistory {
                     loadEarlierButton
                 }
+                // #146: a resume that continued as a new session says so,
+                // right after the replayed history (or ahead of it when
+                // no history row anchors it).
+                let resumeNotice = controller.vm.resumeContinuityNotice
+                let noticeAnchorId = resumeNotice
+                    .flatMap { $0.anchorIndex(in: controller.vm.messages) }
+                    .map { controller.vm.messages[$0].id }
+                if let resumeNotice, noticeAnchorId == nil {
+                    ResumeContinuityNoticeRow(text: resumeNotice.text)
+                }
                 ForEach(controller.vm.messages) { msg in
                     MessageBubble(
                         message: msg,
@@ -456,6 +466,9 @@ struct ChatView: View {
                     )
                     .equatable()
                     .id(msg.id)
+                    if let resumeNotice, msg.id == noticeAnchorId {
+                        ResumeContinuityNoticeRow(text: resumeNotice.text)
+                    }
                 }
                 if controller.vm.isGenerating {
                     // Mac parity (#145): the running turn's elapsed time
@@ -1555,7 +1568,7 @@ struct ChatView: View {
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .padding(.horizontal)
             Button("Retry") {
-                Task { await controller.start() }
+                Task { await controller.retryAfterFailure() }
             }
             .buttonStyle(ScarfPrimaryButton())
         }
@@ -1658,6 +1671,11 @@ final class ChatController {
     /// user-initiated disconnect doesn't get auto-reconnected when
     /// network/scene events fire later.
     private var lastActiveSessionID: String?
+    /// The session a failed resume was reopening, so the error overlay's
+    /// Retry reopens IT instead of `start()`ing a fresh chat — that would
+    /// be the silent new session t-238d2ab3 removed. Cleared by every
+    /// start path.
+    private var failedResumeSessionID: String?
     /// Optional project working directory of the currently-active
     /// session. Used as `cwd` on the recovery path so a project-
     /// scoped session reconnects with the right scope.
@@ -2074,9 +2092,20 @@ final class ChatController {
     /// Open the SSH exec channel, send ACP `initialize`, then
     /// `session/new` — so that by the time `state == .ready` the user
     /// can type and hit send immediately.
+    /// The error overlay's Retry: reopen the session a failed resume was
+    /// on, otherwise start a fresh chat as before.
+    func retryAfterFailure() async {
+        if let sessionID = failedResumeSessionID {
+            await startResuming(sessionID: sessionID)
+        } else {
+            await start()
+        }
+    }
+
     func start() async {
         if state == .connecting || state == .ready { return }
         guard await passModelPreflight(intent: .fresh) else { return }
+        failedResumeSessionID = nil
         state = .connecting
         vm.reset()
         let client = makeClient()
@@ -3143,6 +3172,7 @@ final class ChatController {
         projectName: String?
     ) async {
         if state == .connecting || state == .ready { return }
+        failedResumeSessionID = nil
         let intent: PendingStart
         if let projectPath, let projectName {
             intent = .project(path: projectPath, name: projectName)
@@ -3230,6 +3260,7 @@ final class ChatController {
         guard await passModelPreflight(intent: .resume(sessionID: sessionID)) else { return }
         await stop()
         vm.reset()
+        failedResumeSessionID = nil
         // Clear eagerly so a lingering project name from a prior
         // session doesn't flash onto the new header while the
         // attribution lookup runs.
@@ -3297,6 +3328,7 @@ final class ChatController {
         do {
             try await client.start()
         } catch {
+            failedResumeSessionID = sessionID
             state = .failed(error.localizedDescription)
             await vm.recordACPFailure(error, client: client)
             return
@@ -3317,23 +3349,27 @@ final class ChatController {
             // attemptReconnect's doc comment). Load fails detectably
             // instead, which surfaces the real "session gone" state.
             //
-            // Fallback (mirrors the Mac resume path, ChatViewModel.swift:1559):
-            // sessions that were never ACP-persisted — cron/scheduled runs,
-            // CLI sessions — can't be restored, so Hermes returns null/empty
-            // and `loadSession` throws `invalidResponse(... not restorable)`.
-            // Rather than dead-end the user on a raw ACP error, open a FRESH
-            // ACP session in the same cwd; the transcript still replays from
-            // state.db below (via the original `sessionID`), so the user sees
-            // the past content and can continue in a new context.
-            let resolvedID: String
-            var loadedHead: String?
-            do {
-                let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionID)
-                resolvedID = loaded.sessionId
-                loadedHead = loaded.provenance?.currentHermesSessionId
-            } catch {
-                resolvedID = try await client.newSession(cwd: cwd)
-            }
+            // Fallback, shared with the Mac (`SessionResume`, #146 /
+            // t-238d2ab3): a session Hermes never ACP-persisted — webui,
+            // cron, CLI, gateway — is never `session/load`ed; it continues
+            // in a FRESH ACP session in the same cwd, the transcript still
+            // replays from state.db below (via the original `sessionID`),
+            // and a persistent notice says the model lacks that context.
+            // Only the not-restorable load answer falls back; any other
+            // load error lands in the catch below as a failed state with
+            // Retry, never a silent new session.
+            let source = await SessionResume.fetchSource(context: context, sessionId: sessionID)
+            let outcome = try await SessionResume.resolve(
+                sessionId: sessionID,
+                source: source,
+                load: { id in
+                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: id)
+                    return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
+                },
+                newSession: { try await client.newSession(cwd: cwd) }
+            )
+            let resolvedID = outcome.sessionId
+            let loadedHead = outcome.loadedHead
             if let projectPath = resolved?.path {
                 await applyProjectModelPreset(client: client, sessionId: resolvedID, projectPath: projectPath)
             }
@@ -3355,10 +3391,15 @@ final class ChatController {
                     SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID),
                     for: sessionID, addingLoadedHead: loadedHead)
             )
+            // After the history, so the notice anchors below it.
+            if let reason = outcome.fallbackReason {
+                vm.showResumeContinuityNotice(SessionResume.notice(for: reason))
+            }
             state = .ready
             lastActiveSessionID = resolvedID
             lastProjectPath = resolved?.path
         } catch {
+            failedResumeSessionID = sessionID
             state = .failed(error.localizedDescription)
             await vm.recordACPFailure(error, client: client)
             await stop()

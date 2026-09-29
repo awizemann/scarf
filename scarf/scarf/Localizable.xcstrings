@@ -372,6 +372,88 @@
         }
       }
     },
+    "Hermes couldn’t reopen this session, so this chat continues as a new session without its earlier context." : {
+      "comment" : "Persistent chat transcript notice (#146) after Hermes answered that a session could not be restored, so the chat continues in a new session.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes konnte diese Sitzung nicht wieder öffnen, daher wird dieser Chat als neue Sitzung ohne den bisherigen Kontext fortgesetzt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes no pudo reabrir esta sesión, así que este chat continúa como una sesión nueva sin su contexto anterior."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes n’a pas pu rouvrir cette session : ce chat continue donc comme une nouvelle session, sans son contexte précédent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes はこのセッションを再開できなかったため、このチャットは以前のコンテキストなしの新しいセッションとして続行します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O Hermes não conseguiu reabrir esta sessão, então este chat continua como uma nova sessão, sem o contexto anterior."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hermes 无法重新打开此会话，因此此聊天将作为不含先前上下文的新会话继续。"
+          }
+        }
+      }
+    },
+    "Kanban tasks the earlier session started are still on the Kanban board, but this chat’s badge no longer counts them." : {
+      "comment" : "Second sentence of the #146 resume notice on the Mac: Kanban tasks are tagged with the old session id, and the chat's Kanban badge follows the new one.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kanban-Aufgaben aus der früheren Sitzung sind weiterhin auf dem Kanban-Board, werden aber vom Badge dieses Chats nicht mehr gezählt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Las tareas de Kanban que inició la sesión anterior siguen en el tablero Kanban, pero la insignia de este chat ya no las cuenta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Les tâches Kanban lancées par la session précédente sont toujours sur le tableau Kanban, mais le badge de ce chat ne les compte plus."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以前のセッションで開始された Kanban タスクは Kanban ボードに残っていますが、このチャットのバッジには含まれなくなります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "As tarefas do Kanban iniciadas pela sessão anterior continuam no quadro Kanban, mas o selo deste chat não as conta mais."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先前会话创建的看板任务仍在看板上，但此聊天的徽标不再统计它们。"
+          }
+        }
+      }
+    },
     "Saving removes the unused %@ line from .env." : {
       "localizations" : {
         "de" : {
@@ -5450,6 +5532,47 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此提供商是在默认配置中登录的。请在那里移除它。"
+          }
+        }
+      }
+    },
+    "This session started in %@. Hermes can’t reopen it here, so this chat continues as a new session without its earlier context." : {
+      "comment" : "Persistent chat transcript notice (#146) after resuming a session Hermes's ACP adapter cannot reopen because another client created it. %@ is the raw Hermes session source, e.g. webui, cli, telegram, cron.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Sitzung wurde in %@ gestartet. Hermes kann sie hier nicht wieder öffnen, daher wird dieser Chat als neue Sitzung ohne den bisherigen Kontext fortgesetzt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta sesión se inició en %@. Hermes no puede reabrirla aquí, así que este chat continúa como una sesión nueva sin su contexto anterior."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cette session a démarré dans %@. Hermes ne peut pas la rouvrir ici : ce chat continue donc comme une nouvelle session, sans son contexte précédent."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このセッションは %@ で開始されました。Hermes はここで再開できないため、このチャットは以前のコンテキストなしの新しいセッションとして続行します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Esta sessão começou em %@. O Hermes não consegue reabri-la aqui, então este chat continua como uma nova sessão, sem o contexto anterior."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此会话始于 %@。Hermes 无法在此重新打开它，因此此聊天将作为不含先前上下文的新会话继续。"
           }
         }
       }

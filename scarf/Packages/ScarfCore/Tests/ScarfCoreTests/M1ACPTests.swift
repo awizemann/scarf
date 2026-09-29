@@ -420,10 +420,11 @@ import Foundation
             _ = try await loadTask.value
             Issue.record("expected loadSession to throw on null result")
         } catch let error as ACPClientError {
-            if case .invalidResponse(let msg) = error {
-                #expect(msg.contains("abc-123"))
+            if case .sessionNotRestorable(let id) = error {
+                #expect(id == "abc-123")
+                #expect(SessionResume.isNotRestorable(error))
             } else {
-                Issue.record("expected .invalidResponse, got \(error)")
+                Issue.record("expected .sessionNotRestorable, got \(error)")
             }
         }
         await client.stop()
@@ -451,11 +452,12 @@ import Foundation
             _ = try await loadTask.value
             Issue.record("expected loadSession to throw on empty-dict result")
         } catch let error as ACPClientError {
-            if case .invalidResponse(let msg) = error {
-                #expect(msg.contains("abc-123"))
-                #expect(msg.contains("not restorable"))
+            if case .sessionNotRestorable(let id) = error {
+                #expect(id == "abc-123")
+                #expect(error.localizedDescription.contains("not restorable"))
+                #expect(SessionResume.isNotRestorable(error))
             } else {
-                Issue.record("expected .invalidResponse, got \(error)")
+                Issue.record("expected .sessionNotRestorable, got \(error)")
             }
         }
         await client.stop()
