@@ -25,12 +25,21 @@ import ScarfCore
         try contents.data(using: .utf8)!.write(to: URL(fileURLWithPath: path))
     }
 
+    /// Pin the host version the upgrade pass gates the AGENTS.md step on
+    /// (#142), instead of whatever `hermes` the machine running the suite
+    /// has. Keyed by this home's context, so tests don't see each other's.
+    static func pinHost(_ version: String, _ home: TempHermesHome) {
+        HermesVersionCache.shared.primeForTesting(
+            .parseLine("Hermes Agent v\(version)"), for: home.context)
+    }
+
     // MARK: - Bare project → full structure
 
     @Test func upgradeBareProjectCreatesAllFacets() throws {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let entry = try Self.makeRegisteredProject(home, name: "Basic", slug: "basic")
+        Self.pinHost("0.15.2", home)
 
         let outcome = try ProjectUpgradeService(context: home.context).upgrade(entry, hasKanban: true)
 
@@ -108,12 +117,44 @@ import ScarfCore
         let entry = try Self.makeRegisteredProject(home, name: "HasAgents", slug: "hasagents")
         try Self.write("# My Project\n\nHand-written user notes the agent must keep.\n",
                        to: entry.path + "/AGENTS.md")
+        Self.pinHost("0.15.2", home)
 
         _ = try ProjectUpgradeService(context: home.context).upgrade(entry, hasKanban: true)
 
         let agents = try String(contentsOfFile: entry.path + "/AGENTS.md", encoding: .utf8)
         #expect(agents.contains("Hand-written user notes the agent must keep."))  // user text kept
         #expect(agents.contains(ProjectContextBlock.beginMarker))                  // block spliced in
+    }
+
+    /// #142: on a host that takes HERMES_ENVIRONMENT_HINT the upgrade writes
+    /// no block and strips a legacy one, keeping the user's text.
+    @Test func upgradeOnAnEnvironmentHintHostStripsTheLegacyBlock() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let entry = try Self.makeRegisteredProject(home, name: "Legacy", slug: "legacy")
+        let user = "# My Project\n\nHand-written user notes the agent must keep.\n"
+        try Self.write(user + "\n" + ProjectContextBlock.beginMarker + "\nold\n"
+                       + ProjectContextBlock.endMarker + "\n", to: entry.path + "/AGENTS.md")
+        Self.pinHost("0.16.0", home)
+
+        _ = try ProjectUpgradeService(context: home.context).upgrade(entry, hasKanban: true)
+
+        let agents = try String(contentsOfFile: entry.path + "/AGENTS.md", encoding: .utf8)
+        #expect(agents == user)
+    }
+
+    @Test func upgradeOnAnEnvironmentHintHostCreatesNoAgentsMd() throws {
+        let home = try TempHermesHome()
+        defer { home.cleanup() }
+        let entry = try Self.makeRegisteredProject(home, name: "Bare", slug: "bare16")
+        Self.pinHost("0.16.0", home)
+
+        let outcome = try ProjectUpgradeService(context: home.context).upgrade(entry, hasKanban: true)
+
+        #expect(!FileManager.default.fileExists(atPath: entry.path + "/AGENTS.md"))
+        // The rest of the pass is unaffected.
+        #expect(outcome.dashboardSeeded)
+        #expect(FileManager.default.fileExists(atPath: entry.path + "/.scarf/upgrade.json"))
     }
 
     // MARK: - Stable id preservation

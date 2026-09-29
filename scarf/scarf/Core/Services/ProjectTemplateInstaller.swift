@@ -61,7 +61,9 @@ struct ProjectTemplateInstaller: Sendable {
         }
 
         // P4 of the projects-feature fix: refresh the Scarf-managed
-        // AGENTS.md block now so installed-template projects get the
+        // AGENTS.md block now (on a v0.16+ host, which takes the project
+        // context as HERMES_ENVIRONMENT_HINT at chat start instead, `sync`
+        // strips any block rather than writing one — #142) so installed-template projects get the
         // platform-reference + project bookkeeping section without
         // having to wait for the user to open a chat. Previously the
         // block was only written at chat-start, so an installed
@@ -70,7 +72,8 @@ struct ProjectTemplateInstaller: Sendable {
         // a failed refresh just defers the block to chat-start (which
         // already calls refresh).
         do {
-            try ProjectAgentContextService(context: context).refresh(for: entry)
+            try ProjectAgentContextService(context: context).sync(
+                for: entry, capabilities: HermesVersionCache.shared.capabilitiesSync(for: context))
         } catch {
             Self.logger.warning("install couldn't refresh AGENTS.md block: \(error.localizedDescription, privacy: .public)")
         }
