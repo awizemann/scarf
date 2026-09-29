@@ -357,6 +357,11 @@ struct DashboardView: View {
                     .font(.body)
                     .lineLimit(2)
                     .foregroundStyle(ScarfColor.foregroundPrimary)
+                // #145: branch mark (Hermes /branch). `isBranch` is false
+                // on hosts without lineage data, so those rows are unchanged.
+                if session.isBranch {
+                    branchBadge(session)
+                }
                 HStack(spacing: 12) {
                     Label(session.source, systemImage: session.sourceIcon)
                         .font(.caption)
@@ -387,6 +392,26 @@ struct DashboardView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    /// Text capsule rather than `arrow.triangle.branch`, which means
+    /// "Subagent" elsewhere in Scarf.
+    private func branchBadge(_ session: HermesSession) -> some View {
+        let description: String = {
+            if let parent = session.branchParentTitle, !parent.isEmpty {
+                return String(localized: "Branch of “\(parent)”")
+            }
+            return String(localized: "Branch of another session")
+        }()
+        return Text("Branch")
+            .font(.caption2)
+            .foregroundStyle(ScarfColor.foregroundMuted)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 1)
+            .overlay(Capsule().strokeBorder(ScarfColor.border, lineWidth: 1))
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(Text(verbatim: description))
+            .accessibilityIdentifier("session.branchBadge")
     }
 
     private func formatTokens(_ count: Int) -> String {

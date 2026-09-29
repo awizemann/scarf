@@ -791,6 +791,9 @@ private struct SessionTableRow: View {
     /// and would never be extracted for localization.
     private var accessibilityRowLabel: String {
         var parts: [String] = [session.displayLabel(preview: preview)]
+        if session.isBranch {
+            parts.append(SessionBranchBadge.description(for: session))
+        }
         if let model = session.model, !model.isEmpty {
             parts.append(String(localized: "model \(model)"))
         }
@@ -841,6 +844,10 @@ private struct SessionTableRow: View {
                 .foregroundStyle(ScarfColor.foregroundPrimary)
                 .lineLimit(1)
                 .truncationMode(.tail)
+            // #145: branch mark. `isBranch` is false without lineage data.
+            if session.isBranch {
+                SessionBranchBadge(session: session)
+            }
             // v0.16: rewind indicator. 0 on pre-v0.16 hosts (column absent).
             if session.rewindCount > 0 {
                 Label("\(session.rewindCount)", systemImage: "arrow.counterclockwise")
