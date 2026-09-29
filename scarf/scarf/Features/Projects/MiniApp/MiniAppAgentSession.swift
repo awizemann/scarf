@@ -76,6 +76,11 @@ actor MiniAppAgentSession {
 
     private var client: ACPClient?
     private var sessionId: String?
+    /// Set by `shutdown()`. `ensureSession` suspends (hint prep, `start`,
+    /// `session/new`) before it stores the client, and `shutdown()` can run
+    /// in any of those gaps — it finds no client to stop, so the cold start
+    /// must notice on its own and stop what it built.
+    private var isShutDown = false
     private var eventLoop: Task<Void, Never>?
 
     // At most one prompt in flight; the event loop resolves it.
@@ -207,6 +212,7 @@ actor MiniAppAgentSession {
 
     /// Tear down the ACP session + process. Idempotent.
     func shutdown() async {
+        isShutDown = true
         eventLoop?.cancel()
         eventLoop = nil
         // Cancelling the loop means nothing will ever satisfy a pending
@@ -225,11 +231,14 @@ actor MiniAppAgentSession {
 
     private func ensureSession() async throws -> (ACPClient, String) {
         if let client, let sessionId { return (client, sessionId) }
-        let newClient = clientFactory(context, await environmentHint())
+        let hint = await environmentHint()
+        guard !isShutDown else { throw AgentError.cancelled }
+        let newClient = clientFactory(context, hint)
         let sid: String
         do {
             try await newClient.start()
             sid = try await newClient.newSession(cwd: projectRoot)
+            guard !isShutDown else { throw AgentError.cancelled }
         } catch {
             // The client isn't stored yet, so `shutdown()` can't reach it:
             // stop it here or a failed `session/new` (or `initialize`)

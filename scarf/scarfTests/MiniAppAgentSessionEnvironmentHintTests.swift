@@ -95,4 +95,31 @@ import ScarfCore
         await session.shutdown()
         #expect(spawns.hints == [nil])
     }
+
+    /// `shutdown()` landing while the hint prep is in flight (an SSH round
+    /// trip on a remote) must not let the cold start go on to spawn a
+    /// `hermes acp` nobody will ever stop.
+    @Test func shutdownDuringHintPrepSpawnsNothing() async throws {
+        let spawns = SpawnRecord()
+        let entered = AsyncStream<Void>.makeStream()
+        let release = AsyncStream<Void>.makeStream()
+        let session = MiniAppAgentSession(
+            context: .local, projectRoot: "/tmp/miniapp-hint",
+            environmentHint: {
+                entered.continuation.yield()
+                for await _ in release.stream { break }
+                return nil
+            }
+        ) { ctx, hint in
+            spawns.record(hint)
+            return ACPClient(context: ctx) { _ in Fake() }
+        }
+        let prompt = Task { try await session.prompt("hi") }
+        for await _ in entered.stream { break }
+        await session.shutdown()
+        release.continuation.yield()
+        let result = await prompt.result
+        #expect(throws: MiniAppAgentSession.AgentError.self) { try result.get() }
+        #expect(spawns.hints.isEmpty, "a shut-down session still spawned hermes acp")
+    }
 }
