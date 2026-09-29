@@ -28,9 +28,21 @@ import os
 /// permission request auto-denied (`cancelPermission` below), Hermes's own
 /// context-file injection scan, and the rate limit.
 ///
+/// **Scarf's own project context (#142 P6).** Scarf never wrote the managed
+/// AGENTS.md block for a mini-app, and still doesn't: on a host below
+/// Hermes v0.16 (or one whose version isn't confirmed) the agent sees
+/// whatever block a project chat last left in the folder, exactly as
+/// before. On a confirmed v0.16+ host project chats strip that block and
+/// pass `HERMES_ENVIRONMENT_HINT` instead, so this session gets the same
+/// hint the same way: `environmentHint` (below) runs the chat's
+/// `ProjectEnvironmentHint` gate and prep — strip included — before the
+/// spawn, and the client factory hands the result to `hermes acp`. Bots
+/// are never project-scoped and get no hint.
+///
 /// The default `clientFactory` still spawns `hermes acp` without a
 /// `projectCwd` (Scarf's cwd locally, the login dir over SSH). That no
-/// longer changes what the agent reads; it is left as is.
+/// longer changes which context files the agent reads; it is left as is.
+/// The hint is an environment variable, so it doesn't depend on it.
 ///
 /// **Request/response.** `prompt(_:)` sends the text and resolves with the
 /// agent's full reply, accumulated from the streamed `messageChunk` events
@@ -52,7 +64,13 @@ actor MiniAppAgentSession {
     /// The default omits `projectCwd:`; the session cwd, not the process
     /// cwd, decides where tools run and which context files load (see the
     /// type doc).
-    private let clientFactory: @Sendable (ServerContext) -> ACPClient
+    ///
+    /// The second argument is the environment hint `environmentHint`
+    /// produced (nil below v0.16 / unconfirmed — today's spawn).
+    private let clientFactory: @Sendable (ServerContext, EnvironmentHintRequest?) -> ACPClient
+    /// Decides and prepares the hint for this session's spawn, right before
+    /// it. Nil = no hint. See the type doc and `projectHint(...)`.
+    private let environmentHint: @Sendable () async -> EnvironmentHintRequest?
     private let rateLimiter = MiniAppRateLimiter(maxEvents: 8, windowSeconds: 60)
     private var promptHistory: [Date] = []
 
@@ -84,11 +102,40 @@ actor MiniAppAgentSession {
     init(
         context: ServerContext,
         projectRoot: String,
-        clientFactory: @escaping @Sendable (ServerContext) -> ACPClient = { ACPClient.forMacApp(context: $0) }
+        environmentHint: @escaping @Sendable () async -> EnvironmentHintRequest? = { nil },
+        clientFactory: @escaping @Sendable (ServerContext, EnvironmentHintRequest?) -> ACPClient = {
+            ACPClient.forMacApp(context: $0, environmentHint: $1)
+        }
     ) {
         self.context = context
         self.projectRoot = projectRoot
+        self.environmentHint = environmentHint
         self.clientFactory = clientFactory
+    }
+
+    /// The production `environmentHint`: the chat's gate, on the window's
+    /// CONFIRMED capabilities (`HermesCapabilitiesStore.confirmedCapabilities`,
+    /// `.empty` for no store / a failed probe → no hint), then the chat's
+    /// prep off the cooperative pool — render the hint from the project
+    /// record, read the user's config hint, strip the old block.
+    static func projectHint(
+        project: ScarfProject,
+        projectPath: String,
+        context: ServerContext,
+        capabilities: @escaping @Sendable () async -> HermesCapabilities
+    ) -> @Sendable () async -> EnvironmentHintRequest? {
+        {
+            guard ProjectEnvironmentHint.delivery(for: await capabilities()) == .environmentHint else {
+                return nil
+            }
+            let prepared = await OffPool.run {
+                ProjectEnvironmentHint.prepare(project: project, projectPath: projectPath, context: context)
+            }
+            if let error = prepared.stripError {
+                logger.warning("mini-app: couldn't strip the managed block for \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            }
+            return prepared.request
+        }
     }
 
     enum AgentError: LocalizedError {
@@ -178,7 +225,7 @@ actor MiniAppAgentSession {
 
     private func ensureSession() async throws -> (ACPClient, String) {
         if let client, let sessionId { return (client, sessionId) }
-        let newClient = clientFactory(context)
+        let newClient = clientFactory(context, await environmentHint())
         let sid: String
         do {
             try await newClient.start()

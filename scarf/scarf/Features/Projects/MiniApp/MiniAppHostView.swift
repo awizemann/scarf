@@ -49,7 +49,21 @@ struct MiniAppHostView: NSViewRepresentable {
         // Dedicated agent session for scarf.prompt — lazy (no hermes acp
         // process until the first granted prompt). Held by the coordinator
         // so dismantleNSView can tear it (and its process) down.
-        let agentSession = MiniAppAgentSession(context: serverContext, projectRoot: projectPath)
+        //
+        // On a confirmed Hermes v0.16+ host it carries the same
+        // HERMES_ENVIRONMENT_HINT a project chat does (#142 P6), gated on the
+        // window's capability store exactly like the chat.
+        let capabilitiesStore = context.environment.hermesCapabilities
+        let agentSession = MiniAppAgentSession(
+            context: serverContext,
+            projectRoot: projectPath,
+            environmentHint: MiniAppAgentSession.projectHint(
+                project: project,
+                projectPath: projectPath,
+                context: serverContext,
+                capabilities: { await capabilitiesStore?.confirmedCapabilities() ?? .empty }
+            )
+        )
         context.coordinator.agentSession = agentSession
 
         let custom = onUIAction
