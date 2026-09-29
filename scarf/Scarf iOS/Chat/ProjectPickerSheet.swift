@@ -8,8 +8,10 @@ import ScarfDesign
 ///   The current default behavior.
 /// - **In project…** — lets the user pick a registered project. On
 ///   confirm, the caller is handed back the project path so it can
-///   (1) write the Scarf-managed AGENTS.md block via
-///   `ProjectContextBlock.writeBlock` and (2) spawn `hermes acp` with
+///   (1) hand Hermes the project context — the Scarf-managed AGENTS.md
+///   block (`ProjectContextBlock.writeBlock`) on hosts below v0.16, or
+///   `HERMES_ENVIRONMENT_HINT` plus a strip of any old block on v0.16+
+///   (`ProjectEnvironmentHint`, #142) — and (2) spawn `hermes acp` with
 ///   `cwd = project.path`, then attribute the resulting session.
 ///
 /// The project list is loaded from the remote Hermes's

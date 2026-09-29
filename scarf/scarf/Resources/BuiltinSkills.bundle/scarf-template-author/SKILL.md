@@ -61,13 +61,13 @@ Also do not activate for a one-off "tweak this one widget" edit — that's a pla
 
 ## Upgrading / enriching an EXISTING project
 
-Scarf hands off here right after a one-click **"Upgrade Project"** runs its deterministic structure pass on an existing project. By the time you're invoked, Scarf has already ensured: the stable id (`.scarf/project.json`), the AGENTS.md managed block, a Kanban tenant (if the host has Kanban), and a **placeholder** `.scarf/dashboard.json`. Your job is to **enrich it in place** — do NOT re-scaffold and do NOT clobber the user's files:
+Scarf hands off here right after a one-click **"Upgrade Project"** runs its deterministic structure pass on an existing project. By the time you're invoked, Scarf has already ensured: the stable id (`.scarf/project.json`), the AGENTS.md managed block (only on Hermes older than v0.16 — on v0.16+ Scarf passes a short project hint to chats instead and writes no block), a Kanban tenant (if the host has Kanban), and a **placeholder** `.scarf/dashboard.json`. Your job is to **enrich it in place** — do NOT re-scaffold and do NOT clobber the user's files:
 
 1. **Read what's already there first** — README, the project's source, existing `.scarf/` files, the placeholder dashboard — so the enrichment fits THIS project.
 2. **Replace the placeholder dashboard** (the single "Configure this project" text widget) with a real one tailored to the project, using the widget catalog below. Read the existing `.scarf/dashboard.json` first, then send the complete new document with `project_update_dashboard` — it replaces the file. If the dashboard already has real widgets, read-merge — never delete the user's widgets.
 3. Add **slash commands** with `project_add_slash_command` and, where a recurring job fits, **cron jobs** (`hermes cron create`, created paused) — see the Cron section.
 4. **Build a starter mini-app or two** — invoke the **`scarf-miniapp-author`** skill for the bridge contract + `.scarf/miniapps/<id>/` format. A task board, an approval queue, or a status panel makes the upgrade tangible. Prefer non-sensitive bridge permissions so it runs immediately.
-5. **BOUNDED:** the structure pass already wrote the safe scaffolding (managed AGENTS.md block, identity, tenant). Only ADD or REPLACE-THE-PLACEHOLDER; never write outside managed markers or overwrite user content.
+5. **BOUNDED:** the structure pass already wrote the safe scaffolding (identity, tenant, and on Hermes older than v0.16 the managed AGENTS.md block). Only ADD or REPLACE-THE-PLACEHOLDER; never write outside managed markers or overwrite user content.
 
 Everything below (widget catalog, config schema, cron, file-writing rules) applies to both new scaffolds and upgrades.
 
@@ -583,7 +583,7 @@ Things to check before declaring the scaffold done:
 - [ ] `dashboard.json` has `version: 1` at the top.
 - [ ] `AGENTS.md` documents every config field, every updated widget, and the cron behaviour — the user relies on it as the source of truth when things drift.
 - [ ] **No raw URLs in field descriptions.** Use `[link text](https://…)` markdown syntax instead — raw URLs read as long unbreakable tokens in the Configuration sheet. Same rule for long paths and other unbreakable strings; wrap in `` ` `` if they must appear verbatim.
-- [ ] **Leave the `<!-- scarf-project:begin -->` / `<!-- scarf-project:end -->` region alone in the project's `AGENTS.md`.** As of Scarf v2.3, the app auto-injects a project-identity block at chat-start time (project name, directory, template id, configuration field names, cron jobs). Anything you write inside that region will be overwritten on the next chat start. Put template-specific agent instructions BELOW the block so they're preserved across refreshes.
+- [ ] **Leave the `<!-- scarf-project:begin -->` / `<!-- scarf-project:end -->` region alone in the project's `AGENTS.md`.** On Hermes older than v0.16, Scarf injects a project-identity block there at chat-start time (project name, directory, template id, configuration field names, cron jobs); on v0.16+ it removes the region at chat start and passes a short hint instead. Either way, anything you write inside that region is overwritten or deleted on the next chat start. Put template-specific agent instructions BELOW the block so they're preserved across refreshes.
 
 ## Scarf platform essentials (for any chat opened in a Scarf project)
 
