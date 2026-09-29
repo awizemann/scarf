@@ -121,8 +121,11 @@ struct ProjectUpgradeService: Sendable {
         // 3. AGENTS.md managed block — create-or-splice, bounded, idempotent.
         //    Runs after the tenant exists so the rendered block carries the
         //    board line; gives the agent Scarf platform context on its next run.
+        //    On a v0.16+ host the context rides HERMES_ENVIRONMENT_HINT at
+        //    chat start instead, so `sync` strips a legacy block (#142).
         do {
-            try ProjectAgentContextService(context: context).refresh(for: entry)
+            try ProjectAgentContextService(context: context).sync(
+                for: entry, capabilities: HermesVersionCache.shared.capabilitiesSync(for: context))
         } catch {
             Self.logger.warning("upgrade: AGENTS.md refresh failed for \(project.name, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }

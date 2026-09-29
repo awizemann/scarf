@@ -71,14 +71,15 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted without identifying you. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context, and both apps ask before the first session.
 
-## What's New in 3.4.0
+## What's New in 3.5.0
 
-- **Stop now stops the agent** — Scarf had always sent Hermes's cancel in a shape Hermes's protocol library ignores, so Stop, voice barge-in and ScarfGo cancel ended the turn in Scarf while Hermes kept going. Fixed on every Hermes version.
-- **Hermes v0.21.5** — one gateway serving every profile (routing on by default, parked profiles with a Parked badge, the standalone warning and its fix), the search-index redesign handled so matches deep in tool output aren't lost, and every command whose output changed read correctly (Kanban diagnostics, backup, skills, profile delete, `peer dm`, Optimize). All capability-gated; verified at the tag and on a live v0.21.5 host.
-- **Working · 0:12** — a live elapsed clock replaces the frozen three dots under a running reply, on Mac and ScarfGo.
-- **Cron Run now** — no longer kills jobs after 30 seconds; shows Running…, ignores double clicks, and reports skipped jobs honestly. New **Pin to the current main model** in the cron editor.
-- **Honest results** — reconnects no longer overwrite a newer chat or scramble "Load earlier"; Doctor, security audit and skills update checks stop reporting success when the command failed; Scarf can no longer write to Hermes's database on a fallback connection; a config value that could crash Scarf is read the way Hermes reads it.
-- Full notes: [releases/v3.4.0/RELEASE_NOTES.md](releases/v3.4.0/RELEASE_NOTES.md).
+- **Audited end to end** — three full audits against Hermes v0.21.5 (the last one covering all 664 source files) and more than 140 fixes: Scarf no longer reports success when Hermes refused, writes settings Hermes ignores, or behaves differently on a remote server.
+- **Your files are safe** — editing SOUL.md can no longer wipe it; project chats no longer hide a project's own `CLAUDE.md` / `.cursorrules` behind a new `AGENTS.md`; long compacted chats show their full history again; MCP blocklists, backups and iPhone memory edits no longer lose data.
+- **Stop button** — next to Send (⌘. on the Mac) in chat and Bot Chat, on Mac and iPhone.
+- **Only providers Hermes can use** — the model picker lists what your Hermes version can route (measured per release from v0.6), and warns if your config names one it can't.
+- **Messaging platforms that listen** — forms show the value Hermes actually uses when `.env` overrides config; gateway restarts wait for the current reply; Spotify sign-in works locally and explains the remote step.
+- **Project context without touching your files** (Hermes 0.16+) — Scarf hands the agent a short project summary directly on the chat process instead of writing it into `AGENTS.md`; older hosts are unaffected. Idea and research credit: [@counterposition](https://github.com/counterposition) ([#142](https://github.com/awizemann/scarf/issues/142)).
+- Full notes: [releases/v3.5.0/RELEASE_NOTES.md](releases/v3.5.0/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 

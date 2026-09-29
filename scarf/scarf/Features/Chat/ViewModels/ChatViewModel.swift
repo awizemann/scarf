@@ -23,6 +23,10 @@ final class ChatViewModel {
         self.dataService = HermesDataService(context: context)
         self.fileService = HermesFileService(context: context)
         self.richChatViewModel = RichChatViewModel(context: context)
+        let hintSlot = environmentHintSlot
+        self.acpClientFactory = { ctx, projectCwd in
+            ACPClient.forMacApp(context: ctx, projectCwd: projectCwd, environmentHintSlot: hintSlot)
+        }
         // Answer, rather than silently abandon, every permission request
         // dropped by `clearPendingPermissions()`. Each queued entry is an
         // open `session/request_permission` JSON-RPC call the agent is
@@ -583,10 +587,22 @@ final class ChatViewModel {
     /// `ACPClient.forMacApp` (a `ProcessACPChannel` spawning
     /// `hermes acp`); tests inject scripted/hanging clients to exercise
     /// the watchdog, supersede, and teardown paths without a subprocess.
+    ///
+    /// The production default (set in `init`) reads `environmentHintSlot`
+    /// at spawn, so a project chat on a v0.16+ host carries its
+    /// `HERMES_ENVIRONMENT_HINT` (#142). An injected factory ignores it.
     @ObservationIgnored
     var acpClientFactory: (ServerContext, String?) -> ACPClient = { ctx, projectCwd in
         ACPClient.forMacApp(context: ctx, projectCwd: projectCwd)
     }
+
+    /// The environment hint prepared for this chat's project, read by the
+    /// default `acpClientFactory` when the `hermes acp` channel opens — the
+    /// client is built before the project prep decides the hint. Keyed by
+    /// project path, so the reconnect / autostart spawns for the same
+    /// project reuse it and any other cwd gets none.
+    @ObservationIgnored
+    let environmentHintSlot = EnvironmentHintSlot()
 
     /// Reads the per-project "auto-accept edits in this project" setting
     /// at session boot. A seam rather than a `let` so tests can point it
@@ -2223,6 +2239,13 @@ final class ChatViewModel {
         }
     }
 
+    /// Capabilities for the project-context decision (#142): the ones a
+    /// probe confirmed this session, awaited if the probe is still running.
+    /// No store, or a failed probe, is `.empty` — the managed block path.
+    private func capabilitiesForProjectContext() async -> HermesCapabilities {
+        await capabilitiesStore?.confirmedCapabilities() ?? .empty
+    }
+
     private func startACPSession(
         resume sessionId: String?,
         projectPath: String? = nil,
@@ -2315,15 +2338,22 @@ final class ChatViewModel {
         self.acpClient = client
         let attribution = SessionAttributionService(context: context)
 
-        // If the caller passed a project path, refresh the Scarf-
-        // managed block in the project's AGENTS.md BEFORE starting
-        // ACP — Hermes reads AGENTS.md when it builds a session's
-        // system prompt, so the block has to land on disk first.
-        // Non-blocking on failure: we log and proceed without the
-        // block. Safe on bare projects (creates AGENTS.md with just the
-        // block); safe on template-installed projects (splices the
-        // block into existing AGENTS.md without touching template
-        // content).
+        // If the caller passed a project path, hand Scarf's project
+        // context to Hermes BEFORE starting ACP — Hermes reads it when it
+        // builds a session's system prompt. How depends on the host (#142):
+        //
+        // - v0.16+ (`supportsEnvironmentHint`, confirmed by a probe this
+        //   session): render the short hint into `environmentHintSlot`,
+        //   which the spawn passes as `HERMES_ENVIRONMENT_HINT` (composed
+        //   with the user's own env / config hint), and strip the old
+        //   managed block from the project's context files.
+        // - Older or undetected hosts: refresh the Scarf-managed block in
+        //   the project's AGENTS.md, exactly as before (C1). Safe on bare
+        //   projects (creates AGENTS.md with just the block); safe on
+        //   template-installed projects (splices the block into existing
+        //   AGENTS.md without touching template content).
+        //
+        // Non-blocking on failure either way: we log and proceed.
         //
         // What the refresh reaches (S11-F4): every NEW session, and a
         // resume that `session/load` can't restore (it falls back to a
@@ -2341,28 +2371,46 @@ final class ChatViewModel {
         let prepLogger = logger
         Task { @MainActor [self] in
             if let projectPath {
+                let delivery = ProjectEnvironmentHint.delivery(
+                    for: await capabilitiesForProjectContext())
+                guard startStillCurrent(intent, client: client) else { return }
                 // Synchronous file I/O (ProjectDashboardService.loadRegistry +
                 // ProjectAgentContextService.refresh, which itself walks the
                 // slash-commands directory) must run off the MainActor, and
                 // off the cooperative pool too (`OffPool`, P60: on a remote
                 // it is blocking SFTP) — awaited here so the AGENTS.md block
-                // lands before client.start().
-                await OffPool.run {
+                // (or the hint) is ready before client.start().
+                let hint: EnvironmentHintRequest? = await OffPool.run {
                     let registry = ProjectDashboardService(context: contextForPrep).loadRegistry()
                     guard let project = registry.projects.first(where: { $0.path == projectPath }) else {
-                        return
+                        return nil
                     }
-                    do {
-                        try ProjectAgentContextService(context: contextForPrep).refresh(for: project)
-                    } catch {
-                        prepLogger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
+                    switch delivery {
+                    case .managedBlock:
+                        do {
+                            try ProjectAgentContextService(context: contextForPrep).refresh(for: project)
+                        } catch {
+                            prepLogger.warning("couldn't refresh project context block for \(project.name): \(error.localizedDescription)")
+                        }
+                        return nil
+                    case .environmentHint:
+                        let store = ProjectStore(context: contextForPrep)
+                        let scarfProject = store.load(projectPath: project.path) ?? store.derive(from: project)
+                        let prepared = ProjectEnvironmentHint.prepare(
+                            project: scarfProject, projectPath: project.path, context: contextForPrep)
+                        if let error = prepared.stripError {
+                            prepLogger.warning("couldn't strip the managed block for \(project.name): \(error.localizedDescription)")
+                        }
+                        return prepared.request
                     }
                 }
                 // Pre-spawn await — a newer start may have superseded
                 // us while the registry/AGENTS.md I/O ran. Abandon
                 // BEFORE spawning so the superseded attempt never
-                // launches a process at all.
+                // launches a process at all — and before touching the
+                // slot, which the newer start may already have filled.
                 guard startStillCurrent(intent, client: client) else { return }
+                environmentHintSlot.set(hint, forProjectPath: projectPath)
             }
 
             do {

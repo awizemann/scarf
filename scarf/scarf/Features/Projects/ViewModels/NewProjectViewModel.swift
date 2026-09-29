@@ -204,7 +204,7 @@ final class NewProjectViewModel {
         PROJECT_PATH: \(entry.path)
         PROJECT_NAME: \(entry.name)
 
-        Run the `scarf-template-author` skill interview now. This is a freshly-scaffolded Scarf project with an empty dashboard and a managed AGENTS.md block. Walk me through:
+        Run the `scarf-template-author` skill interview now. This is a freshly-scaffolded Scarf project with an empty dashboard; Scarf supplies its project context. Walk me through:
 
         1. Purpose + data source — what does this project do and where does its data come from?
         2. Dashboard widgets — pick from the supported widget vocabulary documented in the skill.

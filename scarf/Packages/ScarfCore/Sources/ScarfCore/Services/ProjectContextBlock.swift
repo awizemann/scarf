@@ -249,22 +249,55 @@ public enum ProjectContextBlock {
         // agents.md — the names Scarf ever created); any other file just
         // loses the block and keeps the user's text.
         for file in survey.files where file.name != target && file.hasBlock {
-            let path = projectPath + "/" + file.name
-            if !file.hasUserContent && agentsMDNames.contains(file.name) {
-                // Re-read right before deleting: only a file that still holds
-                // nothing but Scarf's block goes.
-                let now = try GuardedTextFile(transport: transport, label: file.name)
-                    .load(path, maxBytes: maxAgentsBytes)
-                guard now.exists else { continue }
-                if removeBlock(from: now.text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    try transport.removeFile(path)
-                } else {
-                    _ = try removeBlock(fromFileAt: path, transport: transport)
-                }
-            } else {
-                _ = try removeBlock(fromFileAt: path, transport: transport)
+            _ = try stripBlock(from: file, projectPath: projectPath, transport: transport)
+        }
+    }
+
+    /// Take Scarf's block out of one surveyed context file: an AGENTS.md /
+    /// agents.md that holds nothing but the block is Scarf's own and is
+    /// deleted; any other file just loses the block and keeps the user's
+    /// text. Returns whether anything on disk changed.
+    static func stripBlock(
+        from file: ContextFile, projectPath: String, transport: any ServerTransport
+    ) throws -> Bool {
+        let path = projectPath + "/" + file.name
+        if !file.hasUserContent && agentsMDNames.contains(file.name) {
+            // Re-read right before deleting: only a file that still holds
+            // nothing but Scarf's block goes.
+            let now = try GuardedTextFile(transport: transport, label: file.name)
+                .load(path, maxBytes: maxAgentsBytes)
+            guard now.exists else { return false }
+            if removeBlock(from: now.text).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                try transport.removeFile(path)
+                return true
             }
         }
+        return try removeBlock(fromFileAt: path, transport: transport)
+    }
+
+    /// The migration for hosts that take the project context as
+    /// `HERMES_ENVIRONMENT_HINT` (Hermes >= v0.16, #142): strip Scarf's
+    /// managed block from EVERY context file that carries one. A file that
+    /// held only the block (the AGENTS.md Scarf created) is deleted rather
+    /// than left as an empty stub; the user's own text is kept byte-for-byte
+    /// outside the markers. Idempotent — a project with no block is a no-op.
+    ///
+    /// Throws on an unreadable context file (never guesses); callers treat
+    /// that as non-fatal and log it.
+    @discardableResult
+    public static func stripForEnvironmentHint(
+        forProjectAt projectPath: String,
+        context: ServerContext
+    ) throws -> Bool {
+        let transport = context.makeTransport()
+        let survey = try surveyContextFiles(forProjectAt: projectPath, transport: transport)
+        var changed = false
+        for file in survey.files where file.hasBlock {
+            if try stripBlock(from: file, projectPath: projectPath, transport: transport) {
+                changed = true
+            }
+        }
+        return changed
     }
 
     // MARK: - Which file Hermes loads (S11-F1)
@@ -619,6 +652,39 @@ public enum ProjectContextBlock {
         lines.append("Any content below this block is template- or user-authored; preserve and defer to it for project-specific behavior. Do NOT modify content inside these markers — Scarf rewrites this block on every project-scoped chat start.")
         lines.append(endMarker)
 
+        return lines.joined(separator: "\n")
+    }
+
+    // MARK: - Environment hint (Hermes >= v0.16, #142)
+
+    /// Short project context for the `HERMES_ENVIRONMENT_HINT` env var passed
+    /// to `hermes acp` — the replacement for `renderManagedBlock` on hosts
+    /// where `HermesCapabilities.supportsEnvironmentHint` is true. Hermes
+    /// appends it to the system prompt (`agent/prompt_builder.py:866` @
+    /// v2026.6.5), so nothing is written into the project's files.
+    ///
+    /// Pure and deterministic: no markers, no dates, no config values (only
+    /// the project name/path, Kanban tenant and project id). The long
+    /// platform reference lives in the `scarf-template-author` skill instead.
+    public static func renderEnvironmentHint(_ input: ManagedBlockInput) -> String {
+        let path = input.projectPath
+        var lines: [String] = []
+        lines.append("## Scarf project")
+        lines.append("")
+        lines.append("This chat was opened in Scarf (a GUI for Hermes) for the project **\"\(input.projectName)\"** at `\(path)`; it is this session's working directory.")
+        if let tenant = input.kanbanTenant, !tenant.isEmpty {
+            // Cron runs never receive this hint and Hermes has no tenant
+            // default (`hermes_cli/kanban_parser.py:84` @ v0.21.4 canary), so a
+            // job's prompt must carry the flag itself.
+            lines.append("- Kanban tenant `\(tenant)`: always pass `--tenant \(tenant)` to `hermes kanban create` so tasks land on this project's board. A cron job's prompt that creates Kanban tasks must spell out that flag too — scheduled runs don't see this note.")
+        }
+        if let projectId = input.projectId {
+            let prefix = "[proj:\(projectId.uuidString)]"
+            lines.append("- Cron jobs: start every job name with `\(prefix) ` exactly and pass `--workdir \"\(path)\"` to `hermes cron create`; Scarf attributes jobs to this project only by that prefix.")
+        }
+        lines.append("- Project slash-command expansions arrive as user messages wrapped in `<!-- scarf-slash:<name> -->`.")
+        lines.append("- Never write a secret value to disk; secret config values live in the Keychain.")
+        lines.append("- For dashboard, template, slash-command or config work, load the `scarf-template-author` skill, and prefer the `scarf-projects` MCP tools when they are available.")
         return lines.joined(separator: "\n")
     }
 

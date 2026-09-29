@@ -71,6 +71,8 @@ import ScarfCore
 
     @Test func scaffoldStillWritesDashboardAndAgentsMd() throws {
         try Self.withTempHomeAndParent { ctx, parent in
+            // Pin a pre-v0.16 host: the block path (#142 gates it).
+            HermesVersionCache.shared.primeForTesting(.parseLine("Hermes Agent v0.15.2"), for: ctx)
             let entry = try ProjectScaffolder(context: ctx).scaffold(
                 name: "Files",
                 slug: "files",
@@ -84,6 +86,24 @@ import ScarfCore
             let agents = try String(contentsOfFile: entry.path + "/AGENTS.md", encoding: .utf8)
             #expect(agents.contains(ProjectContextBlock.beginMarker))
             #expect(agents.contains("\"Files\""))
+        }
+    }
+
+    /// #142: a host that takes HERMES_ENVIRONMENT_HINT gets no stub
+    /// AGENTS.md at all — the context rides the chat spawn instead.
+    @Test func scaffoldOnAnEnvironmentHintHostWritesNoAgentsMd() throws {
+        try Self.withTempHomeAndParent { ctx, parent in
+            HermesVersionCache.shared.primeForTesting(.parseLine("Hermes Agent v0.16.0"), for: ctx)
+            let entry = try ProjectScaffolder(context: ctx).scaffold(
+                name: "Hinted",
+                slug: "hinted",
+                parentDir: parent,
+                description: nil
+            )
+            let fm = FileManager.default
+            #expect(fm.fileExists(atPath: entry.path + "/.scarf/dashboard.json"))
+            #expect(fm.fileExists(atPath: entry.path + "/.scarf/project.json"))
+            #expect(!fm.fileExists(atPath: entry.path + "/AGENTS.md"))
         }
     }
 }

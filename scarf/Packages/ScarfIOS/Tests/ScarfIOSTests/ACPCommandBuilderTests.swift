@@ -131,6 +131,34 @@ import ScarfCore
         // Standard '\'' close-escape-reopen trick keeps the quoting balanced.
         #expect(cmd.contains(#"cd '/tmp/a'\''b'; "#))
     }
+
+    // MARK: - Environment hint (gh#142)
+
+    /// Nil / blank hint → the exact pre-gh#142 command.
+    @Test func noHintIsByteIdentical() {
+        for cwd in [nil, "/srv/app"] as [String?] {
+            let base = ACPClient.buildACPCommand(hermesBinary: "hermes", home: "/root", projectCwd: cwd)
+            #expect(ACPClient.buildACPCommand(
+                hermesBinary: "hermes", home: "/root", projectCwd: cwd, environmentHint: nil) == base)
+            #expect(ACPClient.buildACPCommand(
+                hermesBinary: "hermes", home: "/root", projectCwd: cwd,
+                environmentHint: EnvironmentHintRequest(scarfHint: "", configHint: "C")) == base)
+            #expect(!base.contains("HERMES_ENVIRONMENT_HINT"))
+        }
+    }
+
+    /// The composing fragment sits after the `cd` and before PATH/exec.
+    @Test func hintFragmentFollowsCdAndPrecedesExec() {
+        let req = EnvironmentHintRequest(scarfHint: "S", configHint: "C")
+        let fragment = EnvironmentHintComposer.remoteShellFragment(configHint: "C", scarfHint: "S")
+        let cmd = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "/root", projectCwd: "/srv/app", environmentHint: req)
+        let base = ACPClient.buildACPCommand(hermesBinary: "hermes", home: "/root", projectCwd: "/srv/app")
+        #expect(cmd == "cd '/srv/app'; " + fragment + base.dropFirst("cd '/srv/app'; ".count))
+        let quick = ACPClient.buildACPCommand(
+            hermesBinary: "hermes", home: "/root", projectCwd: nil, environmentHint: req)
+        #expect(quick.hasPrefix(fragment + "PATH="))
+    }
 }
 
 #endif

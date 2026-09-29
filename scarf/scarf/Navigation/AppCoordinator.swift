@@ -306,7 +306,7 @@ final class AppCoordinator {
         PROJECT_PATH: \(project.path)
         PROJECT_NAME: \(project.name)
 
-        This is an EXISTING Scarf project that Scarf just upgraded to the first-class structure — stable id, a managed AGENTS.md block, and a placeholder dashboard. \(boardLine)Run the scarf-template-author skill in ENRICH mode (do NOT re-scaffold, do NOT clobber my files):
+        This is an EXISTING Scarf project that Scarf just upgraded to the first-class structure — stable id, Scarf project context, and a placeholder dashboard. \(boardLine)Run the scarf-template-author skill in ENRICH mode (do NOT re-scaffold, do NOT clobber my files):
 
         1. Read the project first (README, source, existing .scarf/ files, the placeholder dashboard) to understand what it is.
         2. Replace the placeholder dashboard.json with a real dashboard tailored to this project (widget catalog in the skill). Keep any real widgets I already had.

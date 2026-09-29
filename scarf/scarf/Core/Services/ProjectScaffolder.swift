@@ -102,14 +102,21 @@ struct ProjectScaffolder: Sendable {
             )
 
             // 4. Write AGENTS.md with just the marker block — the
-            // refresh() call below populates between the markers.
-            let agentsMd = ProjectContextBlock.beginMarker + "\n"
-                + ProjectContextBlock.endMarker + "\n"
-            // UNGUARDED-WRITE(C): first write into a freshly created, collision-checked project dir.
-            try transport.unguardedWriteFile(
-                projectDir + "/AGENTS.md",
-                data: Data(agentsMd.utf8)
-            )
+            // refresh() call below populates between the markers. Skipped
+            // on a host that takes the project context as
+            // HERMES_ENVIRONMENT_HINT at chat start (#142): there the stub
+            // would only be stripped again. Probed once (usually a cache
+            // hit; `.empty` on failure keeps the stub, C1).
+            let capabilities = HermesVersionCache.shared.capabilitiesSync(for: context)
+            if ProjectEnvironmentHint.delivery(for: capabilities) == .managedBlock {
+                let agentsMd = ProjectContextBlock.beginMarker + "\n"
+                    + ProjectContextBlock.endMarker + "\n"
+                // UNGUARDED-WRITE(C): first write into a freshly created, collision-checked project dir.
+                try transport.unguardedWriteFile(
+                    projectDir + "/AGENTS.md",
+                    data: Data(agentsMd.utf8)
+                )
+            }
 
             // 5. Mint the stable id and write the first-class
             //    ScarfProject record. `ProjectStore.save` writes the
@@ -139,7 +146,7 @@ struct ProjectScaffolder: Sendable {
             // the failure here is enough. `refresh` now renders from the
             // ScarfProject record written in step 5.
             do {
-                try ProjectAgentContextService(context: context).refresh(for: entry)
+                try ProjectAgentContextService(context: context).sync(for: entry, capabilities: capabilities)
             } catch {
                 Self.logger.warning(
                     "couldn't populate AGENTS.md marker block for \(entry.name, privacy: .public): \(error.localizedDescription, privacy: .public)"

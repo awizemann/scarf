@@ -9,7 +9,8 @@ import Foundation
 /// at the start of the name:
 ///
 /// - `[proj:<uuid>] …` — a job created for one project (fleet-apply, the
-///   agent following the AGENTS.md block).
+///   agent following the project hint, or the AGENTS.md block on hosts
+///   below Hermes v0.16).
 /// - `[tmpl:<templateId>] [proj:<uuid>] …` — a job a template install
 ///   created. The project tag was added because the template tag alone is
 ///   shared by every project installed from the same template, so each of

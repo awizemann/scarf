@@ -2717,6 +2717,19 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// proxying through a feature-specific flag.
     public var isV016OrLater: Bool { atLeastSemver(0, 16, 0) }
 
+    /// Whether the host reads the `HERMES_ENVIRONMENT_HINT` env var into the
+    /// system prompt (#142) — lets Scarf pass project context to `hermes acp`
+    /// instead of writing a managed block into the project context file.
+    ///
+    /// Verified at **v2026.6.5 = 0.16.0**: `build_environment_hints()`
+    /// (`agent/prompt_builder.py:773`) reads it at
+    /// `agent/prompt_builder.py:866`
+    /// (`os.getenv("HERMES_ENVIRONMENT_HINT")`), falling back to config
+    /// `agent.environment_hint`, and appends it to the hints; called from
+    /// `agent/system_prompt.py:214`. Absent from `agent/prompt_builder.py`
+    /// at v2026.5.29.2 = 0.15.2, where the env var would be silently ignored.
+    public var supportsEnvironmentHint: Bool { isV016OrLater }
+
     /// Whether the connected host is on the v0.17 line or newer. Convenience
     /// for UI copy that toggles on the v0.16 → v0.17 boundary without
     /// proxying through a feature-specific flag.
@@ -3122,6 +3135,18 @@ public final class HermesCapabilitiesStore {
         // also makes "everything has settled when refresh() returns" hold.
         await refreshTask?.value
         await load(force: true)
+    }
+
+    /// The capabilities a probe in this session CONFIRMED, waiting for the
+    /// in-flight load first. `.empty` when the probe failed — including
+    /// when the published value is only the remembered last-known version
+    /// (`isProvisional`), which may predate a downgrade. For decisions that
+    /// change what Scarf writes to the host, where guessing "newer" is the
+    /// unsafe direction (#142: the environment hint strips the AGENTS.md
+    /// block).
+    public func confirmedCapabilities() async -> HermesCapabilities {
+        await refreshTask?.value
+        return isProvisional ? .empty : capabilities
     }
 
     private func load(force: Bool) async {

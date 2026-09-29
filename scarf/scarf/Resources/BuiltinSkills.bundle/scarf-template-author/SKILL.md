@@ -1,7 +1,7 @@
 ---
 name: scarf-template-author
 description: Scaffold a new Scarf project OR enrich an existing one after a Scarf "Upgrade Project" — dashboard, optional configuration schema, optional cron job, AGENTS.md, and (via the scarf-miniapp-author skill) a starter mini-app — from a short conversational interview. Output is immediately usable locally and cleanly exportable as a .scarftemplate bundle.
-version: 2.0.3
+version: 2.0.4
 author: Alan Wizemann
 license: MIT
 metadata:
@@ -61,13 +61,13 @@ Also do not activate for a one-off "tweak this one widget" edit — that's a pla
 
 ## Upgrading / enriching an EXISTING project
 
-Scarf hands off here right after a one-click **"Upgrade Project"** runs its deterministic structure pass on an existing project. By the time you're invoked, Scarf has already ensured: the stable id (`.scarf/project.json`), the AGENTS.md managed block, a Kanban tenant (if the host has Kanban), and a **placeholder** `.scarf/dashboard.json`. Your job is to **enrich it in place** — do NOT re-scaffold and do NOT clobber the user's files:
+Scarf hands off here right after a one-click **"Upgrade Project"** runs its deterministic structure pass on an existing project. By the time you're invoked, Scarf has already ensured: the stable id (`.scarf/project.json`), the AGENTS.md managed block (only on Hermes older than v0.16 — on v0.16+ Scarf passes a short project hint to chats instead and writes no block), a Kanban tenant (if the host has Kanban), and a **placeholder** `.scarf/dashboard.json`. Your job is to **enrich it in place** — do NOT re-scaffold and do NOT clobber the user's files:
 
 1. **Read what's already there first** — README, the project's source, existing `.scarf/` files, the placeholder dashboard — so the enrichment fits THIS project.
 2. **Replace the placeholder dashboard** (the single "Configure this project" text widget) with a real one tailored to the project, using the widget catalog below. Read the existing `.scarf/dashboard.json` first, then send the complete new document with `project_update_dashboard` — it replaces the file. If the dashboard already has real widgets, read-merge — never delete the user's widgets.
 3. Add **slash commands** with `project_add_slash_command` and, where a recurring job fits, **cron jobs** (`hermes cron create`, created paused) — see the Cron section.
 4. **Build a starter mini-app or two** — invoke the **`scarf-miniapp-author`** skill for the bridge contract + `.scarf/miniapps/<id>/` format. A task board, an approval queue, or a status panel makes the upgrade tangible. Prefer non-sensitive bridge permissions so it runs immediately.
-5. **BOUNDED:** the structure pass already wrote the safe scaffolding (managed AGENTS.md block, identity, tenant). Only ADD or REPLACE-THE-PLACEHOLDER; never write outside managed markers or overwrite user content.
+5. **BOUNDED:** the structure pass already wrote the safe scaffolding (identity, tenant, and on Hermes older than v0.16 the managed AGENTS.md block). Only ADD or REPLACE-THE-PLACEHOLDER; never write outside managed markers or overwrite user content.
 
 Everything below (widget catalog, config schema, cron, file-writing rules) applies to both new scaffolds and upgrades.
 
@@ -406,7 +406,7 @@ The agent runs `curl` via the terminal tool; the shell expands the env vars from
 
 - **A cron job has no working directory unless it was given one.** Hermes runs a job from a project only when the job carries a `workdir` (`hermes cron create --workdir <absolute path>`, Hermes v0.12+); then tools run there and the project's AGENTS.md is loaded. The template installer does not set one, so a template's job runs with no project directory: relative paths in its prompt resolve against wherever the Hermes process happens to be running. Always use `{{PROJECT_DIR}}` in a template's prompt — the installer substitutes the absolute path at install time. This is THE most common template-author mistake.
 - **Cron jobs created by the installer start paused.** Their name is auto-prefixed with `[tmpl:<template-id>] [proj:<project-id>]`, which ties each job to the one project it was installed into. The user enables them from Scarf's Cron sidebar when ready.
-- **Registering a cron job for a user's local (non-exported) project:** run `hermes cron create --name "[proj:<project id>] <descriptive name>" --workdir "<project>" "<schedule>" "<prompt>"` directly, taking the `[proj:<id>]` prefix from the project's AGENTS.md block and substituting the absolute `<project>` path for `{{PROJECT_DIR}}` yourself. Scarf attributes jobs to a project only by that prefix. Then `hermes cron pause <id>` so it doesn't run until the user opts in.
+- **Registering a cron job for a user's local (non-exported) project:** run `hermes cron create --name "[proj:<project id>] <descriptive name>" --workdir "<project>" "<schedule>" "<prompt>"` directly, taking the `[proj:<id>]` prefix from Scarf's project context (the chat's Scarf project hint, or the AGENTS.md block on older hosts) and substituting the absolute `<project>` path for `{{PROJECT_DIR}}` yourself. Scarf attributes jobs to a project only by that prefix. Then `hermes cron pause <id>` so it doesn't run until the user opts in.
 - **Hermes does not substitute env vars into prompt text.** `$VAR` references in the prompt body are passed through verbatim. Env vars only become visible when the agent invokes a tool (terminal, code_exec) that runs in a subprocess inheriting the cron process's environment — see the "Using secrets in cron prompts" section above.
 
 ### Schedule quick reference
@@ -583,7 +583,18 @@ Things to check before declaring the scaffold done:
 - [ ] `dashboard.json` has `version: 1` at the top.
 - [ ] `AGENTS.md` documents every config field, every updated widget, and the cron behaviour — the user relies on it as the source of truth when things drift.
 - [ ] **No raw URLs in field descriptions.** Use `[link text](https://…)` markdown syntax instead — raw URLs read as long unbreakable tokens in the Configuration sheet. Same rule for long paths and other unbreakable strings; wrap in `` ` `` if they must appear verbatim.
-- [ ] **Leave the `<!-- scarf-project:begin -->` / `<!-- scarf-project:end -->` region alone in the project's `AGENTS.md`.** As of Scarf v2.3, the app auto-injects a project-identity block at chat-start time (project name, directory, template id, configuration field names, cron jobs). Anything you write inside that region will be overwritten on the next chat start. Put template-specific agent instructions BELOW the block so they're preserved across refreshes.
+- [ ] **Leave the `<!-- scarf-project:begin -->` / `<!-- scarf-project:end -->` region alone in the project's `AGENTS.md`.** On Hermes older than v0.16, Scarf injects a project-identity block there at chat-start time (project name, directory, template id, configuration field names, cron jobs); on v0.16+ it removes the region at chat start and passes a short hint instead. Either way, anything you write inside that region is overwritten or deleted on the next chat start. Put template-specific agent instructions BELOW the block so they're preserved across refreshes.
+
+## Scarf platform essentials (for any chat opened in a Scarf project)
+
+On Hermes v0.16+ Scarf passes only a short project hint to the chat instead of writing a long block into AGENTS.md, so these rules live here:
+
+- **Kanban tenant.** A project with a Kanban board has a tenant (`kanbanTenant`). Always pass `--tenant <tenant>` to `hermes kanban create` so the task lands on the project's board, not the global "Untagged" pile. Tasks are also stamped with this chat's ACP `session_id`, so the Kanban tab can scope to "tasks from this chat".
+- **Project slash commands.** `/<name>` from the chat slash menu arrives as a normal user message preceded by `<!-- scarf-slash:<name> -->` — that is Scarf expanding the command's prompt, not text the user typed.
+- **Per-project model preset.** The user may bind a `(model, provider)` preset to a project (right-click → "Chat Settings…"); Scarf applies it with `session/set_model` on chat open, falling back to the config.yaml default if Hermes refuses it. Mention the active model only when relevant.
+- **Secrets.** Never write a secret value to disk. Secret config fields live in the Keychain and `config.json` holds only `keychain://` URIs (see Config Schema Design).
+- **Skills.** Hermes loads `SKILL.md` files from `~/.hermes/skills/` (this one lives under the `scarf/` category). Users add more with `hermes skills install <identifier-or-https-url>` or by dropping a directory there.
+- **Export.** When the dashboard, schema and AGENTS.md are stable, the user right-clicks the project in Scarf → "Export as Template…" to produce a `.scarftemplate` bundle.
 
 ## Reference — source of truth files
 

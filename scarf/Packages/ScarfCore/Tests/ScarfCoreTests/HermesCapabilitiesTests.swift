@@ -1765,4 +1765,20 @@ import Foundation
     @Test func openCodeFreeProviderStaysTrueForUndetectedCapabilities() {
         #expect(HermesCapabilities.empty.hasOpenCodeFreeProvider)
     }
+
+    // MARK: - HERMES_ENVIRONMENT_HINT (#142)
+
+    /// `HERMES_ENVIRONMENT_HINT` is read at `agent/prompt_builder.py:866`
+    /// @ v2026.6.5 (0.16.0) and absent at v2026.5.29.2 (0.15.2).
+    @Test func environmentHintFlagFlipsExactlyAtV016() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.15.2 (2026.5.29)").supportsEnvironmentHint)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.16.0 (2026.6.5)").supportsEnvironmentHint)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)").supportsEnvironmentHint)
+    }
+
+    /// An undetected host must keep the AGENTS.md block path (C1): a hint
+    /// sent to a host that ignores it would silently drop project context.
+    @Test func environmentHintFlagIsOffForUndetectedCapabilities() {
+        #expect(!HermesCapabilities.empty.supportsEnvironmentHint)
+    }
 }

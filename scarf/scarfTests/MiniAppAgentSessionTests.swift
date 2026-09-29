@@ -467,7 +467,7 @@ import ScarfCore
     // MARK: - Helpers
 
     private func makeSession(_ fake: FakeACPChannel) -> MiniAppAgentSession {
-        MiniAppAgentSession(context: .local, projectRoot: "/tmp/miniapp-agent-tests") { ctx in
+        MiniAppAgentSession(context: .local, projectRoot: "/tmp/miniapp-agent-tests") { ctx, _ in
             ACPClient(context: ctx) { _ in fake }
         }
     }

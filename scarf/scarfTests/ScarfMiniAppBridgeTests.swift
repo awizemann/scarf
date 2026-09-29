@@ -269,7 +269,7 @@ import ScarfCore
     /// (mirrors `MiniAppAgentSessionTests.makeSession`). Never spawns a real
     /// `hermes acp`; left unprompted in these tests so the wire stays empty.
     private func makeSession(_ fake: MiniAppAgentSessionTests.FakeACPChannel) -> MiniAppAgentSession {
-        MiniAppAgentSession(context: .local, projectRoot: "/tmp/scarf-miniapp-bridge-tests") { ctx in
+        MiniAppAgentSession(context: .local, projectRoot: "/tmp/scarf-miniapp-bridge-tests") { ctx, _ in
             ACPClient(context: ctx) { _ in fake }
         }
     }

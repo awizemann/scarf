@@ -116,6 +116,29 @@ struct ProjectAgentContextService: Sendable {
         Self.logger.info("wrote Scarf block into the project context file for \(project.name, privacy: .public)")
     }
 
+    /// The out-of-chat half of #142 P3, for the installer, the upgrade pass
+    /// and the scaffolder: on a host that takes the project context as
+    /// `HERMES_ENVIRONMENT_HINT` there is no block to refresh — the hint is
+    /// rendered fresh at every chat start — so strip any existing block
+    /// instead (a legacy project being upgraded carries one; a fresh
+    /// install or scaffold has none, making this a no-op). Every other
+    /// host, including one whose version is unknown, gets `refresh`,
+    /// byte-identical to before (C1).
+    ///
+    /// `capabilities` is the caller's probe; the services pass
+    /// `HermesVersionCache.shared.capabilitiesSync(for:)`, which is `.empty`
+    /// (never a remembered guess) when the probe fails.
+    nonisolated func sync(for project: ProjectEntry, capabilities: HermesCapabilities) throws {
+        switch ProjectEnvironmentHint.delivery(for: capabilities) {
+        case .managedBlock:
+            try refresh(for: project)
+        case .environmentHint:
+            if try ProjectContextBlock.stripForEnvironmentHint(forProjectAt: project.path, context: context) {
+                Self.logger.info("stripped the Scarf block from \(project.name, privacy: .public) (host takes the environment hint)")
+            }
+        }
+    }
+
     // MARK: - Marker splice (testable in isolation)
 
     /// Core text transform: given an existing file and a freshly-

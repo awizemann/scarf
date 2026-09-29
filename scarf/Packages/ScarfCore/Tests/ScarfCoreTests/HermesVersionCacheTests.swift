@@ -329,6 +329,50 @@ import Foundation
         #expect(!store.isLoading)
     }
 
+    /// #142: the environment-hint decision strips the AGENTS.md block, so it
+    /// must not ride a remembered version that the probe could not confirm
+    /// (the host may have been downgraded below v0.16 since).
+    @MainActor
+    @Test func confirmedCapabilitiesRefusesARememberedVersion() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let ctx = localContext(home: "/tmp/scarf-cache-conf-a")
+
+        let seeded = HermesVersionCache(
+            defaults: defaults,
+            probe: ProbeSpy(line: "Hermes Agent v0.20.0 (2026.8.3)").probe
+        )
+        _ = await seeded.capabilities(for: ctx)
+
+        let store = HermesCapabilitiesStore(
+            context: ctx, cache: HermesVersionCache(defaults: defaults, probe: { _ in .empty }))
+        let confirmed = await store.confirmedCapabilities()
+
+        #expect(store.isProvisional)
+        #expect(store.capabilities.supportsEnvironmentHint, "the UI keeps the remembered value")
+        #expect(confirmed == .empty)
+        #expect(!confirmed.supportsEnvironmentHint)
+    }
+
+    /// And it waits for the init-time probe rather than answering with the
+    /// pre-probe `.empty`, so a chat started at launch still gets the hint.
+    @MainActor
+    @Test func confirmedCapabilitiesAwaitsTheInFlightProbe() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let ctx = localContext(home: "/tmp/scarf-cache-conf-b")
+        let cache = HermesVersionCache(
+            defaults: defaults,
+            probe: ProbeSpy(line: "Hermes Agent v0.16.0 (2026.6.5)").probe
+        )
+        let store = HermesCapabilitiesStore(context: ctx, cache: cache)
+
+        let confirmed = await store.confirmedCapabilities()
+
+        #expect(confirmed.semver?.minor == 16)
+        #expect(confirmed.supportsEnvironmentHint)
+    }
+
     @MainActor
     @Test func storeFallsBackToEmptyWhenNothingIsRemembered() async {
         let (defaults, name) = makeDefaults()

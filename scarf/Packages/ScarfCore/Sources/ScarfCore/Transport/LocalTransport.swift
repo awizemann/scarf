@@ -365,6 +365,23 @@ public struct LocalTransport: ServerTransport {
         }
         return proc
     }
+
+    /// Sets the composed hint on the process environment (inherited env +
+    /// hint). A nil hint leaves `environment` untouched (nil = inherit),
+    /// exactly like the 3-arg spawn.
+    public func makeProcess(
+        executable: String, args: [String], cwd: String?, environmentHint: EnvironmentHintRequest?
+    ) -> Process {
+        let proc = makeProcess(executable: executable, args: args, cwd: cwd)
+        if let environmentHint,
+           !EnvironmentHintComposer.isBlank(environmentHint.scarfHint) {
+            proc.environment = EnvironmentHintComposer.applying(
+                scarfHint: environmentHint.scarfHint,
+                configHint: environmentHint.configHint,
+                to: ProcessInfo.processInfo.environment)
+        }
+        return proc
+    }
     #endif
 
     public func streamRawBytes(executable: String, args: [String]) -> AsyncThrowingStream<Data, Error> {

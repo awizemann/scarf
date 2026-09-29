@@ -2119,6 +2119,19 @@ final class ChatController {
     /// `MiniAppAgentSession.clientFactory`.
     var clientFactory: ((_ projectCwd: String?) -> ACPClient)?
 
+    /// Where the host's capabilities come from for the project-context
+    /// decision (#142). The shared cache answers `.empty` — never a
+    /// remembered guess — when the probe fails, which keeps the managed
+    /// block. A seam so tests pin the version.
+    var capabilitiesProvider: (ServerContext) async -> HermesCapabilities = { context in
+        await HermesVersionCache.shared.capabilities(for: context)
+    }
+
+    /// The environment hint prepared for the current project chat, keyed by
+    /// project path: the spawn for that cwd (start, resume, reconnect)
+    /// carries it; any other cwd gets none.
+    let environmentHintSlot = EnvironmentHintSlot()
+
     private func makeClient(projectCwd: String? = nil) -> ACPClient {
         if let clientFactory { return clientFactory(projectCwd) }
         // Default (nil) keyProvider = per-server-entry key resolution via
@@ -2128,7 +2141,8 @@ final class ChatController {
         // (gh#133).
         return ACPClient.forIOSApp(
             context: context,
-            projectCwd: projectCwd
+            projectCwd: projectCwd,
+            environmentHint: environmentHintSlot.request(forProjectCwd: projectCwd)
         )
     }
 
@@ -3136,7 +3150,8 @@ final class ChatController {
 
     /// User tapped "In project… <project>". Stop, reset, and start
     /// with the project's path as cwd. Writes the Scarf-managed
-    /// AGENTS.md block via ProjectContextBlock BEFORE spawning `hermes
+    /// AGENTS.md block via ProjectContextBlock (or, on a v0.16+ host,
+    /// prepares the environment hint — #142) BEFORE spawning `hermes
     /// acp`, so Hermes sees the project context at boot. Records the
     /// returned session id in the attribution sidecar.
     func resetAndStartInProject(_ project: ProjectEntry) async {
@@ -3162,12 +3177,12 @@ final class ChatController {
                 self?.currentGitBranch = branch
             }
         }
-        // Render + write the full Scarf-managed AGENTS.md block (cron,
-        // config fields, template, kanban, slash commands, platform
-        // reference) BEFORE `hermes acp` boots — it reads context from the
-        // process cwd at spawn. Non-fatal: a write failure surfaces a
-        // banner and the chat proceeds without the block.
-        await writeProjectContextBlock(projectPath: project.path, projectName: project.name)
+        // Hand Scarf's project context to Hermes BEFORE `hermes acp` boots
+        // — the managed AGENTS.md block on older hosts (it reads context
+        // from the process cwd at spawn), the environment hint on v0.16+
+        // (#142). Non-fatal: a block write failure surfaces a banner and
+        // the chat proceeds without the block.
+        await prepareProjectContext(projectPath: project.path, projectName: project.name)
         await start(projectPath: project.path, projectName: project.name)
     }
 
@@ -3181,8 +3196,29 @@ final class ChatController {
     /// the agent won't see project context this session) with the
     /// underlying error in "Show details", but the chat still starts.
     /// Shared by the new-project-chat and resume paths.
-    private func writeProjectContextBlock(projectPath: String, projectName: String) async {
+    ///
+    /// On a host with `supportsEnvironmentHint` (#142) nothing is written:
+    /// the hint lands in `environmentHintSlot` for the spawn, and the old
+    /// block is stripped from the project's files. A failed strip is only
+    /// logged — the agent still gets its context, so no banner.
+    private func prepareProjectContext(projectPath: String, projectName: String) async {
         let ctx = context
+        let delivery = ProjectEnvironmentHint.delivery(for: await capabilitiesProvider(ctx))
+        guard delivery == .managedBlock else {
+            let prepared = await OffPool.run {
+                let store = ProjectStore(context: ctx)
+                let scarfProject = store.loadOrDerive(projectPath: projectPath, name: projectName)
+                return ProjectEnvironmentHint.prepare(project: scarfProject, projectPath: projectPath, context: ctx)
+            }
+            if let error = prepared.stripError {
+                Self.logger.warning(
+                    "couldn't strip the managed block for \(projectPath, privacy: .public): \(error.localizedDescription, privacy: .public)"
+                )
+            }
+            environmentHintSlot.set(prepared.request, forProjectPath: projectPath)
+            return
+        }
+        environmentHintSlot.set(nil, forProjectPath: projectPath)
         let writeResult: Result<Void, Error> = await Task.detached {
             let store = ProjectStore(context: ctx)
             let scarfProject = store.loadOrDerive(projectPath: projectPath, name: projectName)
@@ -3384,7 +3420,7 @@ final class ChatController {
         // current for the project's next new chat — cron, slash-command
         // and project-name changes apply to new chats.
         if let resumePath = resolved?.path {
-            await writeProjectContextBlock(projectPath: resumePath, projectName: resolved?.name ?? "")
+            await prepareProjectContext(projectPath: resumePath, projectName: resolved?.name ?? "")
         }
 
         state = .connecting

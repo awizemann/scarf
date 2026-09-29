@@ -34,10 +34,34 @@ final class ProjectCockpitViewModel {
     /// none is bound / it no longer resolves.
     var modelPresetName: String?
     /// The Scarf-managed AGENTS.md block (inclusive of markers), for the
-    /// read-only Context panel.
+    /// read-only Context panel — or, when `contextIsEnvironmentHint`, the
+    /// `HERMES_ENVIRONMENT_HINT` text a project chat on this host carries
+    /// instead (#142).
     var contextBlock: String?
+    /// Whether `contextBlock` is the environment hint rather than a block
+    /// read from the project's files. Same gate as the chat start.
+    var contextIsEnvironmentHint = false
+
+    /// The window's capability store, set by the view. Only a probe it
+    /// confirmed switches the Context panel to the hint (nil → block).
+    @ObservationIgnored var capabilitiesStore: HermesCapabilitiesStore?
+    /// The delivery the last committed load rendered for, so
+    /// `capabilitiesChanged()` reloads only when the answer moved.
+    @ObservationIgnored private var lastDelivery: ProjectEnvironmentHint.Delivery?
     /// Cron jobs attributed to this project (`[proj:<id>]` or `[tmpl:]`).
     var cronJobs: [HermesCronJob] = []
+    /// A cron job whose prompt creates Kanban tasks without naming the
+    /// project's tenant, with the corrected prompt to offer (#142 P6).
+    struct CronTenantFix: Equatable, Sendable {
+        let jobID: String
+        let tenant: String
+        let suggestedPrompt: String
+    }
+    /// Keyed by job id. Only filled on a host that takes the environment
+    /// hint (the managed block, which told workdir jobs the tenant, is
+    /// gone there) and only for a project with a Kanban tenant. See
+    /// `ProjectCronTenantCheck` for the heuristic.
+    var cronTenantFixes: [String: CronTenantFix] = [:]
     /// The host zone to name next to time-of-day schedules (S08-F3).
     var cronZoneNote: String?
     /// The project's MEMORY.md block, when it owns one.
@@ -111,6 +135,10 @@ final class ProjectCockpitViewModel {
         /// A watcher tick. Short-circuits on an unchanged signature and
         /// NEVER runs the doctor.
         case watcher
+        /// The capability store's answer changed. Always reads (no file
+        /// changed, so the signature would short-circuit) but never runs
+        /// the doctor.
+        case capabilities
     }
 
     func load(
@@ -137,6 +165,22 @@ final class ProjectCockpitViewModel {
         inFlightLoad = task
         await task.value
         inFlightLoad = nil
+    }
+
+    /// The window's capability store published a new answer (the version
+    /// probe finished after the cockpit opened, or a re-detect changed it).
+    /// Re-reads the facets when that moves the Context panel / cron warning
+    /// between the managed block and the environment hint (#142 P6) — the
+    /// file-signature short-circuit can't see it, since no file changed.
+    /// Waits out an in-flight load first: it may have decided on the old
+    /// answer.
+    func capabilitiesChanged() async {
+        guard hasLoaded else { return }
+        if let existing = inFlightLoad { await existing.value }
+        let delivery = ProjectEnvironmentHint.delivery(
+            for: await capabilitiesStore?.confirmedCapabilities() ?? .empty)
+        guard delivery != lastDelivery else { return }
+        await load(force: true, reason: .capabilities)
     }
 
     /// Every file a full load reads, in the order the load reads them.
@@ -255,6 +299,8 @@ final class ProjectCockpitViewModel {
 
         let context = self.context
         let project = self.project
+        let delivery = ProjectEnvironmentHint.delivery(
+            for: await capabilitiesStore?.confirmedCapabilities() ?? .empty)
         // Which project-context files exist, from the batched stat above, so
         // the block preview reads only those (one read in the usual case)
         // instead of probing every candidate name over SSH.
@@ -300,7 +346,11 @@ final class ProjectCockpitViewModel {
             // whichever context file Hermes loads for the project — AGENTS.md,
             // or the project's own CLAUDE.md / .cursorrules / .hermes.md (S11-F1).
             // AGENTS.md first: it is where the block is in most projects.
-            let block = presentContextFiles.lazy
+            // A host that takes the environment hint has no block to read;
+            // show the hint a chat started now would carry (#142).
+            let hintInput = delivery == .environmentHint ? store.agentContextBlockInput(for: sp) : nil
+            let block = hintInput.map(ProjectContextBlock.renderEnvironmentHint)
+                ?? presentContextFiles.lazy
                 .map { context.readText(project.path + "/" + $0) }
                 .compactMap {
                     Self.extractBlock(
@@ -318,6 +368,16 @@ final class ProjectCockpitViewModel {
                 ProjectCronAttribution.isAttributed(
                     jobName: job.name, projectID: sp.id, templateId: tmpl?.id
                 )
+            }
+            // Jobs whose Kanban tasks would land under "Untagged" now that
+            // the block is gone (hint hosts only; #142 P6).
+            var tenantFixes: [String: CronTenantFix] = [:]
+            if let tenant = hintInput?.kanbanTenant, !tenant.isEmpty {
+                for job in jobs where ProjectCronTenantCheck.needsTenant(prompt: job.prompt, tenant: tenant) {
+                    tenantFixes[job.id] = CronTenantFix(
+                        jobID: job.id, tenant: tenant,
+                        suggestedPrompt: ProjectCronTenantCheck.suggestedPrompt(prompt: job.prompt, tenant: tenant))
+                }
             }
 
             // Memory: the project's MEMORY.md block, when it owns one.
@@ -351,6 +411,7 @@ final class ProjectCockpitViewModel {
                 project: sp,
                 block: block,
                 jobs: jobs,
+                tenantFixes: tenantFixes,
                 zoneNote: zoneNote,
                 memory: memory,
                 templateID: tmpl?.id,
@@ -364,7 +425,10 @@ final class ProjectCockpitViewModel {
 
         scarfProject = result.project
         contextBlock = result.block
+        contextIsEnvironmentHint = delivery == .environmentHint
+        lastDelivery = delivery
         cronJobs = result.jobs
+        cronTenantFixes = result.tenantFixes
         cronZoneNote = result.zoneNote
         memoryBlock = result.memory
         templateID = result.templateID
@@ -445,6 +509,7 @@ final class ProjectCockpitViewModel {
         let project: ScarfProject
         let block: String?
         let jobs: [HermesCronJob]
+        let tenantFixes: [String: CronTenantFix]
         let zoneNote: String?
         let memory: String?
         let templateID: String?
