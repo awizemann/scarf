@@ -132,6 +132,9 @@ struct SidebarView: View {
                 .padding(.top, ScarfSpace.s1)
                 .padding(.bottom, ScarfSpace.s4)
             }
+            // UI tests scroll THIS view to reveal a row, and treat a row as
+            // visible only inside its frame (the footer sits below it).
+            .accessibilityIdentifier("sidebar.nav")
             footer
         }
         .background(.regularMaterial)

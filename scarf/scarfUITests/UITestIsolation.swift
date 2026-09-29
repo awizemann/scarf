@@ -215,26 +215,63 @@ class ScarfUITestCase: XCTestCase {
             + ["-NSAutomaticWindowAnimationsEnabled", "0", "-NSWindowResizeTime", "0.001"]
     }
 
-    /// Scroll the sidebar until the row carrying `identifier` is hittable,
+    /// Scroll the sidebar until the row carrying `identifier` is visible,
     /// and return it. A row below the fold EXISTS in the accessibility tree
     /// but a click lands on its off-screen coordinates and does nothing; a
     /// row under a lazily-built group may not even exist until scrolled to.
+    ///
+    /// `isHittable` alone is not enough: a row clipped at the bottom of the
+    /// nav scroll view (behind the "Hermes Running" footer) still reports
+    /// hittable, and the click lands on the footer. So the row must also lie
+    /// inside the `sidebar.nav` scroll view's frame, and that view (not
+    /// whichever narrow scroll view comes first, e.g. the Projects well) is
+    /// the one scrolled.
     @discardableResult
     func revealSidebarRow(_ app: XCUIApplication, identifier: String, steps: Int = 8) -> XCUIElement {
         let row = app.descendants(matching: .any).matching(identifier: identifier).firstMatch
-        if row.exists && row.isHittable { return row }
-        // The sidebar is the narrow scrollable column; anything wide is the
-        // detail pane, and scrolling THAT would move the wrong content.
-        let candidates = (app.scrollViews.allElementsBoundByIndex
+        let nav = app.scrollViews.matching(identifier: "sidebar.nav").firstMatch
+        func visible() -> Bool {
+            guard row.exists, row.isHittable else { return false }
+            guard nav.exists else { return true }
+            return nav.frame.contains(row.frame)
+        }
+        if visible() { return row }
+        // Fallback for a build without the identifier: the sidebar is the
+        // narrow scrollable column; anything wide is the detail pane.
+        let scroller = nav.exists ? nav : (app.scrollViews.allElementsBoundByIndex
             + app.outlines.allElementsBoundByIndex
             + app.tables.allElementsBoundByIndex)
-            .filter { $0.exists && $0.frame.width > 0 && $0.frame.width < 420 }
-        guard let sidebar = candidates.first else { return row }
+            .first { $0.exists && $0.frame.width > 0 && $0.frame.width < 420 }
+        guard let scroller else { return row }
         for _ in 1...max(1, steps) {
-            sidebar.scroll(byDeltaX: 0, deltaY: -120)
-            if row.exists && row.isHittable { return row }
+            scroller.scroll(byDeltaX: 0, deltaY: -120)
+            if visible() { return row }
         }
         return row
+    }
+
+    /// The smallest window every journey fits in: Cron's HSplitView and the
+    /// Kanban columns need the width, and all sidebar rows need the height.
+    static let minimumWindowSize = CGSize(width: 1500, height: 1200)
+
+    /// Fail with the real cause when the window didn't get the pinned
+    /// frame. macOS window tiling (Desktop & Dock ▸ Windows) overrides the
+    /// `WindowFrameAutosave` launch argument and squeezes Scarf into a tile
+    /// (seen at 1492 × 890), which otherwise surfaces much later as
+    /// "Models.root never appeared" or a clipped Kanban inspector.
+    func requireTestWindowSize(_ app: XCUIApplication) -> Bool {
+        let frame = app.windows.firstMatch.frame
+        let minimum = Self.minimumWindowSize
+        guard frame.width < minimum.width || frame.height < minimum.height else { return true }
+        XCTFail("""
+            Environment: Scarf's window is \(Int(frame.width)) × \(Int(frame.height)) pt, \
+            below the \(Int(minimum.width)) × \(Int(minimum.height)) the UI tests pin. \
+            macOS window tiling or an arrangement tool most likely resized it: turn off \
+            tiling for Scarf (Window ▸ Move & Resize ▸ Return to Previous Size, or \
+            Desktop & Dock ▸ Windows) and re-run. If tiling is off, check that the \
+            `\(Self.windowFramePersistenceKey)` launch argument still matches WindowFrameAutosave's key.
+            """)
+        return false
     }
 
     // MARK: - Launch / surface / quit
@@ -272,7 +309,7 @@ class ScarfUITestCase: XCTestCase {
         for attempt in 1...attempts {
             app.typeKey("1", modifierFlags: .command)
             if app.windows.firstMatch.waitForExistence(timeout: timeout / TimeInterval(attempts)) {
-                return true
+                return requireTestWindowSize(app)
             }
             print("[ScarfUITestCase] no window after ⌘1 attempt \(attempt)/\(attempts); re-activating and retrying.")
             app.activate()

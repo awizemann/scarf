@@ -587,7 +587,9 @@ final class ConfigJourneyUITests: ScarfUITestCase {
         let root = element(app, "\(section).root")
         for attempt in 1...3 {
             ensureFrontmost(app)
-            row.click()
+            // Scroll it into the nav view first: a row clipped behind the
+            // sidebar footer takes the click on the footer instead.
+            revealSidebarRow(app, identifier: "sidebar.section.\(section)").click()
             if root.waitForExistence(timeout: 15) { return }
             print("[ConfigJourney] \(section).root absent after click attempt \(attempt)/3; retrying.")
         }
