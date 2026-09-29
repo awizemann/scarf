@@ -82,6 +82,17 @@ public enum EnvironmentHintComposer {
     /// made only of non-ASCII Unicode spaces counts as set here but blank
     /// to Hermes, which then still reads `<spaces>\n\n<scarf>` stripped to
     /// Scarf's hint. Harmless either way.
+    ///
+    /// **Visible in `ps`, accepted (#142 P6).** Both literals — Scarf's hint
+    /// AND the user's `agent.environment_hint` read from the remote
+    /// config.yaml — travel inside the ssh command line, so they show in the
+    /// process list of the Mac (the `ssh` argv) and of the remote host (the
+    /// remote shell's argv) while the session runs. ssh cannot forward an
+    /// env var without server-side `AcceptEnv`, so there is no quieter
+    /// channel. The content is project name/path/ids plus a hint the user
+    /// already stores in plain text; Alan accepted the exposure, and the
+    /// wiki (Chat.md, "Project context") tells users not to put secrets in
+    /// their config hint. Don't route anything secret through here.
     public static func remoteShellFragment(configHint: String?, scarfHint: String?) -> String {
         guard let scarfHint, !isBlank(scarfHint) else { return "" }
         let v = variableName
