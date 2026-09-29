@@ -640,7 +640,10 @@ public enum ProjectContextBlock {
         lines.append("")
         lines.append("This chat was opened in Scarf (a GUI for Hermes) for the project **\"\(input.projectName)\"** at `\(path)`; it is this session's working directory.")
         if let tenant = input.kanbanTenant, !tenant.isEmpty {
-            lines.append("- Kanban tenant `\(tenant)`: always pass `--tenant \(tenant)` to `hermes kanban create` so tasks land on this project's board.")
+            // Cron runs never receive this hint and Hermes has no tenant
+            // default (`hermes_cli/kanban_parser.py:84` @ v0.21.4 canary), so a
+            // job's prompt must carry the flag itself.
+            lines.append("- Kanban tenant `\(tenant)`: always pass `--tenant \(tenant)` to `hermes kanban create` so tasks land on this project's board. A cron job's prompt that creates Kanban tasks must spell out that flag too — scheduled runs don't see this note.")
         }
         if let projectId = input.projectId {
             let prefix = "[proj:\(projectId.uuidString)]"
