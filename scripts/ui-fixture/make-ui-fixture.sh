@@ -47,6 +47,17 @@ COST_AMOUNT_USD="1.23"                    # renders as "$1.23" (Sessions) / "$1.
 BADGE_SESSION_A="uibadge-acp-0001"        # ACP chat WITH live kanban tasks
 BADGE_SESSION_B="uibadge-acp-0002"        # ACP chat WITH live kanban tasks
 BADGE_SESSION_EMPTY="uibadge-acp-0003"    # ACP chat with NONE — the badge must show 0
+
+# 3.5.0 issue fixes (#145-#148) — `ChatIssues35UITests` / `SessionBranchBadgeUITests`.
+UI35_PLAIN="ui35-plain-0001"              # ordinary root session — no Branch badge
+UI35_BRANCH_PARENT="ui35-branch-parent-0002"  # parent that /branch ended ('branched')
+UI35_BRANCH_CHILD="ui35-branch-child-0003"    # /branch child: _branched_from marker — Branch badge
+UI35_RESET_PARENT="ui35-reset-parent-0004"    # parent of a /new-style reset child
+UI35_RESET_CHILD="ui35-reset-child-0005"      # reset child: _reset_from marker — listed, NO badge
+UI35_COMPRESS_PARENT="ui35-compress-parent-0006" # ended by compression
+UI35_COMPRESS_CHILD="ui35-compress-child-0007"   # compression continuation — never a Branch
+UI35_CLI_TOOLS="ui35-cli-tools-0008"      # source 'cli', one turn with a tool call (#146, #148)
+UI35_ACP_TITLE="ui35-acp-title-0009"      # restorable ACP chat with one turn (#147 /title)
 HERMES_BIN="${HERMES_BIN:-$HOME/.local/bin/hermes}"
 
 MODE="seed"   # seed | dry-run | self-check
@@ -573,6 +584,82 @@ scoped_empty="$(capture kanban list --session "$BADGE_SESSION_EMPTY")"
 empty_rows="$(printf '%s\n' "$scoped_empty" | grep -cE '\bt_[0-9a-f]+\b' || true)"
 [ "$empty_rows" -eq 0 ] || { printf '%s\n' "$scoped_empty" >&2; die "$BADGE_SESSION_EMPTY should own no tasks, sees $empty_rows"; }
 note "kanban --session $BADGE_SESSION_EMPTY: 0 rows"
+
+# ---------------------------------------------------------------- seed: 3.5.0 issue sessions
+
+# Rows for the 3.5.0 fixes' UI tests (#145 Branch badge, #146 honest resume
+# of a non-ACP session, #147 /title, #148 history-derived turn duration).
+# Direct writes for the same reason as the cost and badge rows: no hermes
+# verb mints a session with a CHOSEN id, a chosen `source`, or — for the
+# lineage rows — a chosen parent. The SHAPES are Hermes's own, verified in
+# the installed source:
+#   - /branch: `hermes_cli/cli_commands_mixin.py` (`_handle_branch`) creates
+#     the child with `parent_session_id` and
+#     `model_config = {…, "_branched_from": <parent>}`, then ends the parent
+#     with `end_reason = 'branched'` (`_BRANCH_CHILD_SQL`,
+#     hermes_state_common.py:151).
+#   - reset child: `model_config = {"_reset_from": <parent>}`
+#     (`gateway/session_recovery.py`, `_RESET_CHILD_SQL`).
+#   - compression continuation: parent `end_reason = 'compression'`
+#     (`_COMPRESSION_CHILD_SQL`) — hidden from listings, never a branch.
+#   - messages: the `messages` table's own columns (role/content/
+#     tool_call_id/tool_calls/tool_name/timestamp).
+step "Seeding the 3.5.0 issue sessions (branch lineage, a cli transcript with a tool call, a restorable ACP chat)"
+has_session_column model_config || die "this Hermes's sessions table has no model_config column — the Branch badge fixture needs the _branched_from marker (Hermes v2026.6.5+)."
+UI35_TS="$(( $(date +%s) - 120 ))"
+ui35_session() {
+    # id | source | title | started offset | parent | model_config JSON | end_reason | ended offset
+    local id="$1" src="$2" title="$3" off="$4" parent="$5" cfg="$6" reason="$7" ended="$8"
+    local start=$(( UI35_TS + off ))
+    "$SQLITE_BIN" "$STATE_DB" \
+        "INSERT OR REPLACE INTO sessions (id, source, model, started_at, last_activity_at, message_count, tool_call_count, title, parent_session_id, model_config, end_reason, ended_at) \
+         VALUES ('$id', '$src', 'fixture/chat-model', $start, $start, 2, 0, '$title', $parent, $cfg, $reason, $ended);" \
+        || die "could not seed 3.5.0 session $id into the fixture state.db"
+    note "$id ($title)"
+}
+ui35_session "$UI35_PLAIN"           cli "UI35 Plain Session"     10 NULL NULL NULL NULL
+ui35_session "$UI35_BRANCH_PARENT"   cli "UI35 Branch Parent"     20 NULL NULL "'branched'" "$(( UI35_TS + 30 ))"
+ui35_session "$UI35_BRANCH_CHILD"    cli "UI35 Branch Child"      31 "'$UI35_BRANCH_PARENT'" "'{\"max_iterations\": 90, \"_branched_from\": \"$UI35_BRANCH_PARENT\"}'" NULL NULL
+ui35_session "$UI35_RESET_PARENT"    cli "UI35 Reset Parent"      40 NULL NULL "'session_reset'" "$(( UI35_TS + 45 ))"
+ui35_session "$UI35_RESET_CHILD"     cli "UI35 Reset Child"       46 "'$UI35_RESET_PARENT'" "'{\"_reset_from\": \"$UI35_RESET_PARENT\"}'" NULL NULL
+ui35_session "$UI35_COMPRESS_PARENT" cli "UI35 Compressed Root"   50 NULL NULL "'compression'" "$(( UI35_TS + 55 ))"
+ui35_session "$UI35_COMPRESS_CHILD"  cli "UI35 Compressed Child"  56 "'$UI35_COMPRESS_PARENT'" NULL NULL NULL
+ui35_session "$UI35_CLI_TOOLS"       cli "UI35 CLI Tool Session"  60 NULL NULL NULL NULL
+ui35_session "$UI35_ACP_TITLE"       acp "UI35 Title Me"          70 NULL NULL NULL NULL
+
+# One turn per transcript session: user → assistant(tool_calls) → tool →
+# assistant(final). Timestamps 7 s apart end to end so the history-derived
+# duration (#148: user row → LAST assistant row) renders a pill, on the
+# final bubble only.
+ui35_message() {
+    local sid="$1" role="$2" content="$3" ts="$4" tcid="$5" tcalls="$6" tname="$7"
+    "$SQLITE_BIN" "$STATE_DB" \
+        "INSERT INTO messages (session_id, role, content, tool_call_id, tool_calls, tool_name, timestamp) \
+         VALUES ('$sid', '$role', $content, $tcid, $tcalls, $tname, $ts);" \
+        || die "could not seed a $role message into $sid"
+}
+for sid in "$UI35_CLI_TOOLS" "$UI35_ACP_TITLE"; do
+    "$SQLITE_BIN" "$STATE_DB" "DELETE FROM messages WHERE session_id = '$sid';"
+done
+t=$(( UI35_TS + 60 ))
+ui35_message "$UI35_CLI_TOOLS" user      "'UI35 list the files'" "$t" NULL NULL NULL
+ui35_message "$UI35_CLI_TOOLS" assistant "''" "$(( t + 2 ))" NULL \
+    "'[{\"id\": \"call_ui35\", \"type\": \"function\", \"function\": {\"name\": \"terminal\", \"arguments\": \"{\\\"command\\\": \\\"ls\\\"}\"}}]'" NULL
+ui35_message "$UI35_CLI_TOOLS" tool      "'{\"output\": \"a.txt b.txt c.txt\", \"exit_code\": 0}'" "$(( t + 3 ))" "'call_ui35'" NULL "'terminal'"
+ui35_message "$UI35_CLI_TOOLS" assistant "'UI35 DONE three files'" "$(( t + 7 ))" NULL NULL NULL
+"$SQLITE_BIN" "$STATE_DB" "UPDATE sessions SET message_count = 4, tool_call_count = 1 WHERE id = '$UI35_CLI_TOOLS';"
+t=$(( UI35_TS + 70 ))
+ui35_message "$UI35_ACP_TITLE" user      "'UI35 say hello'" "$t" NULL NULL NULL
+ui35_message "$UI35_ACP_TITLE" assistant "'UI35 hello'" "$(( t + 2 ))" NULL NULL NULL
+
+ui35_rows="$("$SQLITE_BIN" "$STATE_DB" "SELECT COUNT(*) FROM sessions WHERE id LIKE 'ui35-%';")"
+[ "$ui35_rows" -eq 9 ] || die "expected 9 ui35-* sessions in the fixture state.db, found $ui35_rows"
+ui35_msgs="$("$SQLITE_BIN" "$STATE_DB" "SELECT COUNT(*) FROM messages WHERE session_id LIKE 'ui35-%';")"
+[ "$ui35_msgs" -eq 6 ] || die "expected 6 ui35-* messages in the fixture state.db, found $ui35_msgs"
+# The branch child must satisfy Hermes's own predicate, not just ours.
+ui35_branch="$("$SQLITE_BIN" "$STATE_DB" "SELECT id FROM sessions s WHERE json_extract(s.model_config, '\$._branched_from') IS NOT NULL;")"
+[ "$ui35_branch" = "$UI35_BRANCH_CHILD" ] || die "expected exactly $UI35_BRANCH_CHILD to carry _branched_from, got: $ui35_branch"
+note "ui35 sessions: $ui35_rows, messages: $ui35_msgs"
 
 # ---------------------------------------------------------------- seed: project
 

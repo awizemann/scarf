@@ -24,6 +24,11 @@ struct ResumeContinuityNoticeRow: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(ScarfColor.backgroundSecondary, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(ScarfColor.border))
-        .accessibilityElement(children: .combine)
+        // `.combine` alone surfaced an element with an EMPTY label (the
+        // selectable Text doesn't fold in), so VoiceOver and UI tests
+        // read nothing; name it explicitly.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: text))
+        .accessibilityIdentifier("chat.resumeContinuityNotice")
     }
 }
