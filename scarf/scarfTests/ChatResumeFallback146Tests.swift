@@ -16,7 +16,7 @@ struct ChatResumeFallback146Tests {
 
     /// A home that passes the model preflight and holds `rows`
     /// (`id`, `source`) in `sessions`, each with one user message.
-    private static func home(sessions rows: [(String, String)]) throws -> TempHermesHome {
+    static func home(sessions rows: [(String, String)]) throws -> TempHermesHome {
         let home = try ChatViewModelStartLifecycleTests.configuredHome()
         var sql = HermesV0215R18bMacTests.schemaSQL
             .components(separatedBy: "INSERT INTO").first ?? ""
@@ -127,5 +127,71 @@ struct ChatResumeFallback146Tests {
         let notice = try #require(vm.richChatViewModel.resumeContinuityNotice)
         #expect(notice.text.contains("cli"))
         #expect(notice.afterMessageId == 1, "the notice must sit between the old history and the new turn")
+    }
+
+    /// The error banner's Reconnect after a LATER failure in a fallback
+    /// chat reopens the session the user opened, not the continuation —
+    /// reopening the continuation loaded only its own history (the
+    /// original transcript vanished) or, with no turn yet, fell back again
+    /// over a blank chat.
+    @Test @MainActor func reconnectAfterAFallbackReopensTheOriginSession() async throws {
+        let home = try Self.home(sessions: [("web-1", "webui")])
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let first = Channel(behavior: .happy(sessionId: "acp-new"))
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in first } }
+        vm.resumeSession("web-1")
+        #expect(await ChatViewModelStartLifecycleTests.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+        })
+        #expect(vm.richChatViewModel.sessionId == "acp-new")
+        #expect(vm.reconnectSessionId == "web-1")
+
+        let second = Channel(behavior: .happy(sessionId: "acp-new-2"))
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in second } }
+        vm.resumeSession(try #require(vm.reconnectSessionId), origin: .errorRetry)
+        #expect(await ChatViewModelStartLifecycleTests.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "acp-new-2"
+        })
+        let methods = await second.sentMethods
+        #expect(!methods.contains("session/load"), "reconnect reopened the continuation: \(methods)")
+        let rich = vm.richChatViewModel
+        #expect(rich.messages.contains { $0.content == "history web-1" })
+        let notice = try #require(rich.resumeContinuityNotice)
+        #expect(notice.text.contains("webui"))
+        #expect(vm.reconnectSessionId == "web-1")
+    }
+
+    /// The auto-start path (typing into a chat whose connection is gone)
+    /// never sets `originSessionId`, so it records the fallback itself —
+    /// and keeps the ORIGINAL origin when the continuation falls back again.
+    @Test @MainActor func autoStartFallbackIsWhatReconnectReopens() async throws {
+        let home = try Self.home(sessions: [("cli-1", "cli")])
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context)
+        let first = Channel(behavior: .happy(sessionId: "acp-new"))
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in first } }
+        await vm.richChatViewModel.loadSessionHistory(sessionId: "cli-1")
+
+        vm.sendText("carry on")
+        #expect(await ChatViewModelStartLifecycleTests.waitUntil {
+            await first.sentMethods.contains("session/prompt")
+        })
+        #expect(vm.richChatViewModel.sessionId == "acp-new")
+        #expect(vm.richChatViewModel.originSessionId == nil)
+        #expect(vm.reconnectSessionId == "cli-1")
+
+        // The connection goes again; the next send auto-starts on the
+        // continuation, which Hermes can't reopen either.
+        vm.stopACP()
+        let second = Channel(behavior: .loadNotRestorable(sessionId: "acp-new-2"))
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in second } }
+        vm.sendText("still there?")
+        #expect(await ChatViewModelStartLifecycleTests.waitUntil {
+            await second.sentMethods.contains("session/prompt")
+        })
+        #expect(vm.richChatViewModel.sessionId == "acp-new-2")
+        #expect(vm.reconnectSessionId == "cli-1")
     }
 }

@@ -442,7 +442,7 @@ struct ChatView: View {
                     .foregroundStyle(.red)
                     .lineLimit(1)
                     .help(error)
-                if let sid = viewModel.richChatViewModel.sessionId {
+                if let sid = viewModel.reconnectSessionId {
                     Button("Reconnect") {
                         // `origin: error_retry`, not `chat`: this is a retry
                         // of a session that just errored, not a user opening

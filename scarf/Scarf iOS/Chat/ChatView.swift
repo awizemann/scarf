@@ -1676,6 +1676,13 @@ final class ChatController {
     /// be the silent new session t-238d2ab3 removed. Cleared by every
     /// start path.
     private var failedResumeSessionID: String?
+    /// The session the user opened when its resume continued as a new
+    /// session (#146 fallback) — `vm.sessionId` is then the continuation.
+    /// Retry after a LATER failure reopens this one, so the fallback
+    /// repeats with the original transcript and notice. Kept here rather
+    /// than read from `vm.originSessionId`, which is only set once state.db
+    /// answered. Cleared by every start path.
+    private var resumeFallbackOriginID: String?
     /// Optional project working directory of the currently-active
     /// session. Used as `cwd` on the recovery path so a project-
     /// scoped session reconnects with the right scope.
@@ -2131,9 +2138,20 @@ final class ChatController {
     /// otherwise start a fresh chat as before. Reopening goes through
     /// `SessionResume`, so a session Hermes can't reload says so rather
     /// than Retry silently swapping in a blank chat.
+    ///
+    /// After a #146 fallback the VM's `sessionId` is the fresh ACP session
+    /// carrying the chat, not the one the user opened: reopening THAT would
+    /// load only its own (possibly empty) history and — having no turn yet,
+    /// so not restorable — fall back a second time over a blank transcript.
+    /// Retry reopens the ORIGIN session instead (`resumeFallbackOriginID`), so
+    /// the fallback repeats cleanly: the original transcript, then the
+    /// notice. Turns typed into the continuation stay in state.db under
+    /// its own id (listed in Sessions); they aren't replayed here.
     func retryAfterFailure() async {
         if let sessionID = failedResumeSessionID {
             await startResuming(sessionID: sessionID)
+        } else if let origin = resumeFallbackOriginID {
+            await startResuming(sessionID: origin)
         } else if let sessionID = vm.sessionId ?? lastActiveSessionID,
                   vm.messages.contains(where: { $0.id > 0 }) {
             await startResuming(sessionID: sessionID)
@@ -2149,6 +2167,7 @@ final class ChatController {
         if state == .connecting || state == .ready { return }
         guard await passModelPreflight(intent: .fresh) else { return }
         failedResumeSessionID = nil
+        resumeFallbackOriginID = nil
         state = .connecting
         vm.reset()
         let client = makeClient()
@@ -3221,6 +3240,7 @@ final class ChatController {
     ) async {
         if state == .connecting || state == .ready { return }
         failedResumeSessionID = nil
+        resumeFallbackOriginID = nil
         let intent: PendingStart
         if let projectPath, let projectName {
             intent = .project(path: projectPath, name: projectName)
@@ -3309,6 +3329,7 @@ final class ChatController {
         await stop()
         vm.reset()
         failedResumeSessionID = nil
+        resumeFallbackOriginID = nil
         // Clear eagerly so a lingering project name from a prior
         // session doesn't flash onto the new header while the
         // attribution lookup runs.
@@ -3456,6 +3477,7 @@ final class ChatController {
             if let reason = outcome.fallbackReason {
                 vm.showResumeContinuityNotice(SessionResume.notice(for: reason))
             }
+            resumeFallbackOriginID = outcome.fallbackReason == nil ? nil : sessionID
             state = .ready
             lastActiveSessionID = resolvedID
             lastProjectPath = resolved?.path

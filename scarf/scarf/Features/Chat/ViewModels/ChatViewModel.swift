@@ -1108,6 +1108,37 @@ final class ChatViewModel {
     /// session's own project scope is only recovered later (asynchronously,
     /// from the attribution sidecar), and would describe the session rather
     /// than where the user was.
+    /// The session the error banner's Reconnect reopens. After a #146
+    /// fallback the chat's `sessionId` is the fresh continuation, whose own
+    /// history is empty or partial — and, with no turn yet, not restorable,
+    /// so reopening it fell back a second time over a blank transcript.
+    /// Reconnect reopens the session the user opened (`originSessionId`)
+    /// instead, so the fallback repeats with the original transcript and
+    /// its notice. Turns typed into the continuation stay in state.db under
+    /// its own id (its own sidebar row); they aren't replayed here.
+    var reconnectSessionId: String? {
+        let current = richChatViewModel.sessionId
+        if let fallback = lastResumeFallback, fallback.continuation == current {
+            return fallback.origin
+        }
+        return richChatViewModel.originSessionId ?? current
+    }
+
+    /// The last #146 fallback: the session the user opened and the new ACP
+    /// session that carries it on. Only read while the chat is still on
+    /// `continuation`, so no start path has to clear it. Kept apart from
+    /// `originSessionId`, which the auto-start path never sets and which
+    /// is only set once state.db answered.
+    private var lastResumeFallback: (origin: String, continuation: String)?
+
+    /// Record a fallback from `resumed` to `continuation`. Resuming a
+    /// continuation that itself falls back (an auto-start after the ladder
+    /// gave up) keeps the ORIGINAL origin, not the intermediate session.
+    private func noteResumeFallback(from resumed: String, to continuation: String) {
+        let origin = (lastResumeFallback?.continuation == resumed ? lastResumeFallback?.origin : nil) ?? resumed
+        lastResumeFallback = (origin, continuation)
+    }
+
     func resumeSession(_ sessionId: String, origin: UsageEvent.ChatSessionOrigin = .chat) {
         Analytics.record(.chatSessionStarted(mode: .resume, origin: origin))
         // Explicit user action: clear any open SSH circuit breaker for
@@ -1512,7 +1543,10 @@ final class ChatViewModel {
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 noteLoadedHead(loadedHead)
-                if let fallback { showResumeFallbackNotice(fallback) }
+                if let fallback, let existing = sessionToResume {
+                    noteResumeFallback(from: existing, to: resolvedSessionId)
+                    showResumeFallbackNotice(fallback)
+                }
                 acpStatus = ACPPhase.ready
                 isStartingSession = false
                 disarmStartWatchdog()
@@ -2390,7 +2424,10 @@ final class ChatViewModel {
                     )
                     guard startStillCurrent(intent, client: client) else { return }
                     // After the history, so the notice anchors below it.
-                    if let fallback = outcome.fallbackReason { showResumeFallbackNotice(fallback) }
+                    if let fallback = outcome.fallbackReason {
+                        noteResumeFallback(from: sessionId, to: resolvedSessionId)
+                        showResumeFallbackNotice(fallback)
+                    }
                 } else {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)

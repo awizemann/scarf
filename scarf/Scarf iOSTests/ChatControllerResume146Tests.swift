@@ -90,7 +90,7 @@ import ScarfCore
     /// A fake remote whose config passes the model preflight. (The
     /// non-ACP source gate needs the sqlite3 CLI, which the simulator
     /// lacks — ScarfCore and the Mac suites cover it.)
-    private static func withFakeRemote(
+    static func withFakeRemote(
         _ body: (ServerContext) async throws -> Void
     ) async throws {
         let tmp = FileManager.default.temporaryDirectory
@@ -108,7 +108,7 @@ import ScarfCore
         try await body(ctx)
     }
 
-    private static func isReady(_ c: ChatController) -> Bool {
+    static func isReady(_ c: ChatController) -> Bool {
         if case .ready = c.state { return true }
         return false
     }
@@ -161,6 +161,45 @@ import ScarfCore
             #expect(notice.text.contains("couldn’t reopen"))
             // ScarfGo shows no Kanban badge, so no Kanban sentence.
             #expect(!notice.text.contains("Kanban"))
+        }
+    }
+
+    /// Retry after a LATER failure in a fallback chat reopens the session
+    /// the user opened, not the continuation: reopening the continuation
+    /// (no turn yet, so not restorable) fell back a second time over a
+    /// blank transcript, and with turns it dropped the original history.
+    @Test func retryAfterAFallbackReopensTheOriginSession() async throws {
+        try await Self.withFakeRemote { ctx in
+            let first = Channel(load: .notRestorable, newId: "acp-new")
+            let second = Channel(load: .notRestorable, newId: "acp-new-2")
+            let calls = Counter()
+            let controller = ChatController(context: ctx)
+            controller.clientFactory = { _ in
+                let isFirst = calls.next() == 1
+                return ACPClient(context: ctx) { _ in isFirst ? first : second }
+            }
+
+            await controller.startResuming(sessionID: "acp-gone")
+            #expect(Self.isReady(controller))
+            #expect(controller.vm.sessionId == "acp-new")
+
+            // The connection later dies and the ladder gives up; Retry.
+            await controller.retryAfterFailure()
+
+            #expect(Self.isReady(controller))
+            #expect(await second.loadedIds == ["acp-gone"],
+                    "Retry reopened the continuation instead of the origin")
+            #expect(controller.vm.sessionId == "acp-new-2")
+            let notice = try #require(controller.vm.resumeContinuityNotice)
+            #expect(notice.text.contains("couldn’t reopen"))
+
+            // And again: the origin sticks across repeated fallbacks.
+            let third = Channel(load: .restores)
+            controller.clientFactory = { _ in ACPClient(context: ctx) { _ in third } }
+            await controller.retryAfterFailure()
+            #expect(await third.loadedIds == ["acp-gone"])
+            #expect(controller.vm.sessionId == "acp-gone")
+            #expect(controller.vm.resumeContinuityNotice == nil)
         }
     }
 }
