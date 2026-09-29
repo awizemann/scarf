@@ -636,6 +636,9 @@ struct RichMessageBubble: View, Equatable {
                 Text(RichChatViewModel.formatTurnDuration(seconds))
                     .font(ChatFontScale.monoSmall(chatFontScale))
                     .help("Wall-clock duration of this turn")
+                    // UI tests count these: one per turn, on its last
+                    // assistant bubble (#148).
+                    .accessibilityIdentifier("chat.turnDuration")
             }
             // Per-message TTS playback toggle (issue #66). Only on
             // settled assistant bubbles — streaming bubble (id == 0)

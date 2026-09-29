@@ -23,7 +23,8 @@
     {
       "selectedTests": [
         "ChatJourneyUITests",
-        "LiveGateUITests"
+        "LiveGateUITests",
+        "Issues35UITests"
       ],
       "target": {
         "containerPath": "container:scarf.xcodeproj",
