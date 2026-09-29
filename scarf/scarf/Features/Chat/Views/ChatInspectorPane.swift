@@ -356,16 +356,10 @@ struct ChatInspectorPane: View {
 
     private func footer(call: HermesToolCall, result: HermesMessage?) -> some View {
         HStack(spacing: ScarfSpace.s2) {
-            Button("Re-run") {
-                // TODO: wire to a /retry slash command or equivalent ACP path.
-                // No-op until that lands; button stays so the affordance is
-                // visible per the design.
-            }
-            .buttonStyle(ScarfSecondaryButton())
-            .disabled(true)
-            .help("Re-run isn't wired yet")
-            .frame(maxWidth: .infinity)
-
+            // No "Re-run" (gh#147): Hermes's ACP adapter offers no retry
+            // (`/retry` is CLI/gateway only), and a client-side resend would
+            // duplicate the turn in Hermes's history. A permanently disabled
+            // button promised a feature that isn't coming from this side.
             Button("Copy") {
                 let pasteboard = NSPasteboard.general
                 pasteboard.clearContents()

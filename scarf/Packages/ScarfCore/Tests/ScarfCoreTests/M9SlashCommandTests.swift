@@ -541,7 +541,9 @@ import Foundation
     /// adapter does not wire.
     static let neverDispatchedByACP = [
         "clear", "cost", "reload-skills", "exit",
-        "yolo", "sessions", "codex-runtime"
+        "yolo", "sessions", "codex-runtime",
+        // gh#147: CLI/gateway only, intercepted client-side instead.
+        "retry", "undo"
     ]
 
     /// The fallback roster on the target host is exactly the adapter's
@@ -552,7 +554,7 @@ import Foundation
         let names = Set(
             RichChatViewModel.alwaysAvailableCommands(capabilities: caps).map(\.name)
         )
-        #expect(names == ["new", "help", "model", "tools", "context", "reset", "compress", "version"])
+        #expect(names == ["new", "title", "help", "model", "tools", "context", "reset", "compress", "version"])
     }
 
     /// Every name the fallback offers is either client-side (`/new`) or one
@@ -575,10 +577,10 @@ import Foundation
             #expect(compressRows == [RichChatViewModel.compressSlashName(capabilities: caps)],
                     "\(caps.versionLine): \(compressRows)")
             for cmd in roster {
-                if cmd.name == "new" {
+                if cmd.name == "new" || cmd.name == "title" {
                     // Client-side: intercepted before the wire.
                     #expect(
-                        RichChatViewModel.clientSideSlashCommand(for: "/new") != nil,
+                        RichChatViewModel.clientSideSlashCommand(for: "/\(cmd.name)") != nil,
                         "\(caps.versionLine)"
                     )
                     continue

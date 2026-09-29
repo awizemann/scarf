@@ -891,7 +891,9 @@ public final class RichChatViewModel {
     /// `codex-runtime` (`:156-158`) and `yolo` (`:181`) are CLI/gateway
     /// CommandDefs the ACP adapter does not wire. `/reset` ("Clear
     /// conversation history") is the ACP replacement for the `/clear`
-    /// gesture users knew.
+    /// gesture users knew. `retry` and `undo` (gh#147) are CLI/gateway
+    /// only too; they are intercepted rather than listed — see
+    /// ``cliOnlySlashNames``. `title` IS listed, as a client-side command.
     public static func alwaysAvailableCommands(
         capabilities: HermesCapabilities
     ) -> [HermesSlashCommand] {
@@ -900,6 +902,17 @@ public final class RichChatViewModel {
                 name: "new",
                 description: "Start a new chat session",
                 argumentHint: capabilities.hasNewWithSessionName ? "[<name>]" : nil,
+                source: .alwaysAvailable
+            ),
+            // CLIENT-SIDE (gh#147), like `/new`: `clientSideSlashCommand`
+            // turns it into `hermes sessions rename`, which exists at every
+            // tagged Hermes (see the removed `hasSessionsRename` note in
+            // HermesCapabilities), so no capability flag. Greyed pre-session
+            // via ``sessionRequiredCommandNames``.
+            HermesSlashCommand(
+                name: "title",
+                description: "Rename this chat",
+                argumentHint: "<name>",
                 source: .alwaysAvailable
             )
         ]
@@ -1332,6 +1345,58 @@ public final class RichChatViewModel {
         /// user typed bare `/new`. Pre-v0.13 hosts ignore the name
         /// even when Hermes does honor it.
         case newSession(name: String?)
+        /// `/title <name>` — rename the CURRENT session through the same
+        /// `hermes sessions rename` the chat list uses (gh#147). `title`
+        /// is the trimmed argument tail; nil for a bare `/title`, which the
+        /// send paths answer with a usage hint rather than a rename.
+        /// `title` is a CLI/gateway command (`hermes_cli/commands.py`), not
+        /// in the ACP adapter's `_COMMANDS`, so on the wire it would reach
+        /// the model as an ordinary prompt.
+        case renameSession(title: String?)
+        /// `/retry` or `/undo` — real CLI/gateway commands the ACP adapter
+        /// never dispatches (gh#147). Never sent: the model would get the
+        /// literal text. The send paths show
+        /// ``RichChatViewModel/cliOnlySlashNotice(name:)`` instead. There is
+        /// deliberately no client-side resend for `/retry` — Scarf can't
+        /// drop the previous turn from Hermes's history, so a resend would
+        /// duplicate it.
+        case cliOnly(name: String)
+    }
+
+    /// CLI/gateway commands users reach for in chat that the ACP adapter
+    /// does not offer (`acp_adapter/commands.py` `_COMMANDS` is only help,
+    /// model, tools, context, reset, compress, steer, queue, version).
+    /// Intercepted and never sent; NOT listed in the slash menu — a row
+    /// that can never be enabled is noise, and the typed name still gets
+    /// the explanation.
+    public static let cliOnlySlashNames: Set<String> = ["retry", "undo"]
+
+    /// The hint for a name in ``cliOnlySlashNames``; `nil` otherwise.
+    public static func cliOnlySlashNotice(name: String) -> String? {
+        guard cliOnlySlashNames.contains(name) else { return nil }
+        return String(localized: "/\(name) isn't available in Scarf chat yet — Hermes doesn't offer it to apps. Use the Hermes CLI.")
+    }
+
+    /// Hint for a bare `/title`.
+    public static var titleUsageNotice: String {
+        String(localized: "Type a name after /title, e.g. /title Trip planning.")
+    }
+
+    /// Hint for `/title` before any chat exists.
+    public static var titleNeedsSessionNotice: String {
+        String(localized: "Start a chat first — /title names the current chat.")
+    }
+
+    /// Hint for `/title` on a session Hermes hasn't stored yet (an ACP
+    /// session gets its row only after the first turn); the name is
+    /// applied then, like `/new <name>`.
+    public static func titlePendingNotice(_ title: String) -> String {
+        String(localized: "This chat will be named “\(title)” after its first reply.")
+    }
+
+    /// Hint after a successful `/title`.
+    public static func titleAppliedNotice(_ title: String) -> String {
+        String(localized: "Renamed this chat “\(title)”.")
     }
 
     /// Classify input text against the client-side slash command set.
@@ -1345,6 +1410,11 @@ public final class RichChatViewModel {
         case "new":
             let trimmed = parsed.args.trimmingCharacters(in: .whitespacesAndNewlines)
             return .newSession(name: trimmed.isEmpty ? nil : trimmed)
+        case "title":
+            let trimmed = parsed.args.trimmingCharacters(in: .whitespacesAndNewlines)
+            return .renameSession(title: trimmed.isEmpty ? nil : trimmed)
+        case let name? where cliOnlySlashNames.contains(name):
+            return .cliOnly(name: name)
         default:
             return nil
         }
@@ -1514,7 +1584,7 @@ public final class RichChatViewModel {
     /// `codex-runtime` from this set along with the menu — the ACP adapter
     /// dispatches none of them at any tag.
     public static let sessionRequiredCommandNames: Set<String> = [
-        "help", "model", "tools", "context", "reset", "version",
+        "help", "model", "tools", "context", "reset", "version", "title",
         "compact", "compress",
         "steer", "queue"
     ]
