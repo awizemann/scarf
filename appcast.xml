@@ -6,6 +6,147 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.5.0</title>
+      <sparkle:version>74</sparkle:version>
+      <sparkle:shortVersionString>3.5.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 29 Sep 2026 20:30:54 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.5.0</p>
+<p>This release is the result of three full audits of Scarf against Hermes v0.21.5, each followed by a round of fixes. More than 140 problems were found and fixed, most of which had been there for a while: Scarf reporting success when Hermes had refused, writing settings Hermes never reads, or behaving differently on a remote server than on your Mac. The final audit covered every one of Scarf&#x27;s 664 source files and found nothing serious left. Along the way Scarf gained a <strong>Stop button</strong> in chat and Bot Chat, and the model picker now lists only providers your Hermes can actually use. Behaviour that depends on a Hermes release is gated to that release; older hosts get the fixes that apply to them.</p>
+<h2>Things that could lose your work</h2>
+<ul>
+  <li><strong>Editing SOUL.md could wipe it.</strong> The first time you pressed Edit in Personalities, the editor opened blank before the file had loaded, and Save replaced your SOUL.md with that. Edit now waits for the file, and saving an empty editor over existing text asks first.</li>
+  <li><strong>Project chats could hide your CLAUDE.md.</strong> Hermes loads only one project instruction file, and AGENTS.md wins. When a project had a CLAUDE.md or .cursorrules but no AGENTS.md, Scarf&#x27;s first project chat created an AGENTS.md, and from then on every Hermes session in that folder ignored the project&#x27;s own instructions. Scarf now adds its notes to the file your project already uses (on Hermes 0.16+ it writes no notes at all — see below), and repairs projects it had affected (only where the AGENTS.md contains nothing but Scarf&#x27;s notes).</li>
+  <li><strong>Long chats lost their older turns.</strong> Hermes 0.21.5 compacts long chats in place by default. Reopening one in Scarf showed only the recent turns and &quot;Load earlier&quot; couldn&#x27;t reach the rest. Scarf now shows the full history, the way Hermes&#x27;s own resume does.</li>
+  <li><strong>MCP tool blocklists turned into allowlists</strong> on the second save of a server, and <strong>OAuth MCP servers couldn&#x27;t be added</strong> at all. Both fixed.</li>
+  <li><strong>Server Backup and Restore</strong> no longer write to Hermes&#x27;s database, take consistent read-only snapshots, match what <code>hermes backup</code> includes, and refuse to restore while Hermes has a database open.</li>
+  <li><strong>iPhone memory edits</strong> no longer overwrite changes the agent made while the editor was open.</li>
+</ul>
+<h2>Stop, in chat and Bot Chat</h2>
+<p>A Stop button now sits next to Send (⌘. on the Mac), in rich chat and Bot Chat, on Mac and iPhone. Chats stay open and say &quot;You stopped this turn&quot;. On Hermes 0.19.1 and later, your next text message goes to Hermes as a follow-up to the stopped request; start a new chat to drop it. Bot Chat stops the running <code>hermes chat</code> process the way Ctrl-C would, so Hermes saves the turn first, including over SSH.</p>
+<h2>Chat and sessions, from your reports</h2>
+<ul>
+  <li><strong>Sessions started outside Scarf no longer pretend to resume</strong> (#146). Hermes can only reopen sessions that were started in an app like Scarf. Opening one from hermes-webui, the CLI or a messaging platform used to start a new session silently while showing the old conversation, so the model had none of it in context. Scarf now keeps the old conversation on screen and says plainly that your next message starts a new session without it. If a resume fails for any other reason, Scarf shows the error with Retry instead of starting over. On Mac and iPhone.</li>
+  <li><strong><code>/title &lt;name&gt;</code> renames the chat</strong> (#147), on Mac and iPhone. <code>/retry</code> and <code>/undo</code> are Hermes CLI commands that Hermes doesn&#x27;t offer to apps yet; Scarf now says so instead of sending them to the model as text. We&#x27;ve asked Hermes to add them (NousResearch/hermes-agent#127870).</li>
+  <li><strong>Each reply shows how long the whole prompt took</strong> (#148), including every tool step, and older sessions show it too when you reopen them. It used to stop counting at the first bit of text and disappear on reload.</li>
+  <li><strong>Branched sessions are marked</strong> (#145). Sessions made with Hermes&#x27;s <code>/branch</code> carry a <strong>Branch</strong> label in the Sessions list, the chat sidebar and ScarfGo; on the Mac, hovering it names the session it came from.</li>
+</ul>
+<h2>Models and providers</h2>
+<ul>
+  <li>The model picker lists only providers your Hermes can route. It used to offer every provider in the models.dev catalog (about 220), and picking one of the ~185 Hermes can&#x27;t use saved fine and then failed at the first message. This is measured per Hermes version from 0.6 on. If your config already names such a provider, chat shows a warning with a <strong>Choose model…</strong> button. Named custom providers are honoured everywhere, including bot and preset pickers.</li>
+  <li>&quot;Reasoning: none&quot; now actually turns reasoning off; Nous users no longer see a false &quot;chats will fail&quot; banner; Anthropic sign-in opens one browser tab, not two; DeepSeek&#x27;s retired model names follow what your Hermes sends.</li>
+</ul>
+<h2>Remote servers and profiles</h2>
+<ul>
+  <li>Sessions lists on Ubuntu 22.04, Debian 11 and RHEL servers were missing continued and branched conversations, because Scarf guessed JSON support from the sqlite3 version. It now tests it.</li>
+  <li>Windows showing the default profile no longer run commands against whichever profile the server last made active; the default bot can chat.</li>
+  <li>Servers added without Test Connection can run Hermes commands again.</li>
+  <li>Saving files into folders with spaces or accented letters works (SFTP-mode scp no longer receives quoted paths).</li>
+  <li>Uninstalling a template on a remote server removes its folder and skills instead of reporting success and leaving them behind.</li>
+  <li>Project chats on a remote server start in the right folder (<code>~</code> paths are expanded), and the git branch chip shows on Mac, remote and iPhone.</li>
+</ul>
+<h2>Messaging platforms</h2>
+<ul>
+  <li><strong>Settings that <code>.env</code> overrides.</strong> For Discord, Telegram, Matrix, Mattermost, Ntfy and the Slack/Mattermost/Matrix allowlists, Hermes reads the <code>.env</code> value first, so the form&#x27;s toggle did nothing when <code>.env</code> held the variable (Hermes&#x27;s own docs put many there). The forms now show the value Hermes uses, say when <code>.env</code> is deciding it, and Save moves it into config.yaml, removing the <code>.env</code> line only after the config write succeeds. An allowlist is never silently emptied.</li>
+  <li><strong>Gateway restart while the agent is replying</strong> now shows &quot;waiting for the current turn&quot;, lists what&#x27;s still running, and offers Stop Waiting, instead of &quot;restart failed&quot; after 60 seconds.</li>
+  <li><strong>Spotify</strong> sign-in works for first-time users on this Mac (Client ID field); on a remote server Scarf shows the exact command to run.</li>
+  <li>WhatsApp Cloud saves no longer disable a working adapter; a blank WhatsApp reply prefix keeps Hermes&#x27;s default header; Slack&#x27;s inert Reply Mode picker is gone; iMessage read receipts show the right default; platform status dots show Connected/Error again.</li>
+</ul>
+<h2>Project context, without touching your files (Hermes 0.16+)</h2>
+<p>On a project running Hermes 0.16 or later, Scarf no longer writes its notes into your AGENTS.md, CLAUDE.md or similar file at all. Instead it hands the agent a short project summary — name, path, Kanban tenant, cron attribution — directly on the chat process, the way Hermes 0.16 added support for. Anything you&#x27;ve set yourself for that host, in your shell or in Hermes&#x27;s own config, is kept and Scarf&#x27;s notes are added after it, never replacing it. Any notes block Scarf had previously written into a project&#x27;s files is removed the next time you open a chat there. Older or not-yet-detected hosts keep working exactly as before, with the notes written into the project&#x27;s file. Idea and research credit: <strong>@counterposition</strong> (issue #142, PR #144).</p>
+<h2>Everything else, briefly</h2>
+<ul>
+  <li><strong>Cron:</strong> Run Now no longer fires every other overdue job; monitor jobs show the right output; the time-zone note covers plain-language schedules; pause/resume failures that Hermes reported with exit 0 are caught on Mac and iPhone.</li>
+  <li><strong>Kanban:</strong> comments show again; glance counts survive assigned tasks; completing a task asks for the result Hermes requires; a card dragged to Running that Hermes didn&#x27;t start goes back with the reason; &quot;Enable kanban tools&quot; now reaches Scarf&#x27;s chats on 0.21.5 and explains the version requirement below it.</li>
+  <li><strong>Skills and plugins:</strong> flat and deeply nested skills are found; catalog plugin updates no longer read as failures; Hub search on &quot;All Sources&quot; searches everything on 0.21.4+.</li>
+  <li><strong>Voice:</strong> Hermes Voice finds Python on fresh official installs and says when it fell back to the system voice.</li>
+  <li><strong>Sessions:</strong> Export All no longer offers formats Hermes refuses; compressed chats export in full; kanban worker and one-shot sessions stay out of the lists, like in Hermes.</li>
+  <li><strong>Projects:</strong> the project Sessions tab finds older chats; fleet apply copies template cron jobs; Project Doctor handles symlinked folders; the same folder can&#x27;t be added twice; mini-apps say they&#x27;re local-only on a remote server instead of showing a 403.</li>
+  <li>The bundled <code>/scarf-*</code> commands describe the dashboard widgets that actually exist, and the Proxy help shows the right sign-in command.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>About 4,230 ScarfCore tests and 1,930 Mac app tests, all run serially; the Smoke UI gate passes against a live Hermes 0.21.5. Most fixes have a test built from Hermes&#x27;s exact output at the release tag, and several round-trip through Hermes&#x27;s own code.</li>
+  <li>The provider-table check now has 8 lanes (8 of 8 pass), including one that rebuilds the routable-provider list from Hermes&#x27;s source; a second script re-measures it across all 32 Hermes releases since v0.6.</li>
+  <li>Tests no longer touch your real <code>~/.hermes</code> or kanban board.</li>
+  <li>Every new string is translated into all six supported languages.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 14.6+ (Apple Silicon and Intel). ScarfGo for iOS ships separately via TestFlight and the App Store; the iOS changes above ride its next build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.21.5. Fixes that depend on a Hermes release are gated to it; the rest apply to every supported version.</li>
+  <li>If a project&#x27;s instructions stopped reaching the agent after using Scarf, open the project&#x27;s chat once: on Hermes older than 0.16 Scarf moves its notes into your CLAUDE.md / .cursorrules; on 0.16 and later it removes them from your files entirely. Either way it deletes the AGENTS.md it had created (only if that file holds nothing but Scarf&#x27;s notes).</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.5.0/Scarf-v3.5.0-Universal.zip"
+                 sparkle:edSignature="2LUiPLDS4EpeZKlbHD5Rbg1hM88JJ0DuPQPmH2wofxy6kdYfAgg4RwKeGC8Yl5yKLIhU3bMsU6zuk5bARWn8Cg=="
+                 length="36279362"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.4.0</title>
       <sparkle:version>73</sparkle:version>
       <sparkle:shortVersionString>3.4.0</sparkle:shortVersionString>
