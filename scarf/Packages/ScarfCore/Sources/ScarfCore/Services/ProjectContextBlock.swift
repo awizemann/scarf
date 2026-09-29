@@ -622,6 +622,36 @@ public enum ProjectContextBlock {
         return lines.joined(separator: "\n")
     }
 
+    // MARK: - Environment hint (Hermes >= v0.16, #142)
+
+    /// Short project context for the `HERMES_ENVIRONMENT_HINT` env var passed
+    /// to `hermes acp` — the replacement for `renderManagedBlock` on hosts
+    /// where `HermesCapabilities.supportsEnvironmentHint` is true. Hermes
+    /// appends it to the system prompt (`agent/prompt_builder.py:866` @
+    /// v2026.6.5), so nothing is written into the project's files.
+    ///
+    /// Pure and deterministic: no markers, no dates, no config values (only
+    /// the project name/path, Kanban tenant and project id). The long
+    /// platform reference lives in the `scarf-template-author` skill instead.
+    public static func renderEnvironmentHint(_ input: ManagedBlockInput) -> String {
+        let path = input.projectPath
+        var lines: [String] = []
+        lines.append("## Scarf project")
+        lines.append("")
+        lines.append("This chat was opened in Scarf (a GUI for Hermes) for the project **\"\(input.projectName)\"** at `\(path)`; it is this session's working directory.")
+        if let tenant = input.kanbanTenant, !tenant.isEmpty {
+            lines.append("- Kanban tenant `\(tenant)`: always pass `--tenant \(tenant)` to `hermes kanban create` so tasks land on this project's board.")
+        }
+        if let projectId = input.projectId {
+            let prefix = "[proj:\(projectId.uuidString)]"
+            lines.append("- Cron jobs: start every job name with `\(prefix) ` exactly and pass `--workdir \"\(path)\"` to `hermes cron create`; Scarf attributes jobs to this project only by that prefix.")
+        }
+        lines.append("- Project slash-command expansions arrive as user messages wrapped in `<!-- scarf-slash:<name> -->`.")
+        lines.append("- Never write a secret value to disk; secret config values live in the Keychain.")
+        lines.append("- For dashboard, template, slash-command or config work, load the `scarf-template-author` skill, and prefer the `scarf-projects` MCP tools when they are available.")
+        return lines.joined(separator: "\n")
+    }
+
     /// Secret-safe "Configuration fields" tail: comma-joined backticked
     /// field NAMES with an inline `(secret …)` hint, or "(none)" when the
     /// project declares no config schema. **Never** includes values.
