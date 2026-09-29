@@ -162,6 +162,15 @@ public struct ProjectMCPTools: Sendable {
             slashCommands.loadCommands(at: entry.path).map { .string($0.name) }
         )
 
+        // Same derivations `ProjectContextBlock.renderManagedBlock` uses for
+        // its "Kanban board" / "Cron jobs" prose — no parallel logic here.
+        if let tenant = KanbanTenantReader(context: context).tenant(forProjectPath: entry.path) {
+            fields["kanbanTenant"] = .string(tenant)
+        }
+        if let uuid = entry.uuid {
+            fields["cronNamePrefix"] = .string(ProjectCronAttribution.projectTag(uuid) + " ")
+        }
+
         return .ok(try render(fields))
     }
 
