@@ -224,10 +224,10 @@ import ScarfCore
         try "agent:\n  environment_hint: changed-after-boot\n"
             .write(toFile: home.path + "/config.yaml", atomically: true, encoding: .utf8)
         await first.close()
-        #expect(await Lifecycle.waitUntil(timeoutSeconds: 10) { record.spawns.count >= 2 },
-                "the reconnect ladder never respawned")
+        let respawned = await Lifecycle.waitUntil(timeoutSeconds: 10) { record.spawns.count >= 2 }
+        try #require(respawned, "the reconnect ladder never respawned")
 
-        let respawn = record.spawns[1]
+        let respawn = try #require(record.spawns.dropFirst().first)
         #expect(respawn.cwd == projectPath, "the ladder left the project scope")
         #expect(respawn.hint == bootHint, "the respawn did not reuse the slot's hint")
         vm.stopACP()

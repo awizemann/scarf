@@ -71,15 +71,14 @@ import ScarfCore
     @Test func v015HostSpawnsWithoutAHintAndWritesNothing() async throws {
         let (hints, agents, _) = try await Self.spawn(
             capabilities: .parseLine("Hermes Agent v0.15.2 (2026.5.29)"))
-        #expect(hints.count == 1)
-        #expect(hints.first! == nil)
+        #expect(hints == [nil])
         #expect(agents == "# Mine\n\n\(Self.block)\n")
     }
 
     /// No confirmed version (no store, failed probe, provisional) = old path.
     @Test func unknownHostSpawnsWithoutAHint() async throws {
         let (hints, agents, _) = try await Self.spawn(capabilities: .empty)
-        #expect(hints.first! == nil)
+        #expect(hints == [nil])
         #expect(agents == "# Mine\n\n\(Self.block)\n")
     }
 
@@ -94,7 +93,6 @@ import ScarfCore
         }
         _ = try? await session.prompt("hi")
         await session.shutdown()
-        #expect(spawns.hints.count == 1)
-        #expect(spawns.hints.first! == nil)
+        #expect(spawns.hints == [nil])
     }
 }
