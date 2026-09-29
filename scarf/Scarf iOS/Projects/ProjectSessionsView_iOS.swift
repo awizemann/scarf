@@ -168,9 +168,15 @@ private struct ProjectSessionRow_iOS: View {
                 .foregroundStyle(ScarfColor.foregroundMuted)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
-                Text(displayTitle)
-                    .font(.callout)
-                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    Text(displayTitle)
+                        .font(.callout)
+                        .lineLimit(1)
+                    // #145: false on hosts without lineage data.
+                    if session.isBranch {
+                        SessionBranchBadge_iOS(session: session)
+                    }
+                }
                 HStack(spacing: 6) {
                     Text(session.id.prefix(12))
                         .font(.caption2.monospaced())

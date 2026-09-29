@@ -360,7 +360,7 @@ struct DashboardView: View {
                 // #145: branch mark (Hermes /branch). `isBranch` is false
                 // on hosts without lineage data, so those rows are unchanged.
                 if session.isBranch {
-                    branchBadge(session)
+                    SessionBranchBadge_iOS(session: session)
                 }
                 HStack(spacing: 12) {
                     Label(session.source, systemImage: session.sourceIcon)
@@ -394,16 +394,19 @@ struct DashboardView: View {
         .buttonStyle(.plain)
     }
 
-    /// Text capsule rather than `arrow.triangle.branch`, which means
-    /// "Subagent" elsewhere in Scarf.
-    private func branchBadge(_ session: HermesSession) -> some View {
-        let description: String = {
-            if let parent = session.branchParentTitle, !parent.isEmpty {
-                return String(localized: "Branch of “\(parent)”")
-            }
-            return String(localized: "Branch of another session")
-        }()
-        return Text("Branch")
+    private func formatTokens(_ count: Int) -> String {
+        count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+    }
+}
+
+/// #145 branch mark for ScarfGo session rows (Dashboard + project list).
+/// Text capsule rather than `arrow.triangle.branch`, which means
+/// "Subagent" elsewhere in Scarf.
+struct SessionBranchBadge_iOS: View {
+    let session: HermesSession
+
+    var body: some View {
+        Text("Branch")
             .font(.caption2)
             .foregroundStyle(ScarfColor.foregroundMuted)
             .padding(.horizontal, 6)
@@ -414,7 +417,10 @@ struct DashboardView: View {
             .accessibilityIdentifier("session.branchBadge")
     }
 
-    private func formatTokens(_ count: Int) -> String {
-        count.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)))
+    private var description: String {
+        if let parent = session.branchParentTitle, !parent.isEmpty {
+            return String(localized: "Branch of “\(parent)”")
+        }
+        return String(localized: "Branch of another session")
     }
 }
