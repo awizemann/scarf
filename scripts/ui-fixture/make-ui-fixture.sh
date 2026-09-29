@@ -328,7 +328,9 @@ for n in 1 2 3; do
 done
 
 sessions_out="$(capture sessions list)"
-session_count="$(printf '%s\n' "$sessions_out" | grep -c '^Reply with exactly' || true)"
+# Count rows by session id, not title: the model may title a one-shot chat
+# ("FIXTURE-1") instead of leaving the prompt as its preview.
+session_count="$(printf '%s\n' "$sessions_out" | grep -cE '[0-9]{8}_[0-9]{6}_[0-9a-f]{6}[[:space:]]*$' || true)"
 [ "$session_count" -ge 3 ] || { printf '%s\n' "$sessions_out" >&2; die "expected 3 seeded sessions, 'hermes sessions list' shows $session_count"; }
 note "sessions in state.db: $session_count"
 
