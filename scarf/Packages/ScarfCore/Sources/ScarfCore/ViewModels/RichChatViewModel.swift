@@ -996,21 +996,32 @@ public final class RichChatViewModel {
 
     /// Wall-clock start time of the current agent turn. Set when a fresh
     /// user prompt enters an idle session (not for `/steer` which sends
-    /// during an active turn); cleared on `finalizeStreamingMessage`
-    /// after the duration is captured. Used to compute the per-turn
-    /// stopwatch displayed below assistant bubbles. v2.5.
+    /// during an active turn); cleared only when the WHOLE turn ends
+    /// (`closeTurnStopwatch` — prompt complete, cancel, connection lost),
+    /// never by a per-segment `finalizeStreamingMessage` (that runs once
+    /// per tool call). v2.5; turn-scoped since #148.
     private var currentTurnStart: Date?
 
+    /// Id of the most recent assistant message finalized during the
+    /// in-flight turn — where the turn's one duration pill lands when
+    /// the turn ends. Nil until the turn's first segment finalizes.
+    private var turnLastAssistantId: Int?
+
+    /// Durations measured live in this VM (stopwatch), keyed by the
+    /// turn's LAST assistant message's local id.
+    private var liveTurnDurations: [Int: TimeInterval] = [:]
+
     /// Wall-clock duration of completed assistant turns, keyed by the
-    /// finalised assistant message's local id. Render the value in the
-    /// chat UI as a small "4.2s" pill below the bubble. Map grows
-    /// alongside the message list; cleared on `reset()`.
+    /// turn's last assistant message id — one entry per turn. Merges the
+    /// live stopwatch (`liveTurnDurations`, wins on a clash) with
+    /// durations derived from state.db timestamps for loaded history
+    /// (`derivedHistoryTurnDurations`, #148). Recomputed in
+    /// `buildMessageGroups`; cleared on `reset()`.
     public private(set) var turnDurations: [Int: TimeInterval] = [:]
 
     /// Look up a completed turn's duration. Nil for the streaming
-    /// placeholder (still in flight) and for any assistant message
-    /// that pre-dates the v2.5 stopwatch (e.g., loaded from state.db
-    /// for a resumed session).
+    /// placeholder, for non-final messages of a turn, and for history
+    /// whose timestamps are missing or implausible.
     public func turnDuration(forMessageId id: Int) -> TimeInterval? {
         turnDurations[id]
     }
@@ -2114,6 +2125,8 @@ public final class RichChatViewModel {
         discardAnalyticsTurn()
         analyticsReportedSlashFallback = false
         currentTurnStart = nil
+        turnLastAssistantId = nil
+        liveTurnDurations = [:]
         turnDurations = [:]
         transientHint = nil
         clearPendingPermissions()
@@ -2419,6 +2432,7 @@ public final class RichChatViewModel {
         // the user nudged.
         if !isAgentWorking {
             currentTurnStart = Date()
+            turnLastAssistantId = nil
         }
         // Analytics turn clock. Same "only on a fresh turn" rule as the
         // stopwatch above, but with its own state so a mid-turn finalize
@@ -2753,7 +2767,7 @@ public final class RichChatViewModel {
         // (streaming + Scarf rendering) so we can attribute slow-feel
         // bugs to the right side. `bytes` carries the first chunk's
         // size, not the full turn.
-        if streamingAssistantText.isEmpty && currentTurnStart != nil {
+        if streamingAssistantText.isEmpty && currentTurnStart != nil && turnLastAssistantId == nil {
             ScarfMon.event(.chatStream, "firstByte", count: 1, bytes: text.utf8.count)
         }
         streamingAssistantText += text
@@ -2764,7 +2778,7 @@ public final class RichChatViewModel {
     }
 
     private func appendThoughtChunk(text: String) {
-        if streamingThinkingText.isEmpty && currentTurnStart != nil {
+        if streamingThinkingText.isEmpty && currentTurnStart != nil && turnLastAssistantId == nil {
             ScarfMon.event(.chatStream, "firstThoughtByte", count: 1, bytes: text.utf8.count)
         }
         streamingThinkingText += text
@@ -2964,6 +2978,7 @@ public final class RichChatViewModel {
         let hadAssistantOutput = streamingAssistantText.isEmpty == false
             || messages.last?.isAssistant == true
         finalizeStreamingMessage()
+        closeTurnStopwatch()
         // The turn is over: a `tool_call_update` still on its way for one
         // of its calls must not close a call of the NEXT turn's stream
         // (below v0.21.4 there is no turn-end flush, so a call can stay
@@ -3081,6 +3096,7 @@ public final class RichChatViewModel {
 
     private func handleConnectionLost(reason: String) {
         finalizeStreamingMessage()
+        closeTurnStopwatch()
         // The turn died with the connection; no update for its calls can
         // arrive over a new one (see `handlePromptComplete`).
         openToolCallIds.removeAll()
@@ -3180,6 +3196,70 @@ public final class RichChatViewModel {
         )
     }
 
+    /// End the in-flight turn's stopwatch: record ONE duration (prompt
+    /// sent → turn over) on the turn's last finalized assistant message.
+    /// Called on every terminal path — prompt complete (incl. cancel /
+    /// stop / error stop reasons), connection lost, disconnect. A turn
+    /// that produced no assistant message records nothing. #148.
+    private func closeTurnStopwatch(now: Date = Date()) {
+        defer {
+            currentTurnStart = nil
+            turnLastAssistantId = nil
+        }
+        guard let start = currentTurnStart,
+              let id = turnLastAssistantId,
+              messages.contains(where: { $0.id == id }) else { return }
+        liveTurnDurations[id] = now.timeIntervalSince(start)
+        refreshTurnDurations()
+    }
+
+    /// Longest history-derived duration shown; anything longer (clock
+    /// skew, a session resumed days later) is hidden rather than shown.
+    nonisolated static let maxDerivedTurnDuration: TimeInterval = 6 * 60 * 60
+
+    /// Per-turn durations for persisted history, derived purely from the
+    /// already-loaded rows' `timestamp`s (no extra state.db query, so no
+    /// main-actor I/O — C10): user row → the LAST assistant row before
+    /// the next user row. Only DB rows (id > 0) get a value. A missing
+    /// timestamp on either end, a negative gap, or one over
+    /// `maxDerivedTurnDuration` yields no entry (pill hidden). #148.
+    nonisolated static func derivedHistoryTurnDurations(from messages: [HermesMessage]) -> [Int: TimeInterval] {
+        var result: [Int: TimeInterval] = [:]
+        var userStart: Date?
+        var lastAssistant: HermesMessage?
+        var inTurn = false
+        func close() {
+            guard inTurn, let start = userStart, let last = lastAssistant,
+                  let end = last.timestamp else { return }
+            let d = end.timeIntervalSince(start)
+            if d >= 0, d <= maxDerivedTurnDuration { result[last.id] = d }
+        }
+        for m in messages {
+            if m.isUser {
+                // A local (not-yet-persisted) user row still ends the
+                // previous turn, but starts none of its own.
+                close()
+                inTurn = m.id > 0
+                userStart = m.timestamp
+                lastAssistant = nil
+            } else if m.isAssistant, m.id > 0 {
+                lastAssistant = m
+            }
+        }
+        close()
+        return result
+    }
+
+    /// Rebuild the public `turnDurations` from history + live entries.
+    /// Assigns only on change so an unchanged map doesn't invalidate views.
+    private func refreshTurnDurations() {
+        var merged = Self.derivedHistoryTurnDurations(from: messages)
+        // The live stopwatch owns a turn it measured: drop any derived
+        // value for the same turn so each turn shows one pill.
+        merged.merge(liveTurnDurations) { _, live in live }
+        if merged != turnDurations { turnDurations = merged }
+    }
+
     /// Convert the streaming message (id=0) into a permanent message and reset streaming state.
     private func finalizeStreamingMessage() {
         ScarfMon.measure(.chatStream, "finalizeStreamingMessage") {
@@ -3246,14 +3326,10 @@ public final class RichChatViewModel {
                     reasoning: streamingThinkingText.isEmpty ? nil : streamingThinkingText
                 )
             }
-            // Capture per-turn duration so the chat UI can render the
-            // stopwatch pill (v2.5). Skips assistants we don't have a
-            // start time for — e.g., the .promptComplete fired but the
-            // turn began before this VM was constructed (shouldn't
-            // happen in practice but guards an edge case).
-            if let start = currentTurnStart {
-                turnDurations[id] = Date().timeIntervalSince(start)
-                currentTurnStart = nil
+            // Remember the turn's latest segment; the duration itself is
+            // recorded once, when the whole turn ends (`closeTurnStopwatch`).
+            if currentTurnStart != nil {
+                turnLastAssistantId = id
             }
             if let replyId = streamingReplyId, !streamingAssistantText.isEmpty {
                 finalizedReplyMessageIds[replyId] = id
@@ -3281,6 +3357,7 @@ public final class RichChatViewModel {
     /// Saves partial content as a permanent message without adding a system message.
     public func finalizeOnDisconnect() {
         finalizeStreamingMessage()
+        closeTurnStopwatch()
         // Same turn-end cleanup as `handleConnectionLost`: the reconnect
         // is a fresh process, whose updates never close these calls.
         openToolCallIds.removeAll()
@@ -3850,6 +3927,8 @@ public final class RichChatViewModel {
     /// the composer stays in its "agent is working" state.
     public func cancelPendingSend() {
         userSendPending = false
+        currentTurnStart = nil
+        turnLastAssistantId = nil
         isAgentWorking = false
         stopActivePolling()
         workingEpoch &+= 1
@@ -4057,6 +4136,7 @@ public final class RichChatViewModel {
 
     private func buildMessageGroups() {
         messageGroups = Self.buildGroups(from: messages)
+        refreshTurnDurations()
     }
 
     /// Pure grouping pass over a chronological message array — extracted
