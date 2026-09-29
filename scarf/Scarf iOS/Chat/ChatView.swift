@@ -2089,19 +2089,26 @@ final class ChatController {
         )
     }
 
-    /// Open the SSH exec channel, send ACP `initialize`, then
-    /// `session/new` — so that by the time `state == .ready` the user
-    /// can type and hit send immediately.
     /// The error overlay's Retry: reopen the session a failed resume was
-    /// on, otherwise start a fresh chat as before.
+    /// on — or, after a later failure (connection lost, reconnect ladder
+    /// exhausted), the session whose transcript is still on screen —
+    /// otherwise start a fresh chat as before. Reopening goes through
+    /// `SessionResume`, so a session Hermes can't reload says so rather
+    /// than Retry silently swapping in a blank chat.
     func retryAfterFailure() async {
         if let sessionID = failedResumeSessionID {
+            await startResuming(sessionID: sessionID)
+        } else if let sessionID = vm.sessionId ?? lastActiveSessionID,
+                  vm.messages.contains(where: { $0.id > 0 }) {
             await startResuming(sessionID: sessionID)
         } else {
             await start()
         }
     }
 
+    /// Open the SSH exec channel, send ACP `initialize`, then
+    /// `session/new` — so that by the time `state == .ready` the user
+    /// can type and hit send immediately.
     func start() async {
         if state == .connecting || state == .ready { return }
         guard await passModelPreflight(intent: .fresh) else { return }
@@ -3328,6 +3335,9 @@ final class ChatController {
         do {
             try await client.start()
         } catch {
+            // Superseded (another resume / New chat installed its own
+            // client meanwhile): that path owns the state now.
+            guard self.client === client else { await client.stop(); return }
             failedResumeSessionID = sessionID
             state = .failed(error.localizedDescription)
             await vm.recordACPFailure(error, client: client)
@@ -3391,6 +3401,16 @@ final class ChatController {
                     SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID),
                     for: sessionID, addingLoadedHead: loadedHead)
             )
+            // Superseded while the history loaded: the newer start owns the
+            // view model — don't paint this resume's notice onto it.
+            guard self.client === client else { await client.stop(); return }
+            // `loadSessionHistory` points the VM at the ORIGIN id first and
+            // only moves it to the ACP id once state.db answered; an
+            // unreadable DB leaves it on the origin — after a fallback that
+            // is the session Hermes can't reopen, and sends would target
+            // it. Re-assert the ACP id, as the Mac does after its history
+            // load.
+            if vm.sessionId != resolvedID { vm.setSessionId(resolvedID) }
             // After the history, so the notice anchors below it.
             if let reason = outcome.fallbackReason {
                 vm.showResumeContinuityNotice(SessionResume.notice(for: reason))
@@ -3399,10 +3419,14 @@ final class ChatController {
             lastActiveSessionID = resolvedID
             lastProjectPath = resolved?.path
         } catch {
+            guard self.client === client else { await client.stop(); return }
             failedResumeSessionID = sessionID
-            state = .failed(error.localizedDescription)
             await vm.recordACPFailure(error, client: client)
+            // `stop()` resets `state` to `.idle`, which used to wipe the
+            // failure overlay (and its Retry) the instant it appeared —
+            // stop first, then say what failed.
             await stop()
+            state = .failed(error.localizedDescription)
         }
     }
 

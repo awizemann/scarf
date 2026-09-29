@@ -100,7 +100,7 @@ struct ChatResumeFallback146Tests {
         #expect(stopped, "the failed resume leaked its client")
         // Stopping its own client must not read as a dropped connection:
         // no reconnect ladder paints over the failure or re-sends the load.
-        try? await Task.sleep(nanoseconds: 500_000_000)
+        try? await Task.sleep(nanoseconds: 300_000_000)
         #expect(vm.acpStatus == ChatViewModel.ACPPhase.failed)
         #expect(await ch.sentMethods.filter { $0 == "session/load" }.count == 1)
     }

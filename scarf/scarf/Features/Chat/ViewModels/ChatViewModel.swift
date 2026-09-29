@@ -1534,6 +1534,17 @@ final class ChatViewModel {
                 sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
                 releaseHeldSends(for: client, turnAlreadyRunning: true)
             } catch {
+                // The process died while reopening a session: that is a
+                // dropped connection, and the reconnect ladder (load-only,
+                // carries the held sends) is the recovery — hand over now
+                // rather than racing the event loop's EOF for it. Pre-#146
+                // the catch-all `session/new` attempt's extra hop happened
+                // to let the EOF win.
+                if sessionToResume != nil, acpClient === client,
+                   startStillCurrent(intent, client: nil),
+                   handOffDeadStartToReconnect(after: error) {
+                    return
+                }
                 // Superseded start (a newer click, or the watchdog):
                 // the newer path owns the shared state — just make
                 // sure this attempt's spawn doesn't leak.
@@ -1542,7 +1553,7 @@ final class ChatViewModel {
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
                 disarmStartWatchdog()
-                stopWatchingFailedStart()
+                stopWatchingFailedStart(after: error)
                 await recordACPFailure(error, client: client, context: "Auto-start ACP failed")
                 // Stop the client even though start failed — a spawn
                 // that got as far as opening the channel would
@@ -2514,7 +2525,7 @@ final class ChatViewModel {
                 acpStatus = ACPPhase.failed
                 isStartingSession = false
                 disarmStartWatchdog()
-                stopWatchingFailedStart()
+                stopWatchingFailedStart(after: error)
                 await recordACPFailure(error, client: client, context: "Failed to start ACP session")
                 // Stop the client even though start failed — pre-fix
                 // this path leaked the spawned `hermes acp` process
@@ -2624,7 +2635,24 @@ final class ChatViewModel {
     /// as a dropped connection, and `handleConnectionDied` would overwrite
     /// the failure with a reconnect ladder that re-sends the same failing
     /// load (#146 — the error must surface, with its retry).
-    private func stopWatchingFailedStart() {
+    ///
+    /// Not when the process itself died: that EOF IS a dropped connection,
+    /// and the reconnect ladder is the recovery that carries held sends
+    /// over (ChatReconnectHoldR17Tests).
+    /// A resume whose `hermes acp` died mid-start (`processTerminated`):
+    /// end the start and run the connection-died path, whose reconnect
+    /// ladder reloads the same session and carries held sends. True when
+    /// handed over.
+    private func handOffDeadStartToReconnect(after error: Error) -> Bool {
+        guard case ACPClientError.processTerminated = error else { return false }
+        isStartingSession = false
+        disarmStartWatchdog()
+        handleConnectionDied()
+        return true
+    }
+
+    private func stopWatchingFailedStart(after error: Error) {
+        if case ACPClientError.processTerminated = error { return }
         acpEventTask?.cancel()
         acpEventTask = nil
         healthMonitorTask?.cancel()
