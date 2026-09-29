@@ -2,7 +2,7 @@
   "schemaVersion": 2,
   "id": "awizemann/template-author",
   "name": "Scarf Template Author",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Install this to give your agent a skill that scaffolds new Scarf projects — dashboards, optional configuration schemas, cron jobs, and AGENTS.md — from a short conversational interview. Scaffolded projects are usable locally and cleanly exportable as .scarftemplate bundles.",
   "minScarfVersion": "2.2.0",
   "author": {
