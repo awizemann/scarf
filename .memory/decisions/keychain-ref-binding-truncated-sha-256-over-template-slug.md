@@ -3,12 +3,12 @@ title: Keychain ref binding: truncated SHA-256 over (template slug, project path
 type: note
 permalink: scarf/decisions/keychain-ref-binding-truncated-sha-256-over-template-slug
 tags: [security, keychain, templates, projects, migration]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectConfigKeychain.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/KeychainEnvMirror.swift, scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPTools.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectConfigKeychain.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LegacyKeychainRefMigrator.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/KeychainEnvMirror.swift, scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPTools.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: aa52c61e7884fb14e0e7c3c5b993e16136ded73f
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-27
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 
