@@ -42,13 +42,19 @@ public extension ACPClient {
     ///     `KeychainSSHKeyStore().load()` the app used to pass picks
     ///     the first-sorted key across ALL entries, which is the wrong
     ///     key on any device with more than one stored key (gh#133).
+    ///   - environmentHint: Scarf's `HERMES_ENVIRONMENT_HINT` (gh#142),
+    ///     composed on the remote with the user's own hint, never replacing
+    ///     it (see `EnvironmentHintComposer`). Nil = today's command.
     static func forIOSApp(
         context: ServerContext,
         projectCwd: String? = nil,
+        environmentHint: EnvironmentHintRequest? = nil,
         keyProvider: (@Sendable () async throws -> SSHKeyBundle)? = nil
     ) -> ACPClient {
         ACPClient(context: context) { ctx in
-            try await makeSSHExecChannel(for: ctx, projectCwd: projectCwd, keyProvider: keyProvider)
+            try await makeSSHExecChannel(
+                for: ctx, projectCwd: projectCwd, environmentHint: environmentHint,
+                keyProvider: keyProvider)
         }
     }
 
@@ -59,6 +65,7 @@ public extension ACPClient {
     nonisolated private static func makeSSHExecChannel(
         for context: ServerContext,
         projectCwd: String?,
+        environmentHint: EnvironmentHintRequest?,
         keyProvider: (@Sendable () async throws -> SSHKeyBundle)?
     ) async throws -> any ACPChannel {
         guard case .ssh(let sshConfig) = context.kind else {
@@ -80,7 +87,8 @@ public extension ACPClient {
         let command = CitadelServerTransport.viaPOSIXShell(buildACPCommand(
             hermesBinary: context.paths.hermesBinaryShellWord,
             home: context.paths.home,
-            projectCwd: projectCwd
+            projectCwd: projectCwd,
+            environmentHint: environmentHint
         ))
 
         return try await SSHExecACPChannel(
@@ -115,10 +123,17 @@ public extension ACPClient {
     /// failing the whole session. The path is quoted via
     /// `HermesProfileScope.shellQuotePath` so spaces survive and an
     /// injected `$()`/`;`/backtick in a hostile path is inert.
+    ///
+    /// `environmentHint` (gh#142) adds the
+    /// `EnvironmentHintComposer.remoteShellFragment` after the `cd` and
+    /// before the PATH/`exec` line, so the value exported by the exec
+    /// shell's environment is composed with Scarf's, not replaced. Nil (or a
+    /// blank Scarf hint) keeps the command byte-identical.
     static func buildACPCommand(
         hermesBinary: String,
         home: String,
-        projectCwd: String?
+        projectCwd: String?,
+        environmentHint: EnvironmentHintRequest? = nil
     ) -> String {
         // Scope the chat session to the selected profile's HERMES_HOME
         // (#120, Design B), so chat reads/writes the same profile the rest
@@ -137,7 +152,9 @@ public extension ACPClient {
         } else {
             cdPrefix = ""
         }
-        return "\(cdPrefix)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermesHome)exec \(hermesBinary) \(rootPin)acp"
+        let hintFragment = EnvironmentHintComposer.remoteShellFragment(
+            configHint: environmentHint?.configHint, scarfHint: environmentHint?.scarfHint)
+        return "\(cdPrefix)\(hintFragment)PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$HOME/.hermes/bin:$PATH\" \(hermesHome)exec \(hermesBinary) \(rootPin)acp"
     }
 
     /// Shared SSH connect flow — used by ACPClient and

@@ -680,7 +680,17 @@ public struct SSHTransport: ServerTransport {
     /// resolves to; the standard `~/.hermes` carries none (T6-F1). That is
     /// the only change this layer makes to the argv; non-hermes executables
     /// and argv that already carry `-p` pass through untouched.
-    func composedRemoteCommand(executable: String, args: [String], cwd: String? = nil) -> String {
+    ///
+    /// `environmentHint` (gh#142) puts
+    /// ``EnvironmentHintComposer/remoteShellFragment(configHint:scarfHint:)``
+    /// right before the assignment prefix (after any `cd`), so it runs after
+    /// the login profile and a hint the remote user exports there is
+    /// composed, not replaced. Nil (or a blank Scarf hint) leaves the command
+    /// byte-identical.
+    func composedRemoteCommand(
+        executable: String, args: [String], cwd: String? = nil,
+        environmentHint: EnvironmentHintRequest? = nil
+    ) -> String {
         let home = config.remoteHome ?? HermesPathSet.defaultRemoteHome
         let hermesHome = HermesProfileScope.hermesHomeShellAssignment(forHome: home)
         let args = HermesProfileScope.pinnedRemoteArguments(
@@ -704,7 +714,9 @@ public struct SSHTransport: ServerTransport {
         // A path Test Connection found is never a fragment, even with a
         // space in it: it is quoted as one word like any other token.
         let fragment = config.hermesBinaryHintFragment
-        var cmd = "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
+        let hintFragment = EnvironmentHintComposer.remoteShellFragment(
+            configHint: environmentHint?.configHint, scarfHint: environmentHint?.scarfHint)
+        var cmd = hintFragment + "COLUMNS=\(LocalTransport.wideColumns) " + hermesHome
             + ([executable] + args).map { token in
                 token == fragment ? token : Self.remotePathArg(token)
             }.joined(separator: " ")
@@ -734,9 +746,13 @@ public struct SSHTransport: ServerTransport {
     /// so they only matter when nothing on the shell's own PATH is `hermes`:
     /// a host where a lookup already worked keeps running the same binary,
     /// and a non-hermes executable is found exactly as before.
-    func remoteShellCommand(executable: String, args: [String], cwd: String? = nil) -> String {
+    func remoteShellCommand(
+        executable: String, args: [String], cwd: String? = nil,
+        environmentHint: EnvironmentHintRequest? = nil
+    ) -> String {
         HermesConfigReader.pathFallback + "; "
-            + composedRemoteCommand(executable: executable, args: args, cwd: cwd)
+            + composedRemoteCommand(
+                executable: executable, args: args, cwd: cwd, environmentHint: environmentHint)
     }
 
     public func runProcess(executable: String, args: [String], stdin: Data?, timeout: TimeInterval) throws -> ProcessResult {
@@ -756,6 +772,12 @@ public struct SSHTransport: ServerTransport {
     }
 
     public func makeProcess(executable: String, args: [String], cwd: String?) -> Process {
+        makeProcess(executable: executable, args: args, cwd: cwd, environmentHint: nil)
+    }
+
+    public func makeProcess(
+        executable: String, args: [String], cwd: String?, environmentHint: EnvironmentHintRequest?
+    ) -> Process {
         ensureControlDir()
         // `-T` disables pty allocation — critical for binary-clean stdin/stdout
         // (ACP JSON-RPC, log tail bytes). `bash -lc` (login shell) sources the
@@ -764,7 +786,8 @@ public struct SSHTransport: ServerTransport {
         // pipx-installed `hermes` isn't on PATH unless `hermesBinaryHint` was
         // set explicitly — exactly the failure that surfaces as a
         // "command not found" / opaque init timeout against fresh droplets.
-        let cmd = remoteShellCommand(executable: executable, args: args, cwd: cwd)
+        let cmd = remoteShellCommand(
+            executable: executable, args: args, cwd: cwd, environmentHint: environmentHint)
         var sshArgv = sshArgs()
         sshArgv.insert("-T", at: 0)
         sshArgv.append(hostSpec)

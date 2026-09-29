@@ -310,6 +310,14 @@ public enum HermesProfileScope {
         return base != HermesPathSet.defaultRemoteHome && base != "$HOME/.hermes"
     }
 
+    /// Single-quote an arbitrary string for a POSIX shell: always quoted
+    /// (even when empty), every byte literal, an embedded `'` written as
+    /// `'\''`. For free text such as an environment hint, not paths
+    /// (see ``shellQuotePath(_:)`` for `~` handling).
+    public static func shellSingleQuote(_ value: String) -> String {
+        "'" + value.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
     /// Quote a remote path for safe interpolation into a shell command.
     /// A leading `~`/`~/` becomes a live `$HOME` so the shell expands it,
     /// with the remainder escaped so `$HOME` still expands but injected
