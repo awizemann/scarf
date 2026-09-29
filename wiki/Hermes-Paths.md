@@ -50,7 +50,7 @@ These are written by Scarf, never by Hermes. Both clients (Mac + iOS) read and w
 | `<project>/.scarf/config.json` | Non-secret configuration values | Secrets are `keychain://...` URIs; resolved at use time. |
 | `<project>/.scarf/slash-commands/<name>.md` _(v2.5+)_ | Project-scoped slash commands | See [Slash Commands](Slash-Commands). |
 | `~/.hermes/scarf/nous_models_cache.json` _(v2.5.2+)_ | Cached Nous Portal model list (24h TTL) | Populated by `NousModelCatalogService` from `GET /v1/models`. Survives offline so the picker still has a model list to render. |
-| `<project>/AGENTS.md` (between `<!-- scarf-project:begin -->` markers) | Auto-managed project context block | Idempotent, secret-safe. See [Projects & Profiles](Projects-and-Profiles). |
+| `<project>/AGENTS.md` (between `<!-- scarf-project:begin -->` markers) | Auto-managed project context block — only on a pre-0.16 or unconfirmed Hermes host; a confirmed v0.16+ host gets a passed `HERMES_ENVIRONMENT_HINT` instead, and any existing block is stripped | Idempotent, secret-safe. See [Projects & Profiles](Projects-and-Profiles) and [Chat](Chat#project-context--your-agentsmd-in-project-chats-v215-mac-changes-on-hermes-v016-see-below). |
 
 ## ACP
 

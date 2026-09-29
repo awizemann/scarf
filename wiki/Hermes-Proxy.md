@@ -37,7 +37,7 @@ The view ([`HermesProxyView`](https://github.com/awizemann/scarf/blob/main/scarf
 
 **Log card** — Capped 200-line tail of the child's stderr (Hermes writes the startup banner + ongoing chatter to stderr; stdout is reserved for proxied request bodies). Auto-scrolls to the latest line. A Clear button surfaces when the buffer is non-empty so a fresh launch after a failure isn't cluttered with old output.
 
-**Help card** — Static usage hint: "Point any OpenAI-compatible client at the endpoint above." with a sign-in suggestion (`hermes login <provider>`) if the adapter reports not authenticated.
+**Help card** — Static usage hint: "Point any OpenAI-compatible client at the endpoint above." with a sign-in suggestion (`hermes auth add nous`, or `hermes auth add xai-oauth --type oauth` for xAI — the hint Hermes itself prints) if the adapter reports not authenticated.
 
 ## What runs under the hood
 
@@ -67,7 +67,7 @@ When Hermes bumps any of these, mirror the change in `HermesProxyService`'s stat
 
 ## Authentication
 
-The proxy doesn't auth requests — it auths the **upstream**. Sign in to the provider first via `hermes login <provider>` on the CLI (Scarf doesn't drive this from the panel in v2.9 because the OAuth flow is interactive and varies per provider). The Help card surfaces this hint when the adapter reports not authenticated. v0.14 ships with `nous` only; future Hermes versions will add `claude-pro`, `chatgpt-pro`, `supergrok`, etc.
+The proxy doesn't auth requests — it auths the **upstream**. Sign in to the provider first via `hermes auth add <provider>` on the CLI (`hermes auth add xai-oauth --type oauth` for xAI; `hermes login` takes no provider argument) (Scarf doesn't drive this from the panel in v2.9 because the OAuth flow is interactive and varies per provider). The Help card surfaces this hint when the adapter reports not authenticated. v0.14 ships with `nous` only; future Hermes versions will add `claude-pro`, `chatgpt-pro`, `supergrok`, etc.
 
 ## Using the proxy
 

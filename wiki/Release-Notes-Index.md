@@ -2,7 +2,7 @@
 title: Release-Notes-Index
 type: note
 permalink: scarf-wiki/release-notes-index
-updated: 2026-09-26
+updated: 2026-09-29
 created: 2026-05-29
 ---
 
@@ -12,6 +12,7 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 
 | Version | Date | GitHub release | Notes file |
 |---|---|---|---|
+| **v3.5.0** | 2026-09-29 | [v3.5.0](https://github.com/awizemann/scarf/releases/tag/v3.5.0) | [`releases/v3.5.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.5.0/RELEASE_NOTES.md) |
 | **v3.4.0** | 2026-09-26 | [v3.4.0](https://github.com/awizemann/scarf/releases/tag/v3.4.0) | [`releases/v3.4.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.4.0/RELEASE_NOTES.md) |
 | **v3.3.0** | 2026-09-22 | [v3.3.0](https://github.com/awizemann/scarf/releases/tag/v3.3.0) | [`releases/v3.3.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.3.0/RELEASE_NOTES.md) |
 | **v3.2.0** | 2026-09-14 | [v3.2.0](https://github.com/awizemann/scarf/releases/tag/v3.2.0) | [`releases/v3.2.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.2.0/RELEASE_NOTES.md) |

@@ -52,7 +52,7 @@ Onboarding details:
 |---|---|
 | **Multi-server** | Configure as many Hermes hosts as you like. Soft Disconnect keeps credentials; Forget wipes a server end-to-end. |
 | **Dashboard** | Total sessions / messages / tool calls + a 25-session list with project badges. Filter by project. |
-| **Chat** | Streamed agent responses, tool-call disclosure groups, code blocks with horizontal scroll. Project-scoped chat picks a project from your registry, writes the same Scarf-managed `AGENTS.md` block as the Mac app, and spawns `hermes acp` with the project as the working directory. |
+| **Chat** | Streamed agent responses, tool-call disclosure groups, code blocks with horizontal scroll. Project-scoped chat picks a project from your registry and spawns `hermes acp` with the project as the working directory — on Hermes v0.16+ it passes an environment hint instead of writing a block (same gate and behavior as the Mac app, #142); on older/unconfirmed hosts it writes the same Scarf-managed `AGENTS.md` block as the Mac app. |
 | **Session resume** | Tap a row on the Dashboard → opens that session's transcript in Chat. CLI-started sessions hydrate from `state.db`; ACP sessions show an empty-state because Hermes doesn't persist ACP transcripts to the DB (same on Mac). |
 | **Memory** | Read + edit `MEMORY.md` and `USER.md`. The "Saved" pill survives keyboard dismissal; Revert undoes unsaved edits. |
 | **Cron** | List view of `~/.hermes/cron/jobs.json` with **human-readable schedules** ("Every 6 hours", "Weekdays at 09:00") and a relative next-run ("in 4 hours"). Read-only in v1 — editing comes later. |
@@ -91,11 +91,11 @@ Costs about **$0.05 per minute** of session time on that key. A session ends its
 Picking a project at the start of a chat tells the agent exactly which directory it's operating in. ScarfGo does the same handshake the Mac app does:
 
 1. SFTP-reads `~/.hermes/scarf/projects.json` for the project registry.
-2. On selection, SFTP-writes a managed block into `<project>/AGENTS.md` (between `<!-- scarf-project:begin -->` and `:end -->` markers — preserves anything outside).
+2. On selection, hands the project context to Hermes: on a confirmed Hermes v0.16+ host, as an `HERMES_ENVIRONMENT_HINT` environment variable on the `hermes acp` spawn (composed after any hint you already export or set as `agent.environment_hint`, and any existing managed block in the project's context files is stripped); on an older or unconfirmed host, by SFTP-writing a managed block into `<project>/AGENTS.md` (between `<!-- scarf-project:begin -->` and `:end -->` markers — preserves anything outside).
 3. Spawns `hermes acp` with `cwd = <project.path>`.
 4. After the session ID returns, records the attribution in `~/.hermes/scarf/session_project_map.json`.
 
-The block contains the project name, directory, dashboard path, configuration field names (never values — secrets stored in the Keychain are surfaced as field names only), and any cron jobs registered to the project. Hermes's startup context scan picks it up automatically. Ask a fresh chat _"what project am I in?"_ and the agent answers with the right name + path.
+On the hint path, the environment hint carries the project name, directory, Kanban tenant, and cron-attribution id — Hermes appends it straight to the system prompt. On the block path, the block contains the project name, directory, dashboard path, configuration field names (never values — secrets stored in the Keychain are surfaced as field names only), and any cron jobs registered to the project; Hermes's startup context scan picks it up automatically. Either way, ask a fresh chat _"what project am I in?"_ and the agent answers with the right name + path.
 
 If the SFTP write fails (permissions, disk full, network drop), ScarfGo surfaces a banner — "Project context not written — agent will proceed without it" — and starts the session anyway. The session works; it just doesn't have the augmented context.
 
