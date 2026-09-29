@@ -397,7 +397,7 @@ struct ProjectTemplateUninstaller: Sendable {
     }
 
     /// Lock cron names matched against the live `jobs.json`.
-    struct CronResolution {
+    nonisolated struct CronResolution {
         var toRemove: [(id: String, name: String)] = []
         var gone: [String] = []
         var unverified: [String] = []

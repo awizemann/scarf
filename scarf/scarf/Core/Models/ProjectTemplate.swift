@@ -371,7 +371,7 @@ nonisolated struct TemplateUninstallPlan: Sendable {
 /// job AND the files and secrets it pairs with), so "it didn't throw" is not
 /// "everything was removed" — these are the leftovers the success screen
 /// must name.
-struct TemplateUninstallOutcome: Sendable, Equatable {
+nonisolated struct TemplateUninstallOutcome: Sendable, Equatable {
     /// One plain sentence per leftover, e.g. a cron job still scheduled.
     var leftovers: [String] = []
     /// Whether the project folder is actually gone after the run — checked

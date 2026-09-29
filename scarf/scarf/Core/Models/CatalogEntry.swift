@@ -13,7 +13,7 @@ import os
 /// expressed as optionals here so a single-template typo on the
 /// website doesn't bring down the whole list — we drop the malformed
 /// entry and keep going (handled by the decoder in `CatalogService`).
-struct CatalogEntry: Codable, Sendable, Identifiable, Hashable {
+nonisolated struct CatalogEntry: Codable, Sendable, Identifiable, Hashable {
 
     // Hashable + Equatable conformance is identity-based on `id` —
     // `TemplateConfigSchema` only conforms to Equatable, so we can't
@@ -106,7 +106,7 @@ struct CatalogEntry: Codable, Sendable, Identifiable, Hashable {
 /// (missing `tags`, `author`, etc.) is dropped with a logged warning
 /// rather than failing the whole catalog decode. Honors the contract
 /// the per-entry doc-comment promises.
-struct Catalog: Codable, Sendable {
+nonisolated struct Catalog: Codable, Sendable {
     let schemaVersion: Int?
     let templates: [CatalogEntry]
 

@@ -609,7 +609,7 @@ final class SessionsViewModel {
     /// `session_id` is the subparser's only positional and `--yes` its only
     /// flag (`hermes_cli/subcommands/sessions.py:100-102` @ `v2026.9.7`),
     /// which is what makes `--` safe here.
-    static func deleteArgv(sessionId: String) -> [String] {
+    nonisolated static func deleteArgv(sessionId: String) -> [String] {
         ["sessions", "delete", "--yes", "--", sessionId]
     }
 
