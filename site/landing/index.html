@@ -135,7 +135,9 @@
         sidebar-driven app on Mac and a tab-based companion on iPhone. Scarf reads from
         <code>~/.hermes/state.db</code> directly (read-only), streams agent replies in real time
         over the Agent Client Protocol, and connects to remote Hermes installations through your
-        existing SSH config. There is no telemetry, no login, and no separate cloud service.
+        existing SSH config. There is no Scarf account and no companion cloud service. The Mac app
+        sends usage statistics (never chats, files, paths, or hostnames), on by default and
+        switchable off in Settings; ScarfGo sends none. See the <a href="https://awizemann.github.io/scarf/privacy/">privacy policy</a>.
       </p>
     </section>
 
@@ -445,7 +447,7 @@
         <details>
           <summary>Is Scarf open source?</summary>
           <div>
-            <p>Yes. Both Scarf and ScarfGo are <a href="https://github.com/awizemann/scarf/blob/main/LICENSE" rel="noopener">MIT licensed</a> and built from the same open repository at <a href="https://github.com/awizemann/scarf" rel="noopener">github.com/awizemann/scarf</a>. There are no closed-source components and no telemetry.</p>
+            <p>Yes. Both Scarf and ScarfGo are <a href="https://github.com/awizemann/scarf/blob/main/LICENSE" rel="noopener">MIT licensed</a> and built from the same open repository at <a href="https://github.com/awizemann/scarf" rel="noopener">github.com/awizemann/scarf</a>. There are no closed-source components — including the Mac app's opt-out usage analytics, whose event code is in the source.</p>
           </div>
         </details>
 
@@ -466,7 +468,7 @@
         <details>
           <summary>What data does Scarf collect?</summary>
           <div>
-            <p>None. Scarf has no telemetry, no analytics, no crash reporter, and no account system. The only outbound network connections are to GitHub Releases (when you check for updates via Sparkle), to remote Hermes hosts you explicitly add, and to Hermes's own model providers and MCP servers — all initiated by Hermes, not Scarf.</p>
+            <p>Usage statistics from the Mac app; ScarfGo sends the developer nothing. Scarf for macOS records events such as “chat session started” with short fixed labels, counts, and bucketed timings, plus device context such as macOS version, Mac model, and locale — never anything you typed or named, file paths, or hostnames. A random install ID, stored on your Mac, is sent only as a salted hash, so events are pseudonymous, not tied to you. On by default; turn it off in Settings → Advanced → Usage Analytics. There is no Scarf account and no crash upload, though ScarfGo TestFlight testers share crash reports with the developer through Apple. Live Voice (both apps, only when you start it) streams your microphone audio and recent chat messages directly to OpenAI, which also sees your IP address. Other connections include SSH to your Hermes hosts, Sparkle updates (GitHub), the template catalog and template downloads, Nous Portal's model list (with your Nous key), and URLs that dashboard widgets load. The <a href="https://awizemann.github.io/scarf/privacy/">privacy policy</a> has the full list.</p>
           </div>
         </details>
 
@@ -630,7 +632,7 @@
             "name": "Is Scarf open source?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. Both Scarf and ScarfGo are MIT licensed and built from the same open repository at github.com/awizemann/scarf. There are no closed-source components and no telemetry."
+              "text": "Yes. Both Scarf and ScarfGo are MIT licensed and built from the same open repository at github.com/awizemann/scarf. There are no closed-source components — including the Mac app's opt-out usage analytics, whose event code is in the source."
             }
           },
           {
@@ -654,7 +656,7 @@
             "name": "What data does Scarf collect?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "None. Scarf has no telemetry, no analytics, no crash reporter, and no account system. The only outbound network connections are to GitHub Releases (Sparkle update checks), remote Hermes hosts you explicitly add, and Hermes's own model providers and MCP servers — all initiated by Hermes, not Scarf."
+              "text": "Usage statistics from the Mac app; ScarfGo sends the developer nothing. Scarf for macOS records events such as “chat session started” with short fixed labels, counts, and bucketed timings, plus device context such as macOS version, Mac model, and locale — never anything you typed or named, file paths, or hostnames. A random install ID, stored on your Mac, is sent only as a salted hash, so events are pseudonymous, not tied to you. On by default; turn it off in Settings → Advanced → Usage Analytics. There is no Scarf account and no crash upload, though ScarfGo TestFlight testers share crash reports with the developer through Apple. Live Voice (both apps, only when you start it) streams your microphone audio and recent chat messages directly to OpenAI, which also sees your IP address. Other connections include SSH to your Hermes hosts, Sparkle updates (GitHub), the template catalog and template downloads, Nous Portal's model list (with your Nous key), and URLs that dashboard widgets load. The privacy policy has the full list."
             }
           },
           {

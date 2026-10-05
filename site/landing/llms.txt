@@ -2,7 +2,7 @@
 
 > Scarf is a native macOS and iOS GUI for the Hermes AI agent. It surfaces every part of a running Hermes installation — chat sessions, project workspaces, memory files, installed skills, MCP servers, cron jobs, messaging gateways, logs, and configuration — through a sidebar-driven Mac app and a tab-based iPhone companion called ScarfGo.
 
-Both apps are free, MIT licensed, and built from a single open repository. Scarf reads from `~/.hermes/state.db` directly (read-only) and streams agent replies in real time over the Agent Client Protocol. It connects to remote Hermes installations using the host's existing SSH config — no companion service, no telemetry, no account.
+Both apps are free, MIT licensed, and built from a single open repository. Scarf reads from `~/.hermes/state.db` directly (read-only) and streams agent replies in real time over the Agent Client Protocol. It connects to remote Hermes installations using the host's existing SSH config — no companion service, no Scarf account. Scarf for macOS sends pseudonymous usage statistics (on by default, opt out in Settings → Advanced → Usage Analytics); ScarfGo sends none. Privacy policy: https://awizemann.github.io/scarf/privacy/
 
 ## Quick facts
 
@@ -14,7 +14,7 @@ Both apps are free, MIT licensed, and built from a single open repository. Scarf
 - **Mac download:** https://github.com/awizemann/scarf/releases/latest
 - **iOS download:** https://apps.apple.com/us/app/scarfgo/id6763763341 (App Store, free) — beta builds: https://testflight.apple.com/join/qCrRpcTz (public TestFlight)
 - **Auto-updates (Mac):** Sparkle, with EdDSA signature verification
-- **Telemetry:** none
+- **Telemetry:** Mac app sends content-free usage statistics to api.swiftstats.co (salted-hash install ID; on by default; opt out in Settings → Advanced → Usage Analytics). ScarfGo sends none. No crash-report upload (ScarfGo TestFlight testers share crash reports via Apple). Live Voice, when started, streams mic audio and recent chat messages to OpenAI. Details: https://awizemann.github.io/scarf/privacy/
 
 ## Documentation
 
