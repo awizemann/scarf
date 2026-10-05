@@ -16,7 +16,7 @@ Scarf is an Xcode project written in Swift 6. Both the macOS app and iOS app liv
 ## Prerequisites
 
 - **Xcode 16.0+** (Xcode 16 or later; earlier versions don't support Swift 6 strict concurrency).
-- **macOS 14.6+** (to run the built app).
+- **macOS 15+** (to run the built app).
 - **Hermes installed** at `~/.hermes/` (for the local server window on first launch).
 - **Git** (to clone the repo).
 
@@ -182,7 +182,7 @@ To debug a remote (SSH) context:
 
 ### "Hermes not running" on first launch
 
-Scarf's local window is automatic but expects `~/.hermes/state.db` and the `hermes` binary to exist. If you see "Hermes is not running" on the Dashboard, install Hermes first per the [Hermes README](https://github.com/hermes-ai/hermes-agent).
+Scarf's local window is automatic but expects `~/.hermes/state.db` and the `hermes` binary to exist. If you see "Hermes is not running" on the Dashboard, install Hermes first per the [Hermes README](https://github.com/NousResearch/hermes-agent).
 
 ### Xcode build fails with "unknown error"
 

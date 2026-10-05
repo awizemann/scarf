@@ -3,7 +3,7 @@ title: ScarfGo-Onboarding
 type: note
 permalink: scarf-wiki/scarf-go-onboarding
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-10-05
 ---
 
 # ScarfGo Onboarding & SSH Keys
@@ -12,7 +12,7 @@ ScarfGo connects to a Hermes server you operate over SSH. There's no Scarf-contr
 
 ## What you'll need
 
-- An iPhone running iOS 18 or later.
+- An iPhone running iOS 18.6 or later.
 - A Hermes-running host you can reach over SSH from your phone's network. Mac, a Linux box at home, a Tailscale node, a cloud VM — anything that `ssh user@host` works against from a regular machine.
 - The host running Hermes v0.10.0 or later (v0.11.0 recommended for full v2.5 feature parity — see [Hermes Version Compatibility](Hermes-Version-Compatibility)).
 - A way to paste a single line of text into a file on that host. Usually `ssh user@host` from another machine and editing `~/.ssh/authorized_keys`. If you're already running [Scarf](Home) on Mac, you have this.
@@ -131,13 +131,15 @@ The public key you copied into `authorized_keys` doesn't match what ScarfGo is o
 - **You appended after a line without a trailing newline.** `cat >>` should add the newline; if you used a text editor and saved without a final newline, the new line gets glued to the old one. Fix with `echo "" >> ~/.ssh/authorized_keys` then re-paste.
 - **The host's `sshd` config disabled key auth.** Run `sshd -T 2>/dev/null | grep pubkeyauth` — should be `yes`.
 
-### "Host key verification failed"
+### Host key checks
 
-ScarfGo strict-checks SSH host keys. If the host's key changed (new install, MITM unlikely but possible), use **Servers → Forget this server** and re-onboard — Citadel will accept the new host key on first connect.
+ScarfGo checks SSH host keys the way Scarf on the Mac does. The first time it connects to a host and port, it saves the server's host key without asking (servers you paired before this check existed are saved on their next connect). After that, every connection must present the same key. You can see the saved fingerprint under **System → Host key**.
+
+If the server presents a different key, ScarfGo refuses to connect and says **Server identity changed**, with the saved (trusted) and presented fingerprints in OpenSSH's `SHA256:…` form. That's expected after reinstalling the server or regenerating its SSH host keys; otherwise someone may be intercepting the connection. To check, run `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` on the host and compare. If it matches, open the server's **System** tab, tap **Trust New Key**, and confirm: the new key is saved and connections resume. Forgetting a server deletes its saved key unless another server entry uses the same host and port. See the [Privacy Policy](Privacy-Policy) security section.
 
 ### Onboarding succeeds but Dashboard shows zero sessions
 
-ScarfGo downloads a snapshot of `~/.hermes/state.db` over SFTP. If your Hermes install hasn't yet written the DB (no sessions ever started), the snapshot is empty. Start a session via the Mac app or `hermes chat` first, then pull-to-refresh the Dashboard.
+ScarfGo reads `~/.hermes/state.db` on the host with read-only `sqlite3` queries over SSH. If your Hermes install hasn't yet written the DB (no sessions ever started), there's nothing to show. Start a session via the Mac app or `hermes chat` first, then pull-to-refresh the Dashboard.
 
 ### "Memory says 'Save failed' silently"
 
@@ -150,8 +152,8 @@ Cancelling Face ID or the device passcode prompt no longer drops you back into o
 ## Privacy and key handling — quick recap
 
 - **iCloud sync is opt-in (v2.5.1+).** Default is device-local — keys are marked `ThisDeviceOnly` and excluded from iCloud Keychain unless you enable the System → Security toggle. With it on, the key syncs end-to-end encrypted via iCloud Keychain (Advanced Data Protection makes the encryption keys client-side only).
-- **No cloud accounts.** Scarf has no developer-controlled server. Your iPhone connects directly to your Hermes host over SSH.
-- **No analytics.** ScarfGo doesn't transmit any data to any third party.
+- **No cloud accounts.** ScarfGo talks to no developer-controlled server. Your iPhone connects directly to your Hermes host over SSH.
+- **No analytics.** ScarfGo sends nothing to the developer. The one feature that sends your data to a third party is Live Voice: once you start a session and agree, your voice streams directly from your iPhone to OpenAI, and recent chat messages (passed on by your Hermes host) and Hermes's replies go to OpenAI too. Dictation is transcribed on the phone. A project dashboard's web widget also loads the https page that project names.
 - **One key per device — unless you opt into sync.** Default behavior: adding a second device means a second `authorized_keys` line. With iCloud Keychain sync enabled, the same key appears on every signed-in Apple device with iCloud Keychain on, so a single `authorized_keys` line covers all of them.
 
 Full policy: [Privacy Policy](Privacy-Policy).

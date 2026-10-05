@@ -20,7 +20,7 @@ For the local server window to work, Hermes must be installed at `~/.hermes/` wi
 - `~/.hermes/config.yaml` — runtime config.
 - The `hermes` CLI on your `$PATH` (Scarf checks `~/.local/bin/hermes`, `/opt/homebrew/bin/hermes`, `/usr/local/bin/hermes`, and `~/.hermes/bin/hermes` as fallbacks).
 
-If `~/.hermes/` is missing or empty, the Dashboard will tell you so. Install Hermes first per the [Hermes README](https://github.com/hermes-ai/hermes-agent), then relaunch Scarf.
+If `~/.hermes/` is missing or empty, the Dashboard will tell you so. Install Hermes first per the [Hermes README](https://github.com/NousResearch/hermes-agent), then relaunch Scarf.
 
 ## What you'll see
 
@@ -35,7 +35,7 @@ Click any item to open it. Selection lives in `AppCoordinator` — see [Sidebar 
 
 ## Adding a remote server
 
-To open a window against a remote Hermes install, use **File → Open Server… → Add Server**. You'll need:
+To open a window against a remote Hermes install, use **File → Open Server → Manage Servers… → Add**. You'll need:
 
 - Hostname or alias (resolved via your `~/.ssh/config`)
 - Optional user, port, identity file, remote home, and Hermes binary hint

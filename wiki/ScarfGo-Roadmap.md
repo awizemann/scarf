@@ -19,7 +19,7 @@ ScarfGo is the on-the-go iPhone companion to [Scarf](Home). Its scope is deliber
 - **Transport:** pure-Swift SSH via [Citadel](https://github.com/orlandos-nl/Citadel) 0.12.x — no OpenSSH client subprocess (iOS sandbox).
 - **Shared core:** `ScarfCore` SPM package — Models / Transport / Services / ViewModels portable across macOS and iOS, unit-tested on Linux in CI.
 - **iOS-only code:** `ScarfIOS` package (Citadel glue, Keychain key storage) + `Scarf iOS/` SwiftUI views.
-- **Target:** iPhone-only, iOS 18+. v2.5 ships with `TARGETED_DEVICE_FAMILY = 1`, `SUPPORTS_MACCATALYST = NO`, `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO`, `SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO`. iPad and Catalyst flags are explicitly OFF until layout polish lands (M10+).
+- **Target:** iPhone-only, iOS 18.6+. v2.5 ships with `TARGETED_DEVICE_FAMILY = 1`, `SUPPORTS_MACCATALYST = NO`, `SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO`, `SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO`. iPad and Catalyst flags are explicitly OFF until layout polish lands (M10+).
 
 ## What's shipped today (M6)
 

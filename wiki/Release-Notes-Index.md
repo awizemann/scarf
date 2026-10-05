@@ -2,7 +2,7 @@
 title: Release-Notes-Index
 type: note
 permalink: scarf-wiki/release-notes-index
-updated: 2026-09-29
+updated: 2026-10-05
 created: 2026-05-29
 ---
 
@@ -12,6 +12,7 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 
 | Version | Date | GitHub release | Notes file |
 |---|---|---|---|
+| **v3.6.0** | 2026-10-05 | [v3.6.0](https://github.com/awizemann/scarf/releases/tag/v3.6.0) | [`releases/v3.6.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.6.0/RELEASE_NOTES.md) |
 | **v3.5.0** | 2026-09-29 | [v3.5.0](https://github.com/awizemann/scarf/releases/tag/v3.5.0) | [`releases/v3.5.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.5.0/RELEASE_NOTES.md) |
 | **v3.4.0** | 2026-09-26 | [v3.4.0](https://github.com/awizemann/scarf/releases/tag/v3.4.0) | [`releases/v3.4.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.4.0/RELEASE_NOTES.md) |
 | **v3.3.0** | 2026-09-22 | [v3.3.0](https://github.com/awizemann/scarf/releases/tag/v3.3.0) | [`releases/v3.3.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.3.0/RELEASE_NOTES.md) |
@@ -66,7 +67,8 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 | **v1.6.2** | 2026-04 | [v1.6.2](https://github.com/awizemann/scarf/releases/tag/v1.6.2) | [`releases/v1.6.2/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v1.6.2/RELEASE_NOTES.md) |
 | **v1.6.1** | 2026-04 | [v1.6.1](https://github.com/awizemann/scarf/releases/tag/v1.6.1) | [`releases/v1.6.1/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v1.6.1/RELEASE_NOTES.md) |
 | v1.6.0 | 2026-03 | [v1.6.0](https://github.com/awizemann/scarf/releases/tag/v1.6.0) | (no notes file) |
-| v1.5.x | 2026-03 | [releases](https://github.com/awizemann/scarf/releases?q=v1.5) | (no notes files) |
+| v1.5.x | 2026-04 | [releases](https://github.com/awizemann/scarf/releases?q=v1.5) | (no notes files) |
+| v1.0.0 – v1.4.0 | 2026-03-31 → 2026-04-04 | [v1.0.0](https://github.com/awizemann/scarf/releases/tag/v1.0.0), [v1.0.1](https://github.com/awizemann/scarf/releases/tag/v1.0.1), [v1.1.0](https://github.com/awizemann/scarf/releases/tag/v1.1.0), [v1.1.1](https://github.com/awizemann/scarf/releases/tag/v1.1.1), [v1.2.0](https://github.com/awizemann/scarf/releases/tag/v1.2.0), [v1.3.0](https://github.com/awizemann/scarf/releases/tag/v1.3.0), [v1.4.0](https://github.com/awizemann/scarf/releases/tag/v1.4.0) | (no notes files) |
 
 ## Highlights by major
 

@@ -2,15 +2,15 @@
 title: Home
 type: note
 permalink: scarf-wiki/home
-updated: 2026-09-26
+updated: 2026-10-05
 created: 2026-05-29
 ---
 
 # Scarf
 
-**The native Mac & iOS app for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
+**The native Mac & iOS app for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent).** Full visibility into what Hermes is doing, when, and what it creates — on your Mac against one local install or many remote ones, and from your iPhone over SSH with **ScarfGo**.
 
-**Latest release:** [v3.5.0](https://github.com/awizemann/scarf/releases/tag/v3.5.0) — **Audited end to end.** Three full audits against Hermes v0.21.5, the last covering all 664 source files, and more than 140 fixes. Editing **SOUL.md** can no longer wipe it; project chats no longer hide a project's own **CLAUDE.md / .cursorrules** behind a new AGENTS.md; long compacted chats show their full history; MCP blocklists, OAuth MCP servers, Server Backup/Restore and iPhone memory edits no longer lose or misreport data. A **Stop button** sits next to Send in chat and Bot Chat (⌘.); the model picker lists **only providers your Hermes can route**; platform forms show the value Hermes really uses when `.env` overrides config; gateway restarts wait for the current reply; remote servers on older Linux get full session lists. All earlier versions: [Release Notes Index](Release-Notes-Index).
+**Latest release:** [v3.6.0](https://github.com/awizemann/scarf/releases/tag/v3.6.0) — **Trust and readability.** **ScarfGo now verifies SSH host keys**: it remembers each server's key on first connect and refuses one that changes, showing both fingerprints and a **Trust New Key** step (before, it accepted any key; the Mac app always checked). Both apps got a **contrast pass** to WCAG AA: a deeper light-mode orange, dark text on orange buttons in dark mode, darker status text, and brick-red destructive actions. The **privacy policy and in-app text now match the code**, so Live Voice asks for consent once more (Hermes's replies and status lines also go to OpenAI) and the Mac's analytics are called "usage statistics", not "anonymous". Scarf has required **macOS 15** since v2.20.0, and the update feed now says so, so Sonoma Macs are no longer offered updates that can't open. All earlier versions: [Release Notes Index](Release-Notes-Index).
 
 **Mobile:** [Download ScarfGo on the App Store](https://apps.apple.com/us/app/scarfgo/id6763763341) — free. Prefer beta builds? [Join the public TestFlight](https://testflight.apple.com/join/qCrRpcTz). See [ScarfGo](ScarfGo) for the feature tour and [ScarfGo Onboarding](ScarfGo-Onboarding) for the one-minute SSH setup.
 
@@ -58,4 +58,4 @@ Scarf 2.0+ is a multi-window app — one window per Hermes server, local or remo
 Open-source (MIT), actively maintained. See [Roadmap](Roadmap) for what's coming.
 
 ---
-_Last updated: 2026-09-29 — Scarf 3.5.0 (three full Hermes v0.21.5 audits and 140+ fixes, Stop button, routable-only providers, file-safety fixes for SOUL.md and project context, honest platform settings)._
+_Last updated: 2026-10-05 — Scarf 3.6.0 (ScarfGo SSH host-key verification, WCAG AA contrast pass across both apps, privacy policy and Live Voice consent corrected to match the code, macOS 15 minimum in the update feed)._

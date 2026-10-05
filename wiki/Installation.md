@@ -12,7 +12,7 @@ updated: 2026-05-29
 
 ## System requirements
 
-- **macOS 14.6+ (Sonoma)** or newer.
+- **macOS 15+ (Sequoia)** or newer.
 - **Hermes** installed at `~/.hermes/` for the local server window. (Remote servers are reached over SSH and don't need anything on the Mac side beyond what's already there.)
 - Apple Silicon or Intel Mac (Universal binary). An ARM64-only build is also published if you want a smaller download.
 

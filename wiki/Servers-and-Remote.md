@@ -14,7 +14,7 @@ Scarf 2.0 is multi-server. Each Mac window binds to one Hermes install — your 
 
 ## Adding a remote server
 
-**File → Open Server… → Add Server.** Fill in:
+**File → Open Server → Manage Servers… → Add.** Fill in:
 
 | Field | Required? | Notes |
 |---|---|---|

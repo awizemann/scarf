@@ -2,13 +2,13 @@
 title: ScarfGo
 type: note
 permalink: scarf-wiki/scarf-go
-updated: 2026-07-14
+updated: 2026-10-05
 created: 2026-05-29
 ---
 
 # ScarfGo — iOS companion for Hermes
 
-ScarfGo is the iPhone companion to [Scarf](Home), the macOS GUI for the [Hermes AI agent](https://github.com/hermes-ai/hermes-agent). It connects from your phone to a Hermes server you operate (your Mac, a home Linux box, a cloud VM — anywhere reachable over SSH), and lets you run sessions, review memory, manage cron jobs, and resume conversations on the go.
+ScarfGo is the iPhone companion to [Scarf](Home), the macOS GUI for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent). It connects from your phone to a Hermes server you operate (your Mac, a home Linux box, a cloud VM — anywhere reachable over SSH), and lets you run sessions, review memory, manage cron jobs, and resume conversations on the go.
 
 > **Status:** Released on the **[App Store](https://apps.apple.com/us/app/scarfgo/id6763763341)** — free. A public TestFlight beta runs alongside it for early builds. See **[Installation](#installation)** below.
 
@@ -18,7 +18,7 @@ ScarfGo is a fully native iOS app — not a web view, not a remote desktop. It s
 
 ## System requirements
 
-- iPhone running **iOS 18.0** or later.
+- iPhone running **iOS 18.6** or later.
 - An **SSH-reachable Hermes host** running Hermes v0.10.0 or later. See [Hermes Version Compatibility](Hermes-Version-Compatibility).
 - Your iPhone needs to reach that host on the network — same Wi-Fi, VPN, Tailscale, port-forwarded public address, or anything else SSH can dial.
 - A spare second or two for onboarding to generate an SSH keypair.
@@ -80,7 +80,7 @@ Two ways to talk to Hermes from your phone, both next to the message composer.
 2. **Voice Chat Mode set to GPT-Live** — Settings tab → Voice on your phone, or Settings → Voice in the Mac app pointed at the same host (Hermes's default is Chained). It's a Hermes setting for the whole profile: it also switches voice in Hermes's own apps.
 3. **An OpenAI API key on the Hermes host** (`OPENAI_API_KEY` or `voice.gpt_live.api_key`) — the key stays on the host; ScarfGo never sees it.
 
-**What leaves your phone.** The Hermes host only sets up the session; your voice then streams **directly from your phone to OpenAI**, so OpenAI also sees your phone's network address. Each session also sends OpenAI recent messages from the chat as context (up to 24 messages, about 6,000 characters). Before the first session, ScarfGo shows a one-time consent that says this — **Cancel** starts nothing and bills nothing. Review or reset it in Settings → Live Voice Privacy.
+**What leaves your phone.** The Hermes host only sets up the session; your voice then streams **directly from your phone to OpenAI**, so OpenAI also sees your phone's network address. Each session also shares recent messages from the chat with OpenAI as context (up to 24 messages, about 6,000 characters); ScarfGo sends them to your Hermes host, which passes them on when it sets up the session. While the session is open, Hermes's replies and short status lines (such as which tool it's using) go to OpenAI too, so the voice can speak them. Before the first session, ScarfGo shows a one-time consent that says this — **Cancel** starts nothing and bills nothing. Review or reset it in Settings → Live Voice Privacy.
 
 Costs about **$0.05 per minute** of session time on that key. A session ends itself after a few minutes of silence, and ScarfGo also ends it if you background the app, switch chats or servers, dismiss the sheet, or lose the connection to Hermes — nothing keeps billing once you've stepped away. Dictation and Live Voice never hold the microphone at the same time; starting one stops the other. A spoken request never cancels something you typed: while Hermes is busy with a typed request, the voice tells you so and the composer shows why, and it waits for your next request once that turn is done.
 
@@ -141,7 +141,7 @@ A: Yes — anywhere reachable over SSH. Tailscale, port forwarding, a VPS, anyth
 A: Two reasons that need to land together: (1) the Push Notifications capability requires Apple Developer Program enrollment + an APNs auth key, (2) Hermes needs a server-side push sender to actually emit pushes. The iOS skeleton ships ready; flipping it on is one app update + one Hermes update.
 
 **Q: Is my data sent to anyone?**
-A: Only what you choose to send. See the [privacy policy](https://awizemann.github.io/scarf/privacy/). Normally the apps make exactly three kinds of network connections: (1) SSH to your Hermes hosts, (2) Sparkle update checks (Mac only), (3) HTTPS to GitHub Pages for the public template catalog. Zero analytics on ScarfGo. The one deliberate exception is a [Live Voice](#voice) session, which you start yourself after a one-time consent: while it's open, your voice streams directly from your phone to OpenAI (your Hermes server only sets up the session and its OpenAI key pays for it), and recent chat messages go along as context. Push-to-talk dictation never leaves the device — it's transcribed on-device or not at all.
+A: Only what you choose to send. See the [privacy policy](https://awizemann.github.io/scarf/privacy/). ScarfGo normally connects only to your Hermes hosts, over SSH; the full list for both apps is in the policy. Zero analytics on ScarfGo. The one deliberate exception is a [Live Voice](#voice) session, which you start yourself after a one-time consent: while it's open, your voice streams directly from your phone to OpenAI (your Hermes server only sets up the session and its OpenAI key pays for it), and recent chat messages (passed on by your Hermes host when it sets up the session) and Hermes's replies go to OpenAI too. Separately, a project dashboard's web widget, if a project has one, loads the https page it names. Push-to-talk dictation never leaves the device — it's transcribed on-device or not at all.
 
 **Q: Where can I see what's planned next?**
 A: [ScarfGo Roadmap](ScarfGo-Roadmap) tracks shipped milestones (M6 / M7 / M8 / M9) and remaining work. The [main Roadmap](Roadmap) covers cross-platform plans.
