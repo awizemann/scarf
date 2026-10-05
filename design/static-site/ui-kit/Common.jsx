@@ -40,8 +40,11 @@ function Btn({ kind = 'secondary', size = 'md', icon, iconRight, children, onCli
     primary:   { background: 'var(--accent)', color: 'var(--on-accent)', border: '1px solid transparent', shadow: '0 1px 0 rgba(0,0,0,0.08), inset 0 1px 0 rgba(255,255,255,0.18)' },
     secondary: { background: 'var(--bg-card)', color: 'var(--fg)', border: '1px solid var(--border-strong)', shadow: 'var(--shadow-sm)' },
     ghost:     { background: 'transparent', color: 'var(--fg)', border: '1px solid transparent' },
-    danger:    { background: 'var(--bg-card)', color: 'var(--red-600)', border: '1px solid var(--red-500)' },
-    'danger-solid': { background: 'var(--red-500)', color: '#fff', border: '1px solid transparent' },
+    // Outline danger: --danger text/border (AA on the card in both themes); its hover
+    // is the status pair, --danger on --danger-tint (a light pastel would put the
+    // dark theme's --danger on near-white).
+    danger:    { background: 'var(--bg-card)', color: 'var(--danger)', border: '1px solid var(--danger)' },
+    'danger-solid': { background: 'var(--danger-fill)', color: 'var(--on-danger)', border: '1px solid transparent' },
     accent:    { background: 'var(--accent-tint)', color: 'var(--accent-active)', border: '1px solid transparent' },
   };
   const s = sizes[size];
@@ -52,9 +55,10 @@ function Btn({ kind = 'secondary', size = 'md', icon, iconRight, children, onCli
     primary:   { background: 'var(--accent-hover)' },
     secondary: { background: 'var(--gray-50)', borderColor: 'var(--accent)' },
     ghost:     { background: 'var(--bg-quaternary)' },
-    danger:    { background: 'var(--red-100)' },
-    'danger-solid': { background: 'var(--red-600)' },
-    accent:    { background: 'var(--accent-tint-strong)' },
+    danger:    { background: 'var(--danger-tint)', color: 'var(--danger)' },
+    'danger-solid': { filter: 'brightness(0.88)' },
+    // Only --accent-hover clears AA on the strong tint (dark --accent-active is 3.3-3.8:1).
+    accent:    { background: 'var(--accent-tint-strong)', color: 'var(--accent-hover)' },
   }[kind] : {};
 
   return (
@@ -112,12 +116,13 @@ function Spinner({ size = 14, color = 'currentColor' }) {
 function Pill({ tone = 'gray', dot, icon, children, size = 'md' }) {
   const tones = {
     gray:    { bg: 'var(--bg-quaternary)', fg: 'var(--fg-muted)', dotc: 'var(--gray-500)' },
-    green:   { bg: 'var(--green-100)', fg: 'var(--green-600)', dotc: 'var(--green-500)' },
-    red:     { bg: 'var(--red-100)', fg: 'var(--red-600)', dotc: 'var(--red-500)' },
-    orange:  { bg: 'var(--orange-100)', fg: '#A8741F', dotc: 'var(--orange-500)' },
-    blue:    { bg: 'var(--blue-100)', fg: '#1F70A8', dotc: 'var(--blue-500)' },
+    // Status tones: --<kind>-text on --<kind>-tint, AA in both themes (ScarfBadgeKind).
+    green:   { bg: 'var(--success-tint)', fg: 'var(--success)', dotc: 'var(--green-500)' },
+    red:     { bg: 'var(--danger-tint)', fg: 'var(--danger)', dotc: 'var(--red-500)' },
+    orange:  { bg: 'var(--warning-tint)', fg: 'var(--warning)', dotc: 'var(--orange-500)' },
+    blue:    { bg: 'var(--info-tint)', fg: 'var(--info)', dotc: 'var(--blue-500)' },
     accent:  { bg: 'var(--accent-tint)', fg: 'var(--accent-active)', dotc: 'var(--accent)' },
-    amber:   { bg: 'var(--orange-100)', fg: '#A8741F', dotc: 'var(--orange-500)' },
+    amber:   { bg: 'var(--warning-tint)', fg: 'var(--warning)', dotc: 'var(--orange-500)' },
     purple:  { bg: '#EFE0F8', fg: '#5E4080', dotc: '#7E5BA9' },
     idle:    { bg: 'var(--bg-quaternary)', fg: 'var(--fg-faint)', dotc: 'var(--gray-400)' },
   };
@@ -208,13 +213,13 @@ function Field({ label, hint, error, help, children, required, inline }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 5,
         minWidth: inline ? 140 : 0 }}>
         <span style={{ fontSize: 13, color: 'var(--fg)', fontWeight: 500 }}>{label}</span>
-        {required && <span style={{ color: 'var(--red-500)', fontSize: 11 }}>*</span>}
+        {required && <span style={{ color: 'var(--danger)', fontSize: 11 }}>*</span>}
         {help && <HelpIcon text={help} />}
       </div>
       <div style={{ flex: inline ? 1 : 'none', display: 'flex', flexDirection: 'column', gap: 4 }}>
         {children}
         {error
-          ? <span style={{ fontSize: 11, color: 'var(--red-600)', display: 'flex', alignItems: 'center', gap: 4 }}>
+          ? <span style={{ fontSize: 11, color: 'var(--danger)', display: 'flex', alignItems: 'center', gap: 4 }}>
               <i data-lucide="alert-circle" style={{ width: 11, height: 11 }}></i>{error}
             </span>
           : hint && <span style={{ fontSize: 11, color: 'var(--fg-faint)' }}>{hint}</span>
@@ -333,8 +338,8 @@ function Checkbox({ checked, onChange, indeterminate, disabled }) {
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       transition: 'all 120ms', opacity: disabled ? 0.5 : 1,
     }}>
-      {checked && <i data-lucide="check" style={{ width: 12, height: 12, color: '#fff', strokeWidth: 3 }}></i>}
-      {indeterminate && !checked && <div style={{ width: 8, height: 2, background: '#fff', borderRadius: 1 }}></div>}
+      {checked && <i data-lucide="check" style={{ width: 12, height: 12, color: 'var(--on-accent)', strokeWidth: 3 }}></i>}
+      {indeterminate && !checked && <div style={{ width: 8, height: 2, background: 'var(--on-accent)', borderRadius: 1 }}></div>}
     </div>
   );
 }
@@ -478,8 +483,8 @@ function MenuItem({ icon, label, kbd, onClick, danger, selected, children }) {
       style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '6px 10px',
         borderRadius: 6, cursor: 'pointer', fontSize: 13,
-        background: hover ? 'var(--accent-tint)' : 'transparent',
-        color: danger ? 'var(--red-600)' : (hover ? 'var(--accent-active)' : 'var(--fg)'),
+        background: hover ? (danger ? 'var(--danger-tint)' : 'var(--accent-tint)') : 'transparent',
+        color: danger ? 'var(--danger)' : (hover ? 'var(--accent-active)' : 'var(--fg)'),
       }}>
       {icon && <i data-lucide={icon} style={{ width: 14, height: 14 }}></i>}
       <span style={{ flex: 1 }}>{label || children}</span>
@@ -503,7 +508,9 @@ function Avatar({ initials, size = 28, color = 'var(--accent)' }) {
   return (
     <div style={{
       width: size, height: size, borderRadius: '50%', background: color,
-      color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      // Text on the default accent fill takes --on-accent (dark text in dark mode).
+      color: color === 'var(--accent)' ? 'var(--on-accent)' : '#fff',
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       fontSize: Math.round(size * 0.4), fontWeight: 600, flexShrink: 0,
     }}>{initials}</div>
   );

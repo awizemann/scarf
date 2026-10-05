@@ -106,12 +106,12 @@ function MCPDetail({ server }) {
 
       {server.error && (
         <div style={{
-          background: 'var(--red-100)', border: '0.5px solid var(--red-500)',
+          background: 'var(--danger-tint)', border: '0.5px solid var(--danger)',
           borderRadius: 9, padding: 12, marginBottom: 20, display: 'flex', gap: 10, alignItems: 'flex-start',
         }}>
-          <i data-lucide="alert-triangle" style={{ width: 16, height: 16, color: 'var(--red-500)', flexShrink: 0, marginTop: 1 }}></i>
+          <i data-lucide="alert-triangle" style={{ width: 16, height: 16, color: 'var(--danger)', flexShrink: 0, marginTop: 1 }}></i>
           <div>
-            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--red-500)', marginBottom: 2 }}>Connection failed</div>
+            <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--danger)', marginBottom: 2 }}>Connection failed</div>
             <div style={{ fontSize: 12, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}>{server.error}</div>
           </div>
         </div>

@@ -42,3 +42,8 @@ body {
 .swatch .hex  { font-family: var(--font-mono); font-size: 10px; opacity: 0.85; }
 .swatch.dark-text { color: var(--gray-900); }
 .swatch.light-text { color: #fff; }
+/* Theme-aware swatches (var(--success) etc. flip light/dark): the page background as
+   the label passes on every text-safe token in both themes (5.6:1 and up). */
+.swatch.bg-text { color: var(--bg); }
+/* Fixed swatch label for the light amber steps (brand-300/400): brand-900 text. */
+.swatch.brand-dark-text { color: #3B1608; }

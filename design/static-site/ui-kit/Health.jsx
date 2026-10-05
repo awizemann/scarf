@@ -22,6 +22,11 @@ function Health() {
   const ok = HEALTH_CHECKS.filter(c => c.status === 'ok').length;
   const warn = HEALTH_CHECKS.filter(c => c.status === 'warn').length;
   const err = HEALTH_CHECKS.filter(c => c.status === 'error').length;
+  // Status tile fill + glyph per tone. Danger is --danger-fill / --on-danger;
+  // white on orange-500 is under 2:1, so the warning glyph is dark.
+  const tile = err > 0 ? { bg: 'var(--danger-fill)', fg: 'var(--on-danger)' }
+    : warn > 0 ? { bg: 'var(--orange-500)', fg: 'var(--gray-900)' }
+    : { bg: 'var(--green-600)', fg: '#fff' };
 
   function rerun() {
     setScanning(true);
@@ -47,8 +52,8 @@ function Health() {
         }}>
           <div style={{
             width: 38, height: 38, borderRadius: 9,
-            background: err > 0 ? 'var(--red-500)' : warn > 0 ? 'var(--orange-500)' : 'var(--green-500)',
-            color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: tile.bg, color: tile.fg,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}>
             <i data-lucide={err > 0 ? 'alert-octagon' : warn > 0 ? 'alert-triangle' : 'shield-check'} style={{ width: 20, height: 20 }}></i>
           </div>

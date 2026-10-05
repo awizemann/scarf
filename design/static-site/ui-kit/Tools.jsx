@@ -2,11 +2,12 @@
 // permission policy. Two-pane: list of tools (left), detail (right).
 
 const TOOL_KIND_TONES = {
-  read:    { color: 'var(--green-500)',       tint: 'var(--green-100)',  icon: 'book-open' },
-  edit:    { color: 'var(--blue-500)',        tint: 'var(--blue-100)',   icon: 'file-edit' },
-  execute: { color: 'var(--orange-500)',      tint: 'var(--orange-100)', icon: 'terminal' },
-  fetch:   { color: 'var(--purple-tool-500)', tint: '#EFE0F8',           icon: 'globe' },
-  browser: { color: 'var(--indigo-500)',      tint: '#E0E5F8',           icon: 'compass' },
+  // Text-safe kind colors on their tints (ScarfToolTone), AA in both themes.
+  read:    { color: 'var(--success)',     tint: 'var(--success-tint)',     icon: 'book-open' },
+  edit:    { color: 'var(--info)',        tint: 'var(--info-tint)',        icon: 'file-edit' },
+  execute: { color: 'var(--warning)',     tint: 'var(--warning-tint)',     icon: 'terminal' },
+  fetch:   { color: 'var(--tool-web)',    tint: 'var(--tool-web-tint)',    icon: 'globe' },
+  browser: { color: 'var(--tool-search)', tint: 'var(--tool-search-tint)', icon: 'compass' },
   mcp:     { color: 'var(--accent)',          tint: 'var(--accent-tint)',icon: 'server' },
 };
 

@@ -4,11 +4,11 @@
 // tool calls, file diffs, and a slash-command palette in the composer.
 
 const TOOL_TONES = {
-  read:    { color: 'var(--green-500)',       tint: 'var(--green-100)',  icon: 'book-open',  label: 'Read'    },
-  edit:    { color: 'var(--blue-500)',        tint: 'var(--blue-100)',   icon: 'file-edit',  label: 'Edit'    },
-  execute: { color: 'var(--orange-500)',      tint: 'var(--orange-100)', icon: 'terminal',   label: 'Execute' },
-  fetch:   { color: 'var(--purple-tool-500)', tint: '#EFE0F8',           icon: 'globe',      label: 'Fetch'   },
-  browser: { color: 'var(--indigo-500)',      tint: '#E0E5F8',           icon: 'compass',    label: 'Browser' },
+  read:    { color: 'var(--success)',    tint: 'var(--success-tint)', icon: 'book-open', label: 'Read'    },
+  edit:    { color: 'var(--info)',       tint: 'var(--info-tint)',    icon: 'file-edit', label: 'Edit'    },
+  execute: { color: 'var(--warning)',    tint: 'var(--warning-tint)', icon: 'terminal',  label: 'Execute' },
+  fetch:   { color: 'var(--tool-web)',        tint: 'var(--tool-web-tint)',    icon: 'globe',   label: 'Fetch'   },
+  browser: { color: 'var(--tool-search)',     tint: 'var(--tool-search-tint)', icon: 'compass', label: 'Browser' },
   search:  { color: 'var(--accent)',          tint: 'var(--accent-tint)',icon: 'search',     label: 'Search'  },
 };
 
@@ -120,7 +120,7 @@ function SessionRow({ s, active, onClick }) {
           whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.preview}</div>
         {s.unread > 0 && <span style={{
           fontSize: 9, fontWeight: 700, fontFamily: 'var(--font-mono)',
-          padding: '1px 5px', borderRadius: 999, background: 'var(--accent)', color: '#fff', minWidth: 14, textAlign: 'center',
+          padding: '1px 5px', borderRadius: 999, background: 'var(--accent)', color: 'var(--on-accent)', minWidth: 14, textAlign: 'center',
         }}>{s.unread}</span>}
       </div>
     </div>
@@ -244,7 +244,7 @@ function AssistantMsg({ time, tokens, model, inProgress, durationMs, children })
         <div style={{
           width: 26, height: 26, borderRadius: 7, marginTop: 2, flexShrink: 0,
           background: 'var(--gradient-brand)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--on-accent)',
           boxShadow: '0 1px 2px rgba(122, 46, 20, 0.25)',
         }}>
           <i data-lucide="sparkles" style={{ width: 14, height: 14 }}></i>
@@ -308,11 +308,11 @@ function MsgFooter() {
 function Reasoning({ tokens, preview, children }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div style={{ marginBottom: 8, background: 'var(--orange-100)', borderRadius: 7,
+    <div style={{ marginBottom: 8, background: 'var(--warning-tint)', borderRadius: 7,
       padding: '6px 10px', border: '0.5px solid rgba(240, 173, 78, 0.3)' }}>
       <div onClick={() => setOpen(!open)} style={{
         cursor: 'pointer', fontSize: 11, fontWeight: 600,
-        display: 'flex', alignItems: 'center', gap: 5, color: '#A8741F',
+        display: 'flex', alignItems: 'center', gap: 5, color: 'var(--warning)',
       }}>
         <i data-lucide="brain" style={{ width: 12, height: 12 }}></i>
         <span style={{ textTransform: 'uppercase', letterSpacing: '0.04em' }}>Reasoning</span>
@@ -421,12 +421,12 @@ function DiffPreview() {
       border: '0.5px solid var(--border)',
     }}>
       <div><span style={{ color: 'var(--fg-faint)', display: 'inline-block', width: 22 }}>3</span><span>  "schedule": "0 9 * * *",</span></div>
-      <div style={{ background: 'rgba(217, 83, 79, 0.10)' }}>
-        <span style={{ color: 'var(--red-600)', display: 'inline-block', width: 22 }}>-</span>
+      <div style={{ background: 'var(--danger-tint)' }}>
+        <span style={{ color: 'var(--danger)', display: 'inline-block', width: 22 }}>-</span>
         <span>  "timezone": "UTC",</span>
       </div>
-      <div style={{ background: 'rgba(42, 168, 118, 0.10)' }}>
-        <span style={{ color: 'var(--green-600)', display: 'inline-block', width: 22 }}>+</span>
+      <div style={{ background: 'var(--success-tint)' }}>
+        <span style={{ color: 'var(--success)', display: 'inline-block', width: 22 }}>+</span>
         <span>  "timezone": "America/New_York",</span>
       </div>
       <div><span style={{ color: 'var(--fg-faint)', display: 'inline-block', width: 22 }}>5</span><span>  "enabled": true</span></div>
@@ -541,7 +541,7 @@ function Composer({ open, setOpen }) {
           </span>
           <button style={{
             width: 30, height: 30, borderRadius: 8, background: 'var(--accent)',
-            color: '#fff', border: 'none', cursor: 'pointer',
+            color: 'var(--on-accent)', border: 'none', cursor: 'pointer',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             boxShadow: '0 1px 2px rgba(122, 46, 20, 0.3)',
           }}>
@@ -653,11 +653,11 @@ function InspectorDetails({ data, t }) {
     <div>
       <Section title="Status">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-          background: 'var(--green-100)', borderRadius: 7,
+          background: 'var(--success-tint)', borderRadius: 7,
           border: '0.5px solid rgba(42, 168, 118, 0.25)' }}>
-          <i data-lucide="check-circle-2" style={{ width: 16, height: 16, color: 'var(--green-600)' }}></i>
+          <i data-lucide="check-circle-2" style={{ width: 16, height: 16, color: 'var(--success)' }}></i>
           <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--green-600)' }}>Completed</div>
+            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--success)' }}>Completed</div>
             <div style={{ fontSize: 11, color: 'var(--fg-muted)' }}>Exit 0 · No errors</div>
           </div>
         </div>
@@ -678,14 +678,14 @@ function InspectorDetails({ data, t }) {
           <KV k="Started"   v={data.startedAt} mono />
           <KV k="Duration"  v={data.duration} mono />
           <KV k="Tokens"    v={data.tokens.toLocaleString()} mono />
-          {data.exitCode != null && <KV k="Exit code" v={data.exitCode} mono color="var(--green-600)" />}
+          {data.exitCode != null && <KV k="Exit code" v={data.exitCode} mono color="var(--success)" />}
           {data.cwd && <KV k="CWD" v={data.cwd} mono />}
           {data.linesAdded != null && (
             <KV k="Diff" v={
               <span style={{ fontFamily: 'var(--font-mono)' }}>
-                <span style={{ color: 'var(--green-600)' }}>+{data.linesAdded}</span>
+                <span style={{ color: 'var(--success)' }}>+{data.linesAdded}</span>
                 <span style={{ color: 'var(--fg-faint)' }}> / </span>
-                <span style={{ color: 'var(--red-600)' }}>−{data.linesRemoved}</span>
+                <span style={{ color: 'var(--danger)' }}>−{data.linesRemoved}</span>
               </span>
             } />
           )}

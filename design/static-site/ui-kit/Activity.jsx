@@ -25,10 +25,10 @@ const ACTIVITY_GROUPS = [
 
 const ACT_TONES = {
   accent: { bg: 'var(--accent-tint)', fg: 'var(--accent)' },
-  green:  { bg: 'var(--green-100)', fg: 'var(--green-600)' },
-  blue:   { bg: 'var(--blue-100)', fg: 'var(--blue-500)' },
-  amber:  { bg: 'var(--orange-100)', fg: 'var(--orange-500)' },
-  red:    { bg: 'var(--red-100)', fg: 'var(--red-500)' },
+  green:  { bg: 'var(--success-tint)', fg: 'var(--success)' },
+  blue:   { bg: 'var(--info-tint)', fg: 'var(--info)' },
+  amber:  { bg: 'var(--warning-tint)', fg: 'var(--warning)' },
+  red:    { bg: 'var(--danger-tint)', fg: 'var(--danger)' },
 };
 
 function Activity() {

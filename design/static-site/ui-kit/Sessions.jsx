@@ -63,7 +63,7 @@ function Sessions() {
             padding: '4px 11px', borderRadius: 999, cursor: 'pointer', fontSize: 12,
             fontWeight: 500,
             background: filter === f.id ? 'var(--accent)' : 'var(--bg-quaternary)',
-            color: filter === f.id ? '#fff' : 'var(--fg)',
+            color: filter === f.id ? 'var(--on-accent)' : 'var(--fg)',
             display: 'flex', alignItems: 'center', gap: 5,
           }}>{f.label}<span style={{
             opacity: 0.7, fontFamily: 'var(--font-mono)',

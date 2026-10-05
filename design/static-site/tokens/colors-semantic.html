@@ -4,16 +4,17 @@
 <div class="card-root">
   <div class="label">Semantic · status &amp; feedback</div>
   <div class="row">
-    <div class="swatch light-text" style="background:#2AA876"><div class="name">success</div><div class="hex">#2AA876</div></div>
-    <div class="swatch light-text" style="background:#D9534F"><div class="name">danger</div><div class="hex">#D9534F</div></div>
-    <div class="swatch dark-text" style="background:#F0AD4E"><div class="name">warning</div><div class="hex">#F0AD4E</div></div>
-    <div class="swatch light-text" style="background:#3498DB"><div class="name">info</div><div class="hex">#3498DB</div></div>
+    <div class="swatch bg-text" style="background:var(--success)"><div class="name">success</div><div class="hex">#186D4C · dark #3DBE89</div></div>
+    <div class="swatch bg-text" style="background:var(--danger)"><div class="name">danger</div><div class="hex">#A33430 · dark #EA7F7B</div></div>
+    <div class="swatch bg-text" style="background:var(--warning)"><div class="name">warning</div><div class="hex">#8A5A12 · dark #F4BE71</div></div>
+    <div class="swatch bg-text" style="background:var(--info)"><div class="name">info</div><div class="hex">#1B6396 · dark #5BAFE3</div></div>
   </div>
+  <!-- Status text on its tint: --<kind> on --<kind>-tint (the lighter 500 hue), AA in both themes. -->
   <div class="row" style="gap:8px;margin-top:4px">
-    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:#D8F0E5;color:#1F7F5A;font-weight:600">● Running</span>
-    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:#F8DAD8;color:#B83C38;font-weight:600">● Error</span>
-    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:#FCEAD0;color:#A8741F;font-weight:600">● Reasoning</span>
-    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:#D8ECF8;color:#1F70A8;font-weight:600">● Model</span>
+    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:var(--success-tint);color:var(--success);font-weight:600">● Running</span>
+    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:var(--danger-tint);color:var(--danger);font-weight:600">● Error</span>
+    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:var(--warning-tint);color:var(--warning);font-weight:600">● Reasoning</span>
+    <span style="font-size:11px;padding:3px 9px;border-radius:999px;background:var(--info-tint);color:var(--info);font-weight:600">● Model</span>
   </div>
 </div>
 </body></html>

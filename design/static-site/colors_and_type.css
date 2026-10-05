@@ -16,7 +16,7 @@
   --brand-200: #EFC59E;   /* highlight stop in tri-gradient */
   --brand-300: #E89360;   /* gradient start */
   --brand-400: #D87844;
-  --brand-500: #C25A2A;   /* primary accent — Scarf Rust */
+  --brand-500: #C25A2A;   /* brand color — Scarf Rust (logo, gradients); UI accent is --accent */
   --brand-600: #A6481E;
   --brand-700: #7A2E14;   /* gradient end */
   --brand-800: #5C220F;
@@ -39,14 +39,18 @@
   /* ───── Semantic palette ───── */
   --green-500:  #2AA876;
   --green-600:  #1F7F5A;
+  --green-700:  #186D4C;   /* status text on a success tint (light) */
   --green-100:  #D8F0E5;
   --red-500:    #D9534F;
   --red-600:    #B83C38;
   --red-100:    #F8DAD8;
+  --red-700:    #A33430;   /* status text on a danger tint (light) */
   --orange-500: #F0AD4E;   /* reasoning / warning — distinct from brand rust */
   --orange-100: #FCEAD0;
+  --orange-700: #8A5A12;   /* status text on a warning tint (light) */
   --blue-500:   #3498DB;
   --blue-100:   #D8ECF8;
+  --blue-700:   #1B6396;   /* status text on an info tint (light) */
   --indigo-500: #5B6CD9;
   --purple-tool-500: #8E5BC9;
 
@@ -61,13 +65,46 @@
   --border:    rgba(45, 42, 37, 0.08);
   --border-strong: rgba(45, 42, 37, 0.14);
 
-  /* ───── Brand tokens (semantic) ───── */
-  --accent:        var(--brand-500);
-  --accent-hover:  var(--brand-600);
-  --accent-active: var(--brand-700);
-  --accent-tint:   rgba(194, 90, 42, 0.10);
-  --accent-tint-strong: rgba(194, 90, 42, 0.18);
+  /* ───── Brand tokens (semantic) ─────
+   * --brand-500 (Scarf Rust) is the BRAND color: logo, brand mark, gradients,
+   * decoration. The UI accent (buttons, links, tints, selection, accent text)
+   * sits one step darker in light mode so white labels and accent text clear
+   * WCAG AA (white on --brand-500 is only 4.4:1). Mirrors ScarfDesign's
+   * Accent/* + Foreground/OnAccent colorsets; tools/check-design-tokens.py
+   * fails on drift or on a contrast regression. */
+  --accent:        var(--brand-600);   /* white on it: 5.89:1 */
+  --accent-hover:  var(--brand-700);
+  --accent-active: var(--brand-800);
+  --accent-tint:   rgba(166, 72, 30, 0.10);
+  --accent-tint-strong: rgba(166, 72, 30, 0.18);
   --on-accent:     #FFFFFF;
+
+  /* ───── Status (semantic) ─────
+   * --success / --warning / --info / --danger are TEXT-safe: text, icons and dots
+   * on any surface and on their own --<kind>-tint (badges, pills, status strips).
+   * They sit on the 700 step in light (the 500s are under AA as text: orange-500
+   * is 1.9:1 on the page); each --<kind>-tint keeps the lighter 500/600 hue.
+   * A filled danger surface is --danger-fill + --on-danger (white on the dark
+   * --danger is under 3:1). Mirrors ScarfDesign's Semantic/*, Status/*Tint and
+   * Danger/* colorsets; tools/check-design-tokens.py guards drift + AA. */
+  --success:       var(--green-700);   /* 6.00:1 on --bg */
+  --warning:       var(--orange-700);  /* 5.63:1 */
+  --info:          var(--blue-700);    /* 6.11:1 */
+  --danger:        var(--red-700);     /* 6.46:1 */
+  --success-tint:  rgba(42, 168, 118, 0.16);
+  --warning-tint:  rgba(240, 173, 78, 0.18);
+  --info-tint:     rgba(52, 152, 219, 0.16);
+  --danger-tint:   rgba(184, 60, 56, 0.16);
+  --danger-fill:   var(--red-600);   /* white on it: 5.61:1 */
+  --on-danger:     #FFFFFF;
+
+  /* Tool kinds with no status equivalent (chat chips): text-safe like the
+   * status colors, on a tint of the lighter --purple-tool-500 / --indigo-500.
+   * Mirrors Tool/ToolWeb, ToolSearch and their *Tint colorsets. */
+  --tool-web:          #6E3FA6;
+  --tool-web-tint:     rgba(142, 91, 201, 0.16);
+  --tool-search:       #3F4FB8;
+  --tool-search-tint:  rgba(91, 108, 217, 0.16);
 
   /* ───── Type stacks ───── */
   --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
@@ -118,7 +155,7 @@
   --shadow-md: 0 1px 2px rgba(45, 42, 37, 0.04), 0 4px 12px rgba(45, 42, 37, 0.04);
   --shadow-lg: 0 2px 4px rgba(45, 42, 37, 0.06), 0 8px 24px rgba(45, 42, 37, 0.07);
   --shadow-xl: 0 4px 8px rgba(45, 42, 37, 0.08), 0 16px 40px rgba(45, 42, 37, 0.10);
-  --shadow-focus: 0 0 0 3px rgba(194, 90, 42, 0.28);
+  --shadow-focus: 0 0 0 3px rgba(166, 72, 30, 0.28);
 
   --gradient-brand: linear-gradient(135deg, #E89360 0%, #C25A2A 50%, #7A2E14 100%);
   --gradient-brand-soft: linear-gradient(135deg, #F6E0CB 0%, #EFC59E 100%);
@@ -143,8 +180,22 @@
   --accent:        #E89360;
   --accent-hover:  #F0A879;
   --accent-active: #D87844;
-  --accent-tint:   rgba(232, 147, 96, 0.14);
+  --accent-tint:   rgba(232, 147, 96, 0.10);
   --accent-tint-strong: rgba(232, 147, 96, 0.24);
+  --on-accent:     #3B1608;   /* brand-900 — white on the dark-mode accent is only 2.39:1 */
+  --danger:        #EA7F7B;   /* text/icons; fill + label stay --danger-fill / --on-danger */
+  --success:       #3DBE89;
+  --warning:       #F4BE71;
+  --info:          #5BAFE3;
+  --success-tint:  rgba(61, 190, 137, 0.16);
+  --warning-tint:  rgba(244, 190, 113, 0.18);
+  --info-tint:     rgba(91, 175, 227, 0.16);
+  --danger-tint:   rgba(227, 104, 100, 0.16);
+  --tool-web:          #B48FDC;
+  --tool-web-tint:     rgba(167, 126, 212, 0.16);
+  --tool-search:       #8C99E8;
+  --tool-search-tint:  rgba(126, 140, 227, 0.16);
+  --shadow-focus: 0 0 0 3px rgba(232, 147, 96, 0.28);
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 1px 2px rgba(0, 0, 0, 0.35), 0 4px 12px rgba(0, 0, 0, 0.35);
@@ -166,8 +217,22 @@
     --accent:        #E89360;
     --accent-hover:  #F0A879;
     --accent-active: #D87844;
-    --accent-tint:   rgba(232, 147, 96, 0.14);
+    --accent-tint:   rgba(232, 147, 96, 0.10);
     --accent-tint-strong: rgba(232, 147, 96, 0.24);
+    --on-accent:     #3B1608;   /* brand-900 */
+    --danger:        #EA7F7B;
+    --success:       #3DBE89;
+    --warning:       #F4BE71;
+    --info:          #5BAFE3;
+    --success-tint:  rgba(61, 190, 137, 0.16);
+    --warning-tint:  rgba(244, 190, 113, 0.18);
+    --info-tint:     rgba(91, 175, 227, 0.16);
+    --danger-tint:   rgba(227, 104, 100, 0.16);
+    --tool-web:          #B48FDC;
+    --tool-web-tint:     rgba(167, 126, 212, 0.16);
+    --tool-search:       #8C99E8;
+    --tool-search-tint:  rgba(126, 140, 227, 0.16);
+    --shadow-focus: 0 0 0 3px rgba(232, 147, 96, 0.28);
   }
 }
 
