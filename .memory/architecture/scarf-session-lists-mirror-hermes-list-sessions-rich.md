@@ -5,9 +5,11 @@ permalink: scarf/architecture/scarf-session-lists-mirror-hermes-list-sessions-ri
 tags: [sessions, state-db, hermes-parity, compression]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionPreviewSQL.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesSession.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-26
 updated: 2026-09-27
+reviewed: 2026-09-29
+reviewed_by: audit:claude-code (background)
 ---
 
 How Scarf decides which session rows a list shows and how a rotated compression chain appears, after the Hermes v0.21.5 audit R11 (S04, t-e5c479d1). Hermes refs @ v2026.9.24.

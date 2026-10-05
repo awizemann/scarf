@@ -2,12 +2,12 @@
 title: iOS session resume must fall back to newSession for non-ACP-persisted sessions
 type: note
 permalink: scarf/architecture/ios-session-resume-must-fall-back-to-newsession-for-non-acp
-source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/SessionResume.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Scarf iOS/Chat/ChatView.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-08-19
 updated: 2026-09-29
-reviewed: 2026-09-27
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 Scope note (2026-09-29, gh#146): despite the title, this now covers Mac AND ScarfGo. The shared logic lives in `scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/SessionResume.swift`; the notice names the raw `sessions.source` value (e.g. "cli", "telegram").

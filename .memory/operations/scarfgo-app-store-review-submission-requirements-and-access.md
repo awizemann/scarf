@@ -4,7 +4,7 @@ type: note
 permalink: scarf/operations/scarfgo-app-store-review-submission-requirements-and-access
 source_paths: [scarf/Scarf iOS/Info.plist, scarf/Scarf iOS/Scarf_iOS.entitlements, scarf/Scarf iOS/PrivacyInfo.xcprivacy, scarf/Scarf iOS/Onboarding/OnboardingRootView.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/ACPClient+iOS.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/SSHPrivateKeyDecoding.swift, scarf/scarf.xcodeproj/project.pbxproj]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-08-14
 updated: 2026-08-19
 reviewed: 2026-09-29

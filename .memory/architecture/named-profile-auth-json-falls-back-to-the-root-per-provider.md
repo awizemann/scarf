@@ -5,10 +5,10 @@ permalink: scarf/architecture/named-profile-auth-json-falls-back-to-the-root-per
 tags: [hermes, profiles, auth, capability-gating]
 source_paths: [scarf/scarf/Features/CredentialPools/ViewModels/CredentialPoolsViewModel.swift, scarf/scarf/Core/Services/NousSubscriptionService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/NousModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesAuthFallback.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-26
 updated: 2026-09-27
-reviewed: 2026-09-27
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

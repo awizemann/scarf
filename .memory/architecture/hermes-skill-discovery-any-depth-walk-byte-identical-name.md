@@ -5,7 +5,7 @@ permalink: scarf/architecture/hermes-skill-discovery-any-depth-walk-byte-identic
 tags: [skills, hermes, bootstrap, remote, r06]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SkillsScanner.swift, scarf/scarf/Core/Services/SkillBootstrapService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/SkillsViewModel.swift, scarf/scarf/Resources/BuiltinSkills.bundle, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-26
 updated: 2026-09-27
 reviewed: 2026-09-29

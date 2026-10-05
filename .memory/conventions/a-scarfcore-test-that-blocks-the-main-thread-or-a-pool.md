@@ -3,12 +3,12 @@ title: A ScarfCore test that blocks the main thread or a pool thread fails unrel
 type: note
 permalink: scarf/conventions/a-scarfcore-test-that-blocks-the-main-thread-or-a-pool
 tags: [testing, flake, concurrency, main-actor, cooperative-pool, scarfcore]
-source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesP55Tests.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/M1ACPTests.swift]
+source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesP55Tests.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/M1ACPTests.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/ShellTestRunner.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/KanbanChatBadgeStateTests.swift]
 source_paths_inferred: false
-source_sha: 18806e7c4dbac0ffd6ff7e91c12d27440d0a8cc5
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-18
 updated: 2026-09-21
-reviewed: 2026-09-19
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -6,7 +6,7 @@ source_paths: [scarf/scarf/Core/Services/Analytics.swift, scarf/scarf/Core/Servi
 source_paths_inferred: false
 source_sha: ad0ae4671d479a80f21bd3a621364348fc3743fd
 created: 2026-08-20
-updated: 2026-08-26
+updated: 2026-10-05
 reviewed: 2026-09-18
 reviewed_by: audit:claude-code (background)
 ---
@@ -50,3 +50,6 @@ Landed as commits 8d1c5dc, 7887687, 453465a, 9bc58c4, abdd0e7, e5d393a plus audi
 - relates_to [[ScarfGo iOS Companion App]]
 - relates_to [[Uninstall + keychain trust boundaries: re-derive at time-of-use (S1)]]
 - relates_to [[ScarfCore tests inject a temp Hermes home via ServerContext.local(home:)]]
+
+
+- [gotcha] Public copy must describe this as pseudonymous, not "no persistent identifier": every batch carries SHA256(install UUID + salt) plus device context (OS, Mac model, arch, locale/region). The UUID lives in the SDK's own defaults suite `com.wizemann.stats.com.scarf.app`, not com.scarf.app. Debug/dev builds send too (flagged isPreRelease), and the default Performance Diagnostics mode feeds perf_measure. The landing page and PRIVACY_POLICY.md (plus its wiki and gh-pages copies) were corrected 2026-10-05 (commit e8acbc4e). Any change to events, context, identity, or a new outbound connection must update the policy's lists in the same change. The policy now claims those lists are complete. Live Voice consent is versioned (VoiceDataRecipient.disclosureVersion, currently 2); bump it whenever what's sent to OpenAI changes. #privacy

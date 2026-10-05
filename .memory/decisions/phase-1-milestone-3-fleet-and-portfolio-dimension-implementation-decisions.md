@@ -52,10 +52,9 @@ reviewed_by: claude-opus-5
 - relates_to [[ScarfCore tests inject a temp Hermes home via ServerContext.local(home:)]]
 
 
-
 ## Round 5 (P50) — a fleet copy that drops a field owes a downgrade note
 
-- [decision] **A fleet-copied `pre_run_script` is a DOWNGRADE NOTE at the `copyableCronJobs` seam, not a silence** (round-5 decision 12, `39b888d1`). A `[proj:]` cron job that is not `no_agent` but carries a `script` was copied with the field dropped in silence — green "created", prompt intact, and no stdout injection ever again. `FleetApplyExecutor` counts `job.hasPreRunScript` at the copy seam (`:381`) and surfaces `preRunScriptDowngrades` (`:441`) in the outcome, the P42 shape: the job is still copied, and the user is told what did not come with it #fleet
+- [decision] **A fleet-copied `pre_run_script` is a DOWNGRADE NOTE at the `copyableCronJobs` seam, not a silence** (round-5 decision 12, `39b888d1`). Cron jobs that are not `no_agent` but carry a `script` — whether plain `[proj:<uuid>]` or template-installed `[tmpl:<id>] [proj:<uuid>]` (identified via `ProjectCronAttribution.namesProject()`) — are copied with the field dropped in silence: green "created", prompt intact, and no stdout injection ever again. `FleetApplyExecutor` counts `job.hasPreRunScript` at the copy seam (`:381`) and surfaces `preRunScriptDowngrades` (`:441`) in the outcome, the P42 shape: the job is still copied, and the user is told what did not come with it. #fleet
 - [convention] **A new `String(localized:)` in a file whose siblings all have catalogue rows is a missing localisation, and the gate is FILE-scoped.** P50b (`94c88e7f`) shipped the six locale rows plus `FleetApplyExecutorCatalogueP50bTests`: every `String(localized:)` in `FleetApplyExecutor.swift` must have a `Localizable.xcstrings` entry. A forward gate on the file beats remembering the rule #testing
 
 

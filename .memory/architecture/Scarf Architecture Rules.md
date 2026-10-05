@@ -8,7 +8,7 @@ source_paths: [scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/P
 source_paths_inferred: false
 source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
 created: 2026-05-29
-updated: 2026-05-29
+updated: 2026-10-05
 reviewed: 2026-09-11
 reviewed_by: claude-opus-5
 ---
@@ -23,7 +23,7 @@ reviewed_by: claude-opus-5
 - [data-access] Read-only access to ~/.hermes/state.db (WAL mode) — never write the SQLite DB. Scarf writes only to memory files (MEMORY.md, USER.md, SOUL.md), cron jobs.json, and config.yaml fragments #db #data
 - [code-quality] Zero-warning build required; no commented-out code, TODOs, or deferred functionality in PRs; one feature/fix per PR #quality
 - [structure] Xcode project uses PBXFileSystemSynchronizedRootGroup — files auto-discovered from disk, no manual project.pbxproj membership edits needed for new files #xcode
-- [platform] Build targets: macOS 14.6+ (Sonoma) for Scarf, iOS 18.0+ for ScarfGo, Swift 6 tools, Xcode 16.0+ #platform
+- [platform] Build targets: macOS 15.0+ (Sequoia) for Scarf, iOS 18.6+ for ScarfGo, Swift 6 tools, Xcode 16.0+ (source: MACOSX_/IPHONEOS_DEPLOYMENT_TARGET in project.pbxproj; Sparkle's sparkle:minimumSystemVersion in scripts/release.sh must match — it said 14.6 until 2026-10-05). ScarfCore/ScarfDesign packages declare lower floors (.macOS(.v14)/.iOS(.v18)); that's allowed, the app target is what users get. #platform
 
 ## Relations
 - implemented_by [[Scarf Project Layout]]

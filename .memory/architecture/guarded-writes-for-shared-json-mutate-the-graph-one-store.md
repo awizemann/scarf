@@ -5,10 +5,10 @@ permalink: scarf/architecture/guarded-writes-for-shared-json-mutate-the-graph-on
 tags: [guarded-write, dataloss, projects, architecture]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSidecarStore.swift, scarf/scarf/Core/Persistence/ServerRegistry.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/scarf/Core/Services/ProjectManifestStore.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppStore.swift, scarf/scarf/Core/Services/SkillBootstrapService.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-27
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

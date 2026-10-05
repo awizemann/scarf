@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-pairing-approve-revoke-refuse-at-exit-0-jud
 tags: [hermes, cli, gateway, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Features/Gateway/ViewModels/GatewayViewModel.swift, scarf/scarf/Features/Gateway/Views/GatewayView.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-10
 updated: 2026-09-10
-reviewed: 2026-09-26
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

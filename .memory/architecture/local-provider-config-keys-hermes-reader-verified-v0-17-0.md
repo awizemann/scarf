@@ -54,6 +54,7 @@ Reader-verified 2026-07-13 against the LIVE local Hermes install: **Hermes Agent
 ## Relations
 - relates_to [[Local model providers — what exists below the UI and what filters them out]]
 - relates_to [[Hermes v0.18 Compatibility Decisions]]
+- relates_to [[Hermes upstream submission pattern — clean issue/PR contract]]
 
 
 ## Observations
@@ -62,6 +63,8 @@ Reader-verified 2026-07-13 against the LIVE local Hermes install: **Hermes Agent
 - [fact] lmstudio works with zero config: default http://127.0.0.1:1234/v1, LM_BASE_URL env override, model.base_url honored only when model.provider==lmstudio (runtime_provider.py:1799-1803), auto key "dummy-lm-api-key" (auth.py:145), JIT model load via POST /api/v1/models/load (models.py:2993). #lmstudio
 - [fact] Named custom providers: `providers.<key>: {base_url, key_env?, default_model?, api_mode?}` (new) or `custom_providers:` list `{name, base_url, …}` (legacy); menu key `custom:<slug>`; resolved provider id is always the string "custom" (runtime_provider.py:504-658, 800-920). #custom
 - [fact] Ollama-style tags (llama3:8b) are safe verbatim; only hazard is slash-bearing model ids in simple `model.aliases` values, which split once on "/" as provider/model (model_switch.py:249-250). Gateway uses the same resolve_runtime_provider() — no extra keys (gateway/run.py:1790). #hazards
+- [decision] Write-plan ordering for local saves: clear → base_url/api_key/api_mode → model.default → model.provider LAST (crash-safe by construction; every prefix is a config state the runtime won't misinterpret). #write-plan
+- [gotcha] Runtime enforces 64K-token minimum context window at session init; models below raise ACP -32603. model.context_length override is a trap when the model's actual ceiling <64K. Unset with 0, never "" (empty string causes startup warning). #context-floor
 
 
 

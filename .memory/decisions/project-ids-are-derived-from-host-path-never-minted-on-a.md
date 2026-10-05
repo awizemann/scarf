@@ -5,10 +5,10 @@ permalink: scarf/decisions/project-ids-are-derived-from-host-path-never-minted-o
 tags: [projects, identity, phase-3, uuid, fleet, decision]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectIdentity.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/FleetService.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift]
 source_paths_inferred: false
-source_sha: c274e429308eb0a19bbfcae56761d89f056f9091
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-03
 updated: 2026-09-27
-reviewed: 2026-09-04
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 

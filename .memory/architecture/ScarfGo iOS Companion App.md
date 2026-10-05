@@ -5,11 +5,11 @@ permalink: scarf/architecture/scarf-go-i-os-companion-app
 tags: [ios, scarfgo, ssh]
 source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectEnvironmentHint.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-05-29
 updated: 2026-09-29
 reviewed: 2026-09-29
-reviewed_by: claude-sonnet-5
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

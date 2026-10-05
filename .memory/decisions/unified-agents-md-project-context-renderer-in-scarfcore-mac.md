@@ -24,7 +24,7 @@ Before: the Mac had a rich renderer (`ProjectAgentContextService.renderBlock`) w
 - `ProjectContextBlock` (ScarfCore): pure `renderManagedBlock` + shared formatters `configFieldsLine(fields:)` and `cronLines(from:projectId:templateId:)`. `renderMinimalBlock` DELETED.
 - `ProjectStore` (ScarfCore): `agentContextBlockInput(for:)` / `renderAgentContextBlock(for:)` gather inputs cross-platform via existing readers (`templateInfo`, `loadCronJobs`, `KanbanTenantReader`, `ProjectSlashCommandService`) + a new secret-safe `config.schema` projection. Works on Mac and over iOS SFTP.
 - Mac `ProjectAgentContextService.renderBlock` is now a thin delegate to `ProjectStore.renderAgentContextBlock`; its inline renderer + private helpers were removed. Rendered output is byte-identical to before (verified by diffing string literals — only variable spellings changed).
-- iOS `ChatController.writeProjectContextBlock(projectPath:projectName:)` shared helper, wired into BOTH the new-project-chat AND resume paths. Resume previously wrote NO block, so cron/config changes are now refreshed on every project-scoped start (matching the Mac's "rewrite on every project-scoped chat start").
+- iOS `ChatController.prepareProjectContext(projectPath:projectName:)` shared helper, wired into BOTH the new-project-chat AND resume paths. Resume previously wrote NO block, so cron/config changes are now refreshed on every project-scoped start (matching the Mac's "rewrite on every project-scoped chat start").
 
 ## Invariant going forward
 

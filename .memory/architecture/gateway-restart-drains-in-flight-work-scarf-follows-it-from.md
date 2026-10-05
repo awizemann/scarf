@@ -5,9 +5,11 @@ permalink: scarf/architecture/gateway-restart-drains-in-flight-work-scarf-follow
 tags: [hermes, gateway, restart, c10]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Features/Gateway/ViewModels/GatewayViewModel.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-27
 updated: 2026-09-27
+reviewed: 2026-09-29
+reviewed_by: audit:claude-code (background)
 ---
 
 B05 / S07-F3. A service-managed `hermes gateway restart` is not a bounce: launchd_restart / systemd_restart send SIGUSR1 and the gateway waits for in-flight turns before exiting with the restart code; the service manager starts the replacement. Scarf's restart spawn stays capped at 60 s (C10) and then consults the state file.

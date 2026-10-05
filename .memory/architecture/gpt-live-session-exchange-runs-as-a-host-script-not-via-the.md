@@ -5,10 +5,10 @@ permalink: scarf/architecture/gpt-live-session-exchange-runs-as-a-host-script-no
 tags: [voice, gpt-live, transport, secrets]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: 904c0e60784d0936f39ccbd47242201c12ef23d0
+source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
 created: 2026-09-18
 updated: 2026-09-27
-reviewed: 2026-09-22
+reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 
