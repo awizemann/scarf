@@ -400,7 +400,7 @@ struct AdvancedTab: View {
     private var usageAnalyticsSection: some View {
         SettingsSection(title: "Usage Analytics", icon: "chart.bar.xaxis") {
             ToggleRow(
-                label: "Share anonymous usage statistics",
+                label: "Share usage statistics",
                 isOn: analyticsEnabled
             ) { newValue in
                 analyticsEnabled = newValue
@@ -411,7 +411,7 @@ struct AdvancedTab: View {
             Text("")
                 .font(.caption)
                 .frame(width: 160, alignment: .trailing)
-            Text("Anonymous usage statistics only — never message content, hostnames, or file paths. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so active installs can be counted without identifying you.")
+            Text("Usage statistics only — never message content, hostnames, or file paths. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so the developer can count active installs and see how an install's use changes over time without knowing who you are.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

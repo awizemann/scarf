@@ -8,7 +8,7 @@ import ScarfDesign
 enum VoiceLiveConsentCopy {
 
     static func title(_ recipient: VoiceDataRecipient) -> String {
-        String(localized: "Live Voice sends your voice to \(recipient.displayName)")
+        String(localized: "Live Voice sends your voice and conversation to \(recipient.displayName)")
     }
 
     /// One plain sentence per fact the user agrees to.
@@ -23,14 +23,15 @@ enum VoiceLiveConsentCopy {
         }
         return [
             String(localized: "Your voice streams directly from this Mac to OpenAI. The Hermes host only sets up the session, so OpenAI also sees this Mac's network address."),
-            String(localized: "Each session shares recent messages from this chat with OpenAI for context: up to 24 messages, about 6,000 characters."),
+            String(localized: "Each session shares recent messages from this chat with OpenAI for context: up to 24 messages, about 6,000 characters. The Hermes host passes them on when it sets up the session."),
+            String(localized: "During a session, Hermes's replies and short status lines, such as which tool Hermes is using, go to OpenAI so the voice can speak them."),
             String(localized: "OpenAI bills the OpenAI key on the Hermes host about $0.05 per minute while a session is open."),
             String(localized: "GPT-Live mode is a Hermes setting for the whole profile. It also changes voice in Hermes's own apps."),
         ]
     }
 
     static var footnote: String {
-        String(localized: "Scarf asks once on this Mac. You can review or reset this in Settings › Voice.")
+        String(localized: "Scarf asks once on this Mac, and again if what is shared changes. You can review or reset this in Settings › Voice.")
     }
 }
 

@@ -419,7 +419,7 @@ struct VoiceTab: View {
     private var liveVoiceNote: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("Chained, Hermes's default, turns speech into text, runs a normal turn, and reads the reply aloud. GPT-Live lets you talk with Hermes from the chat composer: an OpenAI voice model listens and speaks, and hands each request to Hermes as a normal chat turn.")
-            Text("With GPT-Live, your voice streams directly from this Mac to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this Mac's network address. Each session also shares recent messages from the chat with OpenAI for context.")
+            Text("With GPT-Live, your voice streams directly from this Mac to OpenAI; the Hermes host only sets up the session, so OpenAI also sees this Mac's network address. Each session also shares recent messages from the chat with OpenAI for context. The Hermes host passes those messages on, and Hermes's replies and short status lines also go to OpenAI so the voice can speak them.")
             Text("It needs an OpenAI API key on the Hermes host (OPENAI_API_KEY in its .env, or voice.gpt_live.api_key) and bills that key about $0.05 per minute of session time. Sessions end on their own after \(Int((VoiceIdleMonitor.defaultTimeout / 60).rounded())) minutes without speech.")
             Text("This mode is a Hermes setting for the whole profile, not just Scarf: it also switches voice in Hermes's own apps.")
         }

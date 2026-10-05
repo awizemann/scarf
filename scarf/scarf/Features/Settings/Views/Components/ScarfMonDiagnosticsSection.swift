@@ -22,7 +22,7 @@ struct ScarfMonDiagnosticsSection: View {
         SettingsSection(title: "Performance Diagnostics", icon: "speedometer") {
             VStack(alignment: .leading, spacing: ScarfSpace.s3) {
                 modeRow
-                Text("Default mode emits Instruments signposts only — no measurable cost outside an active profiling session. Switch to Full to keep an in-memory ring buffer (4096 entries) you can inspect below or copy as JSON.")
+                Text("Signpost only (the default) emits Instruments signposts and, while Usage Analytics is on, adds unusually slow operations to the usage statistics (the kind of operation and a rough duration, nothing else). Full does the same and also keeps an in-memory ring buffer (4096 entries) you can inspect below or copy as JSON. Off records nothing.")
                     .scarfStyle(.footnote)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                 if mode == .full {

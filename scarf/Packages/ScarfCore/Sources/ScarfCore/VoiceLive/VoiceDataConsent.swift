@@ -28,7 +28,11 @@ public struct VoiceDataRecipient: Sendable, Hashable, Identifiable {
     }
 
     /// OpenAI, for Hermes's GPT-Live mode.
-    public static let openAI = VoiceDataRecipient(id: "openai", displayName: "OpenAI", disclosureVersion: 1)
+    /// Version 2 (2026-10-05): the disclosure now says recent messages reach
+    /// OpenAI through the Hermes host, and that Hermes's replies and status
+    /// lines go to OpenAI during a session. Bumped so devices that agreed to
+    /// version 1 are asked again.
+    public static let openAI = VoiceDataRecipient(id: "openai", displayName: "OpenAI", disclosureVersion: 2)
 
     /// Who a mode's engine sends the user's data to, or `nil` when nothing
     /// leaves the user's devices and Hermes host.

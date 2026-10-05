@@ -25,7 +25,7 @@ struct VoiceLiveConsentSheet: View {
                         .font(.largeTitle)
                         .foregroundStyle(ScarfColor.accent)
                         .accessibilityHidden(true)
-                    Text("Live Voice sends your voice to \(recipient.displayName)")
+                    Text("Live Voice sends your voice and conversation to \(recipient.displayName)")
                         .font(.title2.bold())
                         .accessibilityAddTraits(.isHeader)
                     VStack(alignment: .leading, spacing: ScarfSpace.s3) {
@@ -41,7 +41,7 @@ struct VoiceLiveConsentSheet: View {
                             .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    Text("ScarfGo asks once on this device. You can review or reset this in Settings.")
+                    Text("ScarfGo asks once on this device, and again if what is shared changes. You can review or reset this in Settings.")
                         .font(.footnote)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                 }
@@ -92,7 +92,8 @@ struct VoiceLiveConsentSheet: View {
         }
         return [
             Text("Your voice streams directly from this device to OpenAI. The Hermes host only sets up the session, so OpenAI also sees this device's network address."),
-            Text("Each session shares recent messages from this chat with OpenAI for context: up to 24 messages, about 6,000 characters."),
+            Text("Each session shares recent messages from this chat with OpenAI for context: up to 24 messages, about 6,000 characters. The Hermes host passes them on when it sets up the session."),
+            Text("During a session, Hermes's replies and short status lines, such as which tool Hermes is using, go to OpenAI so the voice can speak them."),
             Text("OpenAI bills the OpenAI key on the Hermes host about $0.05 per minute while a session is open."),
             Text("GPT-Live mode is a Hermes setting for the whole profile. It also changes voice in Hermes's own apps."),
         ]

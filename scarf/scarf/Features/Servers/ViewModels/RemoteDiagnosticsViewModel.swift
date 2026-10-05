@@ -83,7 +83,7 @@ final class RemoteDiagnosticsViewModel {
             case .stateDBReadable:
                 return "Scarf can't read `state.db` — Sessions, Activity, Dashboard stats all depend on this. Either (a) run Hermes as the SSH user, (b) `chmod a+r ~/.hermes/state.db`, or (c) configure Scarf to SSH as the Hermes user."
             case .sqlite3Installed:
-                return "Scarf pulls a snapshot of state.db via `sqlite3 .backup`, so sqlite3 must be installed on the remote AND visible to non-interactive SSH sessions. The probe uses your login shell's PATH and falls back to `/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, and `/opt/local/bin` — if it's still not found, either install via your package manager (`sudo apt install sqlite3` / `sudo yum install sqlite` / `apk add sqlite`) or symlink the existing binary into a location the probe checks (e.g. `sudo ln -s /your/path/sqlite3 /usr/local/bin/sqlite3`)."
+                return "Scarf reads state.db by running read-only `sqlite3 -readonly` queries on the remote, so sqlite3 must be installed on the remote AND visible to non-interactive SSH sessions. The probe uses your login shell's PATH and falls back to `/usr/bin`, `/usr/local/bin`, `/opt/homebrew/bin`, and `/opt/local/bin` — if it's still not found, either install via your package manager (`sudo apt install sqlite3` / `sudo yum install sqlite` / `apk add sqlite`) or symlink the existing binary into a location the probe checks (e.g. `sudo ln -s /your/path/sqlite3 /usr/local/bin/sqlite3`)."
             case .sqlite3CanOpenStateDB:
                 return "sqlite3 exists but can't open state.db. Could be a permission issue, a corrupt DB, or a version skew."
             case .hermesBinaryNonLogin:

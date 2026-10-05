@@ -59,8 +59,22 @@ import Foundation
     @Test func aNewDisclosureVersionAsksAgain() {
         let store = Self.store()
         store.recordConsent(to: .openAI)
-        let revised = VoiceDataRecipient(id: "openai", displayName: "OpenAI", disclosureVersion: 2)
+        let revised = VoiceDataRecipient(
+            id: "openai", displayName: "OpenAI", disclosureVersion: VoiceDataRecipient.openAI.disclosureVersion + 1
+        )
         #expect(VoiceDataConsent.pendingRecipient(for: revised, store: store) == revised)
+    }
+
+    /// The 2026-10-05 disclosure correction (replies and status lines reach
+    /// OpenAI; context goes through the host) is version 2, so a device that
+    /// agreed to version 1 is asked again.
+    @Test func aVersionOneConsentNoLongerCountsForOpenAI() {
+        let store = Self.store()
+        let versionOne = VoiceDataRecipient(id: "openai", displayName: "OpenAI", disclosureVersion: 1)
+        store.recordConsent(to: versionOne)
+        #expect(VoiceDataRecipient.openAI.disclosureVersion == 2)
+        #expect(!store.hasConsented(to: .openAI))
+        #expect(VoiceDataConsent.pendingRecipient(for: .openAI, store: store) == .openAI)
     }
 
     /// The acceptance persists in the defaults, so a new store (a relaunch)
