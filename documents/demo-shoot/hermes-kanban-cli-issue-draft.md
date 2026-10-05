@@ -1,4 +1,4 @@
-# Draft issue for hermes-ai/hermes-agent — Kanban CLI argument bugs (v0.20.0)
+# Draft issue for NousResearch/hermes-agent — Kanban CLI argument bugs (v0.20.0)
 
 **Title:** `kanban block` rejects its reason argument; `kanban create --initial-status` silently ignored (v0.20.0)
 
