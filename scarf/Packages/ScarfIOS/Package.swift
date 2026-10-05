@@ -40,7 +40,7 @@ let package = Package(
         // changed its authentication-method variant names between
         // minor versions (0.7 → 0.9 → 0.12) — letting the version
         // float to 0.13+ without a code review risks a silent build
-        // break in `CitadelSSHService.buildClientSettings(...)`. When
+        // break in `PinnedSSHConnect.connect(...)` (PinnedHostKeyValidator.swift). When
         // bumping the minor, smoke test onboarding against:
         //   (a) a real host with 1Password SSH agent
         //   (b) a real host with a hand-edited `authorized_keys`

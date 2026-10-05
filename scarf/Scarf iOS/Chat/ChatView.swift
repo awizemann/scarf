@@ -3117,6 +3117,15 @@ final class ChatController {
                     isHandlingDisconnect = false
                     Self.logger.info("Reconnected on attempt \(attempt)")
                     return
+                } catch let mismatch as HostKeyMismatchError {
+                    // The server's identity changed: retrying can't fix it
+                    // and every attempt is another handshake with a server
+                    // we refuse to trust. Stop and say why.
+                    await client.stop()
+                    guard !Task.isCancelled else { return }
+                    state = .failed(mismatch.localizedDescription)
+                    isHandlingDisconnect = false
+                    return
                 } catch {
                     Self.logger.warning(
                         "Reconnect attempt \(attempt) failed: \(error.localizedDescription, privacy: .public)"

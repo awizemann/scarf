@@ -76,6 +76,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         contextID: ServerID,
         config: SSHConfig,
         displayName: String,
+        hostKeyStore: HostKeyPinStore = .shared,
         keyProvider: @escaping KeyProvider
     ) {
         self.contextID = contextID
@@ -86,6 +87,7 @@ public final class CitadelServerTransport: ServerTransport, @unchecked Sendable 
         self.connectionHolder = ConnectionHolder(
             contextID: contextID,
             config: config,
+            hostKeyStore: hostKeyStore,
             keyProvider: keyProvider
         )
     }
@@ -1101,6 +1103,8 @@ private actor ConnectionHolder {
     private let contextID: ServerID
     private let config: SSHConfig
     private let keyProvider: CitadelServerTransport.KeyProvider
+    /// Host-key pins the connect checks against (`PinnedHostKeyValidator`).
+    private let hostKeyStore: HostKeyPinStore
 
     private var sshClient: SSHClient?
     private var sftpClient: SFTPClient?
@@ -1122,10 +1126,12 @@ private actor ConnectionHolder {
     init(
         contextID: ServerID,
         config: SSHConfig,
+        hostKeyStore: HostKeyPinStore,
         keyProvider: @escaping CitadelServerTransport.KeyProvider
     ) {
         self.contextID = contextID
         self.config = config
+        self.hostKeyStore = hostKeyStore
         self.keyProvider = keyProvider
     }
 
@@ -1222,27 +1228,19 @@ private actor ConnectionHolder {
         } catch {
             throw TransportError.other(message: String(describing: error))
         }
-        let username = config.user ?? "root"
-        let host = config.host
-        let port = config.port
         do {
-            return try await SSHConnectPolicy.connect {
-                // Fresh SSHAuthenticationMethod per attempt — Citadel's
-                // auth delegate consumes its offer list on use, so a
-                // reused instance would fail the retry with
-                // `allAuthenticationOptionsFailed` instead of re-offering
-                // the key.
-                let auth: SSHAuthenticationMethod = .ed25519(username: username, privateKey: ck)
-                var settings = SSHClientSettings(
-                    host: host,
-                    authenticationMethod: { auth },
-                    hostKeyValidator: .acceptAnything()
-                )
-                if let port {
-                    settings.port = port
-                }
-                return try await SSHClient.connect(to: settings)
-            }
+            return try await PinnedSSHConnect.connect(
+                host: config.host,
+                port: config.port,
+                username: config.user ?? "root",
+                privateKey: ck,
+                store: hostKeyStore
+            )
+        } catch let mismatch as HostKeyMismatchError {
+            // Passed through typed (it is a LocalizedError with a plain-
+            // language message) so the UI can tell an identity change from
+            // an ordinary connect failure.
+            throw mismatch
         } catch {
             throw TransportError.other(
                 message: SSHConnectPolicy.describeConnectFailure(error, host: config.host)

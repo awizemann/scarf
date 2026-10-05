@@ -23,7 +23,7 @@ import ScarfCore
 /// **Citadel 0.12.1 API verified.** Every call below (`SSHAuthentication
 /// Method.ed25519(username:privateKey:)`, `SSHClientSettings(host:
 /// authenticationMethod:hostKeyValidator:)`, `SSHHostKeyValidator.
-/// acceptAnything()`, `SSHClient.connect(to:)`, `client.executeCommand
+/// custom(_:)`, `SSHClient.connect(to:)`, `client.executeCommand
 /// (_:)`, `client.close()`) was cross-checked against the 0.12.1 tag in
 /// April 2026. If Citadel's package pin is bumped to a new minor
 /// (0.13+), re-verify these against
@@ -34,7 +34,14 @@ public struct CitadelSSHService: SSHConnectionTester {
     /// doesn't hang on a silently-dropped connection.
     public static let probeTimeoutSeconds: TimeInterval = 10
 
-    public init() {}
+    /// Host-key pins Test Connection checks against. Onboarding's first
+    /// successful probe is what pins a new server's key (trust on first use,
+    /// keyed by host + port — see `HostKeyPinStore`).
+    let hostKeyStore: HostKeyPinStore
+
+    public init(hostKeyStore: HostKeyPinStore = .shared) {
+        self.hostKeyStore = hostKeyStore
+    }
 
     // MARK: - Key generation (public entry point)
 
@@ -84,15 +91,21 @@ public struct CitadelSSHService: SSHConnectionTester {
         key: SSHKeyBundle,
         command: String
     ) async throws -> ProbeResult {
+        let ck: Curve25519.Signing.PrivateKey
+        do {
+            ck = try SSHPrivateKeyDecoding.curve25519PrivateKey(fromPEM: key.privateKeyPEM)
+        } catch {
+            throw SSHConnectionTestError.other(String(describing: error))
+        }
         let client: SSHClient
         do {
-            client = try await SSHConnectPolicy.connect {
-                // Settings (and their one-shot SSHAuthenticationMethod,
-                // whose offer list is consumed on use) are rebuilt per
-                // attempt — see SSHConnectPolicy.
-                let settings = try self.buildClientSettings(config: config, key: key)
-                return try await SSHClient.connect(to: settings)
-            }
+            client = try await PinnedSSHConnect.connect(
+                host: config.host,
+                port: config.port,
+                username: config.user ?? "root",
+                privateKey: ck,
+                store: hostKeyStore
+            )
         } catch {
             throw Self.classifyConnectError(error, host: config.host)
         }
@@ -118,40 +131,6 @@ public struct CitadelSSHService: SSHConnectionTester {
         }
     }
 
-    // MARK: - Citadel glue
-
-    /// Translate our in-house `SSHKeyBundle` (raw 32+32 byte Ed25519)
-    /// into Citadel's authentication method. Verified against Citadel
-    /// 0.12.1 — see `Sources/Citadel/SSHAuthenticationMethod.swift`
-    /// for the full set of `.passwordBased(...)` / `.ed25519(...)` /
-    /// `.p256(...)` / etc. variants.
-    private func buildClientSettings(
-        config: IOSServerConfig,
-        key: SSHKeyBundle
-    ) throws -> SSHClientSettings {
-        let ck: Curve25519.Signing.PrivateKey
-        do {
-            ck = try SSHPrivateKeyDecoding.curve25519PrivateKey(fromPEM: key.privateKeyPEM)
-        } catch {
-            throw SSHConnectionTestError.other(String(describing: error))
-        }
-        let username = config.user ?? "root"
-        let auth: SSHAuthenticationMethod = .ed25519(
-            username: username,
-            privateKey: ck
-        )
-
-        var settings = SSHClientSettings(
-            host: config.host,
-            authenticationMethod: { auth },
-            hostKeyValidator: .acceptAnything()
-        )
-        if let port = config.port {
-            settings.port = port
-        }
-        return settings
-    }
-
     // MARK: - Error mapping
 
     /// Best-effort classification of Citadel / NIO connect errors to
@@ -162,6 +141,15 @@ public struct CitadelSSHService: SSHConnectionTester {
         _ error: Error,
         host: String
     ) -> SSHConnectionTestError {
+        if let mismatch = error as? HostKeyMismatchError {
+            return .hostKeyMismatch(
+                host: mismatch.endpoint.displayName,
+                // Onboarding renders both fingerprints in its host-key card
+                // (unwrapped); keeping them out of this prose avoids a
+                // hyphenated, misleading copy of each.
+                detail: "It presented a different host key than the one ScarfGo trusts. Review both fingerprints below."
+            )
+        }
         let s = String(describing: error).lowercased()
         if s.contains("authentication") || s.contains("publickey") || s.contains("userauth") {
             return .authenticationFailed(host: host, detail: "Check that the public key above is in ~/.ssh/authorized_keys on the remote.")

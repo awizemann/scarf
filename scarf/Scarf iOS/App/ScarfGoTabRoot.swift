@@ -256,6 +256,10 @@ private struct SystemTab: View {
                 }
             }
 
+            // The pinned SSH host key, and the re-trust flow when the
+            // server's identity changed (`HostKeyPinStore`).
+            HostKeySection(endpoint: config.hostKeyEndpoint)
+
             Section("Features") {
                 NavigationLink {
                     MemoryListView(config: config)

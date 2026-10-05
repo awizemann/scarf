@@ -319,6 +319,13 @@ private struct TestFailedStep: View {
                 Text(reason)
                     .font(.callout)
 
+                // A refused host key: show both fingerprints and the
+                // deliberate re-trust, then Retry connects with it.
+                OnboardingHostKeyChangeCard(endpoint: HostKeyEndpoint(
+                    host: vm.host,
+                    port: Int(vm.portText.trimmingCharacters(in: .whitespaces))
+                ))
+
                 HStack {
                     Button("Back") {
                         vm.goBackToServerDetails()

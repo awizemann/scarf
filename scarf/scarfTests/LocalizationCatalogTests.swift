@@ -287,6 +287,27 @@ struct LocalizationCatalogTests {
         "Stops the running turn. The chat stays open.",
         "This skill is in `skills.disabled` in `~/.hermes/config.yaml`. Hermes won't load it. Re-enable it with `hermes skills config` in a terminal on that host.",
         "• skills.config.%@",
+        // ScarfGo SSH host-key pinning (System tab Host key section,
+        // the identity-change card, the server-list row note, and
+        // ScarfIOS's HostKeyMismatchError message).
+        "Fingerprint",
+        "Key type",
+        "Trusted since",
+        "Host key",
+        "Not saved yet. ScarfGo saves this server’s host key the first time it connects.",
+        "ScarfGo checks this key on every connection and refuses to connect if the server presents a different one.",
+        "Server identity changed",
+        "ScarfGo refused to connect to %@ because it presented a different host key than the one ScarfGo trusts. This is expected if the server was reinstalled or its SSH keys were regenerated. Otherwise, someone may be intercepting the connection.",
+        "Trusted key",
+        "Presented key",
+        "Compare the presented key with the server’s own: run ssh-keygen -lf on its host key, for example /etc/ssh/ssh_host_ed25519_key.pub.",
+        "Trust New Key",
+        "The server presented a different key again, so nothing was trusted. Review the presented key above before you decide.",
+        "You are about to trust %@. Only continue if you know why the server’s key changed and this fingerprint matches the server. If someone is intercepting the connection, trusting this key lets them read and change everything ScarfGo sends, including your chats.",
+        "Copy Fingerprint",
+        "Trust the new host key?",
+        "Server identity changed. Review it in System.",
+        "Server identity changed for %@. ScarfGo didn’t connect because the server presented a different host key than the one it trusted before. This happens when a server is reinstalled or its SSH keys are regenerated, but it can also mean someone is intercepting the connection. Trusted key: %@. Presented key: %@. If you expected this change, open this server’s System tab and choose Trust New Key.",
     ]
 
     @Test("iOS-only keys survive a macOS-scheme extraction")

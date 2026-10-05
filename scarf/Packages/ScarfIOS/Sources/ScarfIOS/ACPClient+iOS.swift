@@ -45,16 +45,20 @@ public extension ACPClient {
     ///   - environmentHint: Scarf's `HERMES_ENVIRONMENT_HINT` (gh#142),
     ///     composed on the remote with the user's own hint, never replacing
     ///     it (see `EnvironmentHintComposer`). Nil = today's command.
+    ///   - hostKeyStore: Host-key pins the connect is checked against
+    ///     (`PinnedHostKeyValidator`). The app uses `.shared`; tests inject
+    ///     an isolated store.
     static func forIOSApp(
         context: ServerContext,
         projectCwd: String? = nil,
         environmentHint: EnvironmentHintRequest? = nil,
+        hostKeyStore: HostKeyPinStore = .shared,
         keyProvider: (@Sendable () async throws -> SSHKeyBundle)? = nil
     ) -> ACPClient {
         ACPClient(context: context) { ctx in
             try await makeSSHExecChannel(
                 for: ctx, projectCwd: projectCwd, environmentHint: environmentHint,
-                keyProvider: keyProvider)
+                hostKeyStore: hostKeyStore, keyProvider: keyProvider)
         }
     }
 
@@ -66,6 +70,7 @@ public extension ACPClient {
         for context: ServerContext,
         projectCwd: String?,
         environmentHint: EnvironmentHintRequest?,
+        hostKeyStore: HostKeyPinStore,
         keyProvider: (@Sendable () async throws -> SSHKeyBundle)?
     ) async throws -> any ACPChannel {
         guard case .ssh(let sshConfig) = context.kind else {
@@ -77,7 +82,7 @@ public extension ACPClient {
         } else {
             key = try await SSHKeyResolver.key(for: sshConfig)
         }
-        let client = try await openSSHClient(config: sshConfig, key: key)
+        let client = try await openSSHClient(config: sshConfig, key: key, hostKeyStore: hostKeyStore)
 
         // Through `/bin/sh -c`: the PATH/HERMES_HOME assignment prefix is
         // sh syntax, and the exec string is read by the user's LOGIN shell,
@@ -163,7 +168,8 @@ public extension ACPClient {
     /// `SSHAuthenticationMethod.ed25519`).
     nonisolated private static func openSSHClient(
         config: SSHConfig,
-        key: SSHKeyBundle
+        key: SSHKeyBundle,
+        hostKeyStore: HostKeyPinStore
     ) async throws -> SSHClient {
         let ck: Curve25519.Signing.PrivateKey
         do {
@@ -171,25 +177,18 @@ public extension ACPClient {
         } catch {
             throw ACPChannelError.launchFailed(String(describing: error))
         }
-        let username = config.user ?? "root"
-        let host = config.host
-        let port = config.port
         do {
-            return try await SSHConnectPolicy.connect {
-                // Fresh SSHAuthenticationMethod per attempt — Citadel's
-                // auth delegate consumes its offer list on use, so a
-                // reused instance would fail the retry with
-                // `allAuthenticationOptionsFailed` instead of re-offering
-                // the key.
-                let auth: SSHAuthenticationMethod = .ed25519(username: username, privateKey: ck)
-                var settings = SSHClientSettings(
-                    host: host,
-                    authenticationMethod: { auth },
-                    hostKeyValidator: .acceptAnything()
-                )
-                if let port { settings.port = port }
-                return try await SSHClient.connect(to: settings)
-            }
+            return try await PinnedSSHConnect.connect(
+                host: config.host,
+                port: config.port,
+                username: config.user ?? "root",
+                privateKey: ck,
+                store: hostKeyStore
+            )
+        } catch let mismatch as HostKeyMismatchError {
+            // Typed and unwrapped: the chat shows its plain-language message
+            // instead of "Failed to launch ACP channel: …".
+            throw mismatch
         } catch {
             throw ACPChannelError.launchFailed(
                 "SSH connect to \(config.host) failed: \(SSHConnectPolicy.describeConnectFailure(error, host: config.host))"

@@ -28,6 +28,11 @@ struct ServerListView: View {
     /// surviving a list re-render does not repeat itself.
     @State private var lastAnnouncedError: String?
 
+    /// Endpoints whose server presented a different host key than the
+    /// pinned one (`HostKeyPinStore`). Their rows say so, so the user knows
+    /// to review it in the server's System tab.
+    @State private var identityChanged: Set<HostKeyEndpoint> = []
+
     var body: some View {
         NavigationStack {
             List {
@@ -59,7 +64,11 @@ struct ServerListView: View {
 
                 Section {
                     ForEach(sortedServers, id: \.id) { row in
-                        ServerListRow(row: row, isConnecting: connectingID == row.id) {
+                        ServerListRow(
+                            row: row,
+                            isConnecting: connectingID == row.id,
+                            identityChanged: identityChanged.contains(HostKeyEndpoint(host: row.host, port: row.port))
+                        ) {
                             guard connectingID == nil else { return }
                             connectingID = row.id
                             Task {
@@ -104,6 +113,12 @@ struct ServerListView: View {
                 }
             }
             .task { await model.refreshServers() }
+            .task {
+                await reloadIdentityChanges()
+                for await _ in NotificationCenter.default.notifications(named: HostKeyPinStore.didChangeNotification) {
+                    await reloadIdentityChanges()
+                }
+            }
             .confirmationDialog(
                 "Forget this server?",
                 isPresented: forgetBinding,
@@ -147,6 +162,11 @@ struct ServerListView: View {
         ).post()
     }
 
+    private func reloadIdentityChanges() async {
+        let records = await HostKeyPinStore.shared.allRecordsOffMain()
+        identityChanged = Set(records.filter { $0.rejected != nil }.map(\.endpoint))
+    }
+
     private var sortedServers: [ServerRow] {
         model.servers
             .map { id, config in
@@ -177,6 +197,7 @@ struct ServerListView: View {
 private struct ServerListRow: View {
     let row: ServerListView.ServerRow
     var isConnecting: Bool = false
+    var identityChanged: Bool = false
     let onTap: () -> Void
 
     var body: some View {
@@ -194,6 +215,11 @@ private struct ServerListRow: View {
                     Text(isConnecting ? "Connecting…" : hostLine)
                         .font(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
+                    if identityChanged && !isConnecting {
+                        Label("Server identity changed. Review it in System.", systemImage: "exclamationmark.shield.fill")
+                            .font(.caption)
+                            .foregroundStyle(ScarfColor.danger)
+                    }
                 }
                 Spacer()
                 if isConnecting {

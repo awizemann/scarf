@@ -183,6 +183,10 @@ final class RootModel {
             let all = try await configStore.listAll()
             servers = all
             lastError = nil
+            // Drop host-key pins no entry uses any more (an onboarding that
+            // was cancelled after its Test Connection pinned a key).
+            await HostKeyPinStore.shared.pruneOffMain(
+                keeping: Set(all.values.map(\.hostKeyEndpoint)))
             if all.isEmpty {
                 // Fresh install or user forgot every server → go
                 // straight to onboarding with a new ID reserved so
@@ -241,6 +245,10 @@ final class RootModel {
     /// or back to `.serverList` if we can't find it (defensive).
     func onboardingFinished(serverID: ServerID) async {
         servers = (try? await configStore.listAll()) ?? [:]
+        // Re-onboarding an entry at a new host or port leaves its old
+        // endpoint's pin behind; the new endpoint was pinned by Test
+        // Connection.
+        await pruneHostKeyPins()
         if let config = servers[serverID],
            let key = try? await keyStore.load(for: serverID) {
             state = .connected(serverID, config, key)
@@ -329,12 +337,23 @@ final class RootModel {
         // persisted — covers the partial-failure case where Keychain
         // succeeded but config didn't (or vice versa).
         servers = (try? await configStore.listAll()) ?? [:]
+        // Forget the server's pinned host key too — unless another entry
+        // still points at the same host and port (pins are per endpoint).
+        await pruneHostKeyPins()
         if failures.isEmpty {
             lastError = nil
         } else {
             lastError = "Couldn't fully forget server: " + failures.joined(separator: "; ")
         }
         state = servers.isEmpty ? .onboarding(forNewServer: ServerID()) : .serverList
+    }
+
+    /// Keep only the host-key pins a configured server still uses. Skipped
+    /// when the server list can't be read, so a transient read failure never
+    /// wipes every pin.
+    private func pruneHostKeyPins() async {
+        guard let all = try? await configStore.listAll() else { return }
+        await HostKeyPinStore.shared.pruneOffMain(keeping: Set(all.values.map(\.hostKeyEndpoint)))
     }
 
     /// Legacy v1 "Disconnect" that wipes EVERYTHING. Kept for back-compat
@@ -358,6 +377,9 @@ final class RootModel {
             failures.append("Config: \(error.localizedDescription)")
         }
         servers = (try? await configStore.listAll()) ?? [:]
+        if servers.isEmpty {
+            await HostKeyPinStore.shared.removeAllOffMain()
+        }
         if !failures.isEmpty {
             lastError = "Couldn't fully sign out: " + failures.joined(separator: "; ")
         }

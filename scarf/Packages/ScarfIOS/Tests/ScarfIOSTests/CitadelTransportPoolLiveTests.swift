@@ -47,8 +47,15 @@ private func liveAuthorize(_ env: LiveEnv) throws -> (SSHKeyBundle, SSHConfig) {
     return (bundle, SSHConfig(host: env.host, user: env.user, port: env.port))
 }
 
+/// Isolated, in-memory host-key pins: the verify script mints a fresh sshd
+/// host key on every run, so pinning into the shared store would refuse the
+/// next run, and a UserDefaults suite would leave a plist behind.
+private let liveHostKeyStore = HostKeyPinStore(backing: InMemoryHostKeyPinBacking())
+
 private func liveTransport(_ id: ServerID, _ config: SSHConfig, _ bundle: SSHKeyBundle) -> CitadelServerTransport {
-    CitadelServerTransport(contextID: id, config: config, displayName: "live", keyProvider: { bundle })
+    CitadelServerTransport(
+        contextID: id, config: config, displayName: "live",
+        hostKeyStore: liveHostKeyStore, keyProvider: { bundle })
 }
 
 /// A `hermes config set` pinned to a throwaway HERMES_HOME so the real

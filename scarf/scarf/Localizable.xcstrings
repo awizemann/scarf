@@ -140823,6 +140823,744 @@
           }
         }
       }
+    },
+    "Fingerprint" : {
+      "comment" : "ScarfGo System tab, Host key section: label above the pinned SSH host key's SHA256 fingerprint.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fingerabdruck"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Huella digital"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Empreinte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィンガープリント"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Impressão digital"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "指纹"
+          }
+        }
+      }
+    },
+    "Key type" : {
+      "comment" : "ScarfGo System tab, Host key section: the SSH host key algorithm (e.g. ssh-ed25519).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schlüsseltyp"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tipo de clave"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Type de clé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "鍵の種類"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tipo de chave"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密钥类型"
+          }
+        }
+      }
+    },
+    "Trusted since" : {
+      "comment" : "ScarfGo System tab, Host key section: when the pinned host key was first trusted.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vertraut seit"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "De confianza desde"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approuvée depuis"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信頼した日時"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confiável desde"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任时间"
+          }
+        }
+      }
+    },
+    "Host key" : {
+      "comment" : "ScarfGo System tab: section header for the server's pinned SSH host key.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Host-Schlüssel"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clave del host"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé d’hôte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ホスト鍵"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chave do host"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主机密钥"
+          }
+        }
+      }
+    },
+    "Not saved yet. ScarfGo saves this server’s host key the first time it connects." : {
+      "comment" : "ScarfGo System tab, Host key section, before the first connection has pinned a key.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch nicht gespeichert. ScarfGo speichert den Host-Schlüssel dieses Servers bei der ersten Verbindung."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aún no se ha guardado. ScarfGo guarda la clave del host de este servidor la primera vez que se conecta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pas encore enregistrée. ScarfGo enregistre la clé d’hôte de ce serveur lors de la première connexion."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "まだ保存されていません。ScarfGo は最初に接続したときにこのサーバーのホスト鍵を保存します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ainda não salva. O ScarfGo salva a chave do host deste servidor na primeira vez que se conecta."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未保存。ScarfGo 会在首次连接时保存此服务器的主机密钥。"
+          }
+        }
+      }
+    },
+    "ScarfGo checks this key on every connection and refuses to connect if the server presents a different one." : {
+      "comment" : "ScarfGo System tab, Host key section footer.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo prüft diesen Schlüssel bei jeder Verbindung und verbindet sich nicht, wenn der Server einen anderen vorlegt."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo comprueba esta clave en cada conexión y no se conecta si el servidor presenta otra distinta."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo vérifie cette clé à chaque connexion et refuse de se connecter si le serveur en présente une autre."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo は接続のたびにこの鍵を確認し、サーバーが別の鍵を提示した場合は接続しません。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O ScarfGo verifica esta chave a cada conexão e se recusa a conectar se o servidor apresentar outra."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo 每次连接都会检查此密钥,如果服务器出示了不同的密钥,将拒绝连接。"
+          }
+        }
+      }
+    },
+    "Server identity changed" : {
+      "comment" : "ScarfGo: heading shown when a server's SSH host key no longer matches the pinned one.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serveridentität geändert"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La identidad del servidor cambió"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’identité du serveur a changé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーの身元が変わりました"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A identidade do servidor mudou"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器身份已更改"
+          }
+        }
+      }
+    },
+    "ScarfGo refused to connect to %@ because it presented a different host key than the one ScarfGo trusts. This is expected if the server was reinstalled or its SSH keys were regenerated. Otherwise, someone may be intercepting the connection." : {
+      "comment" : "ScarfGo host-key change card. The argument is the host, or host:port.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo hat die Verbindung zu %@ abgelehnt, weil der Server einen anderen Host-Schlüssel vorgelegt hat als den, dem ScarfGo vertraut. Das ist zu erwarten, wenn der Server neu installiert oder seine SSH-Schlüssel neu erzeugt wurden. Andernfalls fängt möglicherweise jemand die Verbindung ab."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo se negó a conectarse a %@ porque presentó una clave del host distinta de la que ScarfGo considera de confianza. Es lo esperado si el servidor se reinstaló o se regeneraron sus claves SSH. Si no, puede que alguien esté interceptando la conexión."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo a refusé de se connecter à %@, car le serveur a présenté une clé d’hôte différente de celle que ScarfGo a approuvée. C’est normal si le serveur a été réinstallé ou si ses clés SSH ont été régénérées. Sinon, quelqu’un intercepte peut-être la connexion."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ が ScarfGo の信頼しているものとは異なるホスト鍵を提示したため、ScarfGo は接続を拒否しました。サーバーを再インストールした場合や SSH 鍵を再生成した場合は想定どおりです。そうでない場合は、誰かが接続を傍受している可能性があります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O ScarfGo se recusou a conectar a %@ porque ele apresentou uma chave do host diferente da que o ScarfGo confia. Isso é esperado se o servidor foi reinstalado ou suas chaves SSH foram geradas novamente. Caso contrário, alguém pode estar interceptando a conexão."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ScarfGo 拒绝连接到 %@,因为它出示的主机密钥与 ScarfGo 信任的不同。如果服务器重新安装过或重新生成了 SSH 密钥,这是正常的。否则,可能有人正在拦截连接。"
+          }
+        }
+      }
+    },
+    "Trusted key" : {
+      "comment" : "ScarfGo host-key change card: label above the fingerprint ScarfGo trusts (pinned).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vertrauenswürdiger Schlüssel"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clave de confianza"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé approuvée"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信頼済みの鍵"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chave confiável"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "受信任的密钥"
+          }
+        }
+      }
+    },
+    "Presented key" : {
+      "comment" : "ScarfGo host-key change card: label above the fingerprint the server just presented.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vorgelegter Schlüssel"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clave presentada"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clé présentée"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提示された鍵"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chave apresentada"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出示的密钥"
+          }
+        }
+      }
+    },
+    "Compare the presented key with the server’s own: run ssh-keygen -lf on its host key, for example /etc/ssh/ssh_host_ed25519_key.pub." : {
+      "comment" : "ScarfGo host-key change card: how to verify the presented fingerprint. Keep the command and path verbatim.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vergleiche den vorgelegten Schlüssel mit dem des Servers: Führe ssh-keygen -lf für seinen Host-Schlüssel aus, zum Beispiel /etc/ssh/ssh_host_ed25519_key.pub."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compara la clave presentada con la del propio servidor: ejecuta ssh-keygen -lf sobre su clave del host, por ejemplo /etc/ssh/ssh_host_ed25519_key.pub."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Comparez la clé présentée avec celle du serveur : exécutez ssh-keygen -lf sur sa clé d’hôte, par exemple /etc/ssh/ssh_host_ed25519_key.pub."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提示された鍵をサーバー側の鍵と比較してください。サーバーのホスト鍵 (例: /etc/ssh/ssh_host_ed25519_key.pub) に対して ssh-keygen -lf を実行します。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Compare a chave apresentada com a do próprio servidor: execute ssh-keygen -lf na chave do host, por exemplo /etc/ssh/ssh_host_ed25519_key.pub."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将出示的密钥与服务器自己的密钥进行比较:对其主机密钥运行 ssh-keygen -lf,例如 /etc/ssh/ssh_host_ed25519_key.pub。"
+          }
+        }
+      }
+    },
+    "Trust New Key" : {
+      "comment" : "ScarfGo: destructive button that pins the SSH host key the server presented.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neuem Schlüssel vertrauen"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confiar en la nueva clave"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approuver la nouvelle clé"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しい鍵を信頼"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confiar na nova chave"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任新密钥"
+          }
+        }
+      }
+    },
+    "Trust the new host key?" : {
+      "comment" : "ScarfGo: confirmation dialog title before re-trusting a changed SSH host key.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dem neuen Host-Schlüssel vertrauen?"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "¿Confiar en la nueva clave del host?"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approuver la nouvelle clé d’hôte ?"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新しいホスト鍵を信頼しますか?"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confiar na nova chave do host?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信任新的主机密钥?"
+          }
+        }
+      }
+    },
+    "Server identity changed. Review it in System." : {
+      "comment" : "ScarfGo server list: row note when that server's SSH host key changed.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serveridentität geändert. Prüfe sie unter System."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La identidad del servidor cambió. Revísala en Sistema."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’identité du serveur a changé. Vérifiez-la dans Système."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーの身元が変わりました。「システム」で確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A identidade do servidor mudou. Revise em Sistema."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器身份已更改。请在“系统”中查看。"
+          }
+        }
+      }
+    },
+    "Server identity changed for %@. ScarfGo didn’t connect because the server presented a different host key than the one it trusted before. This happens when a server is reinstalled or its SSH keys are regenerated, but it can also mean someone is intercepting the connection. Trusted key: %@. Presented key: %@. If you expected this change, open this server’s System tab and choose Trust New Key." : {
+      "comment" : "Connection error when an SSH server's host key no longer matches the pinned one. 1: host or host:port. 2: trusted fingerprint. 3: presented fingerprint (both SHA256:…).",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Serveridentität für %1$@ geändert. ScarfGo hat sich nicht verbunden, weil der Server einen anderen Host-Schlüssel vorgelegt hat als den, dem es zuvor vertraut hat. Das passiert, wenn ein Server neu installiert oder seine SSH-Schlüssel neu erzeugt werden, kann aber auch bedeuten, dass jemand die Verbindung abfängt. Vertrauenswürdiger Schlüssel: %2$@. Vorgelegter Schlüssel: %3$@. Wenn du diese Änderung erwartet hast, öffne den Tab „System“ dieses Servers und wähle „Neuem Schlüssel vertrauen“."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "La identidad del servidor %1$@ cambió. ScarfGo no se conectó porque el servidor presentó una clave del host distinta de la que consideraba de confianza. Esto ocurre cuando un servidor se reinstala o se regeneran sus claves SSH, pero también puede significar que alguien está interceptando la conexión. Clave de confianza: %2$@. Clave presentada: %3$@. Si esperabas este cambio, abre la pestaña Sistema de este servidor y elige Confiar en la nueva clave."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "L’identité du serveur %1$@ a changé. ScarfGo ne s’est pas connecté, car le serveur a présenté une clé d’hôte différente de celle qu’il avait approuvée. Cela arrive quand un serveur est réinstallé ou que ses clés SSH sont régénérées, mais cela peut aussi signifier que quelqu’un intercepte la connexion. Clé approuvée : %2$@. Clé présentée : %3$@. Si vous attendiez ce changement, ouvrez l’onglet Système de ce serveur et choisissez Approuver la nouvelle clé."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ のサーバーの身元が変わりました。サーバーが以前に信頼したものとは異なるホスト鍵を提示したため、ScarfGo は接続しませんでした。サーバーの再インストールや SSH 鍵の再生成で起こりますが、誰かが接続を傍受している可能性もあります。信頼済みの鍵: %2$@。提示された鍵: %3$@。この変更が想定どおりなら、このサーバーの「システム」タブを開き、「新しい鍵を信頼」を選択してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A identidade do servidor %1$@ mudou. O ScarfGo não conectou porque o servidor apresentou uma chave do host diferente da que ele confiava antes. Isso acontece quando um servidor é reinstalado ou suas chaves SSH são geradas novamente, mas também pode significar que alguém está interceptando a conexão. Chave confiável: %2$@. Chave apresentada: %3$@. Se você esperava essa mudança, abra a aba Sistema deste servidor e escolha Confiar na nova chave."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 的服务器身份已更改。服务器出示的主机密钥与之前信任的不同,因此 ScarfGo 没有连接。服务器重新安装或重新生成 SSH 密钥时会出现这种情况,但也可能意味着有人正在拦截连接。受信任的密钥:%2$@。出示的密钥:%3$@。如果这一更改在你的预期之中,请打开此服务器的“系统”标签页,然后选择“信任新密钥”。"
+          }
+        }
+      }
+    },
+    "The server presented a different key again, so nothing was trusted. Review the presented key above before you decide." : {
+      "comment" : "ScarfGo host-key change card: a re-trust was refused because the server presented yet another key while the confirmation was open.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Server hat erneut einen anderen Schlüssel vorgelegt, daher wurde nichts als vertrauenswürdig gespeichert. Prüfe den vorgelegten Schlüssel oben, bevor du entscheidest."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "El servidor volvió a presentar una clave distinta, así que no se confió en nada. Revisa la clave presentada arriba antes de decidir."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Le serveur a de nouveau présenté une autre clé, donc rien n’a été approuvé. Vérifiez la clé présentée ci-dessus avant de décider."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "サーバーがまた別の鍵を提示したため、何も信頼済みにしていません。判断する前に、上の提示された鍵を確認してください。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "O servidor apresentou outra chave diferente de novo, então nada foi marcado como confiável. Revise a chave apresentada acima antes de decidir."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "服务器又出示了另一个不同的密钥,因此没有信任任何密钥。请先查看上方出示的密钥再做决定。"
+          }
+        }
+      }
+    },
+    "You are about to trust %@. Only continue if you know why the server’s key changed and this fingerprint matches the server. If someone is intercepting the connection, trusting this key lets them read and change everything ScarfGo sends, including your chats." : {
+      "comment" : "ScarfGo: confirmation dialog message before re-trusting a changed SSH host key. The argument is the SHA256:… fingerprint being trusted.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Du bist dabei, %@ zu vertrauen. Fahre nur fort, wenn du weißt, warum sich der Schlüssel des Servers geändert hat, und dieser Fingerabdruck zum Server passt. Wenn jemand die Verbindung abfängt, kann er nach dem Vertrauen alles lesen und ändern, was ScarfGo sendet, auch deine Chats."
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vas a confiar en %@. Continúa solo si sabes por qué cambió la clave del servidor y esta huella digital coincide con la del servidor. Si alguien está interceptando la conexión, confiar en esta clave le permite leer y modificar todo lo que envía ScarfGo, incluidos tus chats."
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vous êtes sur le point d’approuver %@. Ne continuez que si vous savez pourquoi la clé du serveur a changé et que cette empreinte correspond au serveur. Si quelqu’un intercepte la connexion, approuver cette clé lui permet de lire et de modifier tout ce qu’envoie ScarfGo, y compris vos conversations."
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ を信頼しようとしています。サーバーの鍵が変わった理由がわかっていて、このフィンガープリントがサーバーのものと一致する場合にのみ続行してください。誰かが接続を傍受している場合、この鍵を信頼すると、チャットを含め ScarfGo が送信するすべての内容を読み取られ、改ざんされる可能性があります。"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Você está prestes a confiar em %@. Só continue se você souber por que a chave do servidor mudou e se esta impressão digital corresponder à do servidor. Se alguém estiver interceptando a conexão, confiar nesta chave permite que essa pessoa leia e altere tudo o que o ScarfGo envia, incluindo seus chats."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你即将信任 %@。只有在你知道服务器密钥为何更改,并且此指纹与服务器一致时才继续。如果有人正在拦截连接,信任此密钥将使其能够读取和篡改 ScarfGo 发送的所有内容,包括你的聊天。"
+          }
+        }
+      }
+    },
+    "Copy Fingerprint" : {
+      "comment" : "ScarfGo: long-press menu item that copies an SSH host key fingerprint.",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fingerabdruck kopieren"
+          }
+        },
+        "es" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copiar huella digital"
+          }
+        },
+        "fr" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copier l’empreinte"
+          }
+        },
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フィンガープリントをコピー"
+          }
+        },
+        "pt-BR" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copiar impressão digital"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拷贝指纹"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"
