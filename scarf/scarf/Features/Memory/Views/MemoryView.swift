@@ -258,7 +258,7 @@ struct MemoryView: View {
         }
         .padding(.horizontal, ScarfSpace.s4)
         .padding(.vertical, ScarfSpace.s2)
-        .background(ScarfColor.warning.opacity(0.10))
+        .background(ScarfColor.warningTint.opacity(0.56))
     }
 
     // MARK: - File list pane

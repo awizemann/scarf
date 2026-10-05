@@ -476,15 +476,20 @@ struct InsightsView: View {
         KnownPlatforms.icon(for: platform)
     }
 
+    /// Six series, all text-safe tokens (>= 5.8:1 on the card in both
+    /// appearances) and >= 34 CIE76 ΔE apart in both: web fetch and the
+    /// browser share the web purple (the indigo search color is only 16 ΔE
+    /// from it), memory takes the danger red, and everything else is muted
+    /// gray (the accent rust sat 21-23 ΔE from warning and danger).
     private func barColor(for toolName: String) -> Color {
         switch toolName {
         case "terminal", "execute_code": return ScarfColor.warning
         case "read_file", "search_files": return ScarfColor.success
         case "write_file", "patch": return ScarfColor.info
         case "web_search", "web_extract": return ScarfColor.Tool.web
-        case _ where toolName.hasPrefix("browser"): return ScarfColor.Tool.search
-        case "memory": return ScarfColor.Tool.think
-        default: return ScarfColor.accent
+        case _ where toolName.hasPrefix("browser"): return ScarfColor.Tool.web
+        case "memory": return ScarfColor.danger
+        default: return ScarfColor.foregroundMuted
         }
     }
 }

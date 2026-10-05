@@ -122,10 +122,10 @@ struct WidgetView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(ScarfColor.warning.opacity(0.08))
+        .background(ScarfColor.warningTint.opacity(0.44))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(ScarfColor.warning.opacity(0.3), lineWidth: 1)
+                .strokeBorder(ScarfColor.warningHue.opacity(0.3), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }

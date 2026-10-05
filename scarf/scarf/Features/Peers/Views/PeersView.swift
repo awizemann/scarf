@@ -30,10 +30,10 @@ struct PeersView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: ScarfSpace.s4) {
                     if let loadError = viewModel.loadError {
-                        banner(loadError, icon: "exclamationmark.triangle.fill", tint: ScarfColor.warning)
+                        banner(loadError, icon: "exclamationmark.triangle.fill", tone: .warning)
                     }
                     if let errorMessage = viewModel.errorMessage {
-                        banner(errorMessage, icon: "xmark.octagon.fill", tint: ScarfColor.danger)
+                        banner(errorMessage, icon: "xmark.octagon.fill", tone: .danger)
                     }
                     if viewModel.isLoading && viewModel.peers.isEmpty {
                         // Don't flash "No peers registered" while a slow
@@ -309,9 +309,9 @@ struct PeersView: View {
 
     // MARK: - Banners
 
-    private func banner(_ text: String, icon: String, tint: Color) -> some View {
+    private func banner(_ text: String, icon: String, tone: ScarfBadgeKind) -> some View {
         HStack(alignment: .top, spacing: ScarfSpace.s2) {
-            Image(systemName: icon).foregroundStyle(tint)
+            Image(systemName: icon).foregroundStyle(tone.text)
             // Verbatim CLI text: the actionable failures here (peer's
             // hermes-agent too old, missing HERMES_PEER_<NAME>_KEY) carry
             // their own remedy, and paraphrasing would lose it.
@@ -323,7 +323,7 @@ struct PeersView: View {
         .padding(ScarfSpace.s3)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .fill(tint.opacity(0.12))
+                .fill(tone.tinted(0.12))
         )
     }
 }

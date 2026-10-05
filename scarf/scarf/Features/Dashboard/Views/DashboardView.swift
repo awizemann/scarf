@@ -373,10 +373,10 @@ private struct DashActivityRow: View {
             HStack(alignment: .center, spacing: ScarfSpace.s2 + 2) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 5, style: .continuous)
-                        .fill(toneBackground)
+                        .fill(entry.kind.tone.wash)
                     Image(systemName: entry.kind.icon)
                         .font(.system(size: 11))
-                        .foregroundStyle(toneForeground)
+                        .foregroundStyle(entry.kind.tone.color)
                 }
                 .frame(width: 22, height: 22)
                 VStack(alignment: .leading, spacing: 1) {
@@ -404,27 +404,7 @@ private struct DashActivityRow: View {
         .buttonStyle(.plain)
     }
 
-    private var toneBackground: Color {
-        switch entry.kind {
-        case .read:    return ScarfColor.success.opacity(0.16)
-        case .edit:    return ScarfColor.info.opacity(0.16)
-        case .execute: return ScarfColor.warning.opacity(0.18)
-        case .fetch:   return ScarfColor.Tool.web.opacity(0.16)
-        case .browser: return ScarfColor.Tool.search.opacity(0.16)
-        case .other:   return ScarfColor.backgroundTertiary
-        }
-    }
 
-    private var toneForeground: Color {
-        switch entry.kind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
 }
 
 // MARK: - StatusCard

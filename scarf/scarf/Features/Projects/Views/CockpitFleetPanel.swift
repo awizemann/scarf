@@ -154,7 +154,7 @@ struct CockpitFleetPanel: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.warning.opacity(0.10))
+        .background(ScarfColor.warningTint.opacity(0.56))
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 
@@ -296,7 +296,7 @@ private struct FlowChips: View {
                     .font(.caption2.weight(.medium))
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(ScarfColor.warning.opacity(0.18))
+                    .background(ScarfColor.warningTint)
                     .foregroundStyle(ScarfColor.warning)
                     .clipShape(Capsule())
             }

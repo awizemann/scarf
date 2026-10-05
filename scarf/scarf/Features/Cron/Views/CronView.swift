@@ -976,11 +976,11 @@ struct CronView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.08))
+                .fill(ScarfColor.warningTint.opacity(0.44))
         )
         .overlay(
             RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                .strokeBorder(ScarfColor.warning.opacity(0.25), lineWidth: 1)
+                .strokeBorder(ScarfColor.warningHue.opacity(0.25), lineWidth: 1)
         )
     }
 
@@ -1243,11 +1243,11 @@ struct CronView: View {
             .padding(ScarfSpace.s3)
             .background(
                 RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                    .fill(ScarfColor.warning.opacity(0.08))
+                    .fill(ScarfColor.warningTint.opacity(0.44))
             )
             .overlay(
                 RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                    .strokeBorder(ScarfColor.warning.opacity(0.25), lineWidth: 1)
+                    .strokeBorder(ScarfColor.warningHue.opacity(0.25), lineWidth: 1)
             )
         } else {
             HStack(spacing: 6) {

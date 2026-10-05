@@ -236,7 +236,7 @@ struct GatewayView: View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
             Label("This gateway is standalone: it serves only its own profile.", systemImage: "exclamationmark.triangle.fill")
                 .font(.caption.bold())
-                .foregroundStyle(.orange)
+                .foregroundStyle(ScarfColor.warning)
             if !warning.unservedProfiles.isEmpty {
                 Text("Profiles not served (their bots stay silent): \(warning.unservedProfiles.joined(separator: ", "))")
                     .font(.caption)
@@ -257,7 +257,7 @@ struct GatewayView: View {
             }
         }
         .padding(ScarfSpace.s3)
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+        .background(ScarfColor.warningTint.opacity(0.56), in: RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Platforms
@@ -325,7 +325,7 @@ struct GatewayView: View {
                 }
                 .padding(ScarfSpace.s2)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(ScarfColor.danger.opacity(0.12))
+                .background(ScarfColor.dangerTint.opacity(0.75))
                 .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.sm))
             }
 

@@ -56,10 +56,10 @@ struct WidgetErrorCard: View {
         .accessibilityElement(children: .combine)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(ScarfColor.warning.opacity(0.08))
+        .background(ScarfColor.warningTint.opacity(0.44))
         .overlay(
             RoundedRectangle(cornerRadius: ScarfRadius.lg)
-                .strokeBorder(ScarfColor.warning.opacity(0.3), lineWidth: 1)
+                .strokeBorder(ScarfColor.warningHue.opacity(0.3), lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.lg))
     }

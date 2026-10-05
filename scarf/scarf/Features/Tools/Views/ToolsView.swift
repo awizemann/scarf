@@ -45,7 +45,7 @@ struct ToolsView: View {
                 }
                 .padding(.horizontal, ScarfSpace.s3)
                 .padding(.vertical, ScarfSpace.s2)
-                .background(ScarfColor.danger.opacity(0.10))
+                .background(ScarfColor.dangerTint.opacity(0.62))
                 .accessibilityElement(children: .combine)
             }
             toolsList

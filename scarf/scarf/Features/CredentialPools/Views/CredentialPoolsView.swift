@@ -426,19 +426,19 @@ struct CredentialPoolsView: View {
             if secondsRemaining <= 0 {
                 Text("expired")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ScarfColor.onDanger)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(.red)
+                    .background(ScarfColor.dangerFill)
                     .clipShape(Capsule())
             } else if secondsRemaining < 7 * 86_400 {
                 let days = max(1, Int(secondsRemaining / 86_400))
                 Text("expires in \(days)d")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ScarfColor.warning)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(.orange)
+                    .background(ScarfColor.warningTint)
                     .clipShape(Capsule())
             }
         }
@@ -616,18 +616,18 @@ struct CredentialPoolsView: View {
             case .expired:
                 Text("expired")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ScarfColor.onDanger)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(.red)
+                    .background(ScarfColor.dangerFill)
                     .clipShape(Capsule())
             case .expiringSoon(let days):
                 Text("expires in \(days)d")
                     .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(ScarfColor.warning)
                     .padding(.horizontal, 5)
                     .padding(.vertical, 1)
-                    .background(.orange)
+                    .background(ScarfColor.warningTint)
                     .clipShape(Capsule())
             }
         }

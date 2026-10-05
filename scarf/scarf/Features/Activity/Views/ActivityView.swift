@@ -70,7 +70,7 @@ struct ActivityView: View {
     private func loadErrorBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: ScarfSpace.s2) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(ScarfColor.warning)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Couldn't load activity")
                     .scarfStyle(.bodyEmph)
@@ -88,9 +88,9 @@ struct ActivityView: View {
             .controlSize(.small)
         }
         .padding(ScarfSpace.s3)
-        .background(Color.orange.opacity(0.08))
+        .background(ScarfColor.warningTint.opacity(0.44))
         .overlay(
-            Rectangle().fill(Color.orange.opacity(0.25)).frame(height: 1),
+            Rectangle().fill(ScarfColor.warningHue.opacity(0.25)).frame(height: 1),
             alignment: .bottom
         )
         // Sweep contract: see DashboardView.readErrorBanner.
@@ -261,7 +261,7 @@ struct ActivityView: View {
                     HStack(spacing: 8) {
                         Image(systemName: entry.kind.icon)
                             .font(.system(size: 14))
-                            .foregroundStyle(colorForKind(entry.kind))
+                            .foregroundStyle(entry.kind.tone.color)
                         Text(entry.toolName)
                             .scarfStyle(.bodyEmph)
                             .foregroundStyle(ScarfColor.foregroundPrimary)
@@ -360,16 +360,6 @@ struct ActivityView: View {
             .foregroundStyle(ScarfColor.foregroundMuted)
     }
 
-    private func colorForKind(_ kind: ToolKind) -> Color {
-        switch kind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
 }
 
 // MARK: - Activity row
@@ -390,13 +380,13 @@ private struct ActivityRow: View {
 
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(toneBackground)
+                        .fill(entry.kind.tone.wash)
                     if entry.isPlaceholder {
                         ProgressView().controlSize(.mini)
                     } else {
                         Image(systemName: entry.kind.icon)
                             .font(.system(size: 12))
-                            .foregroundStyle(toneForeground)
+                            .foregroundStyle(entry.kind.tone.color)
                     }
                 }
                 .frame(width: 26, height: 26)
@@ -460,27 +450,7 @@ private struct ActivityRow: View {
         return t.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
     }
 
-    private var toneBackground: Color {
-        switch entry.kind {
-        case .read:    return ScarfColor.success.opacity(0.16)
-        case .edit:    return ScarfColor.info.opacity(0.16)
-        case .execute: return ScarfColor.warning.opacity(0.18)
-        case .fetch:   return ScarfColor.Tool.web.opacity(0.16)
-        case .browser: return ScarfColor.Tool.search.opacity(0.16)
-        case .other:   return ScarfColor.backgroundTertiary
-        }
-    }
 
-    private var toneForeground: Color {
-        switch entry.kind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
 }
 
 // MARK: - Filter chip

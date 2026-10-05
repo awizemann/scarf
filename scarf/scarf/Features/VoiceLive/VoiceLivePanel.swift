@@ -293,6 +293,17 @@ private struct VoiceLiveStatusOrb: View {
         }
     }
 
+    /// The pulsing halo: the status phases use the lighter `*Hue` (a wash of
+    /// the darker text-safe color reads as mud in light mode).
+    private var halo: Color {
+        switch phase {
+        case .failed: return ScarfColor.dangerHue
+        case .thinking: return ScarfColor.infoHue
+        case .listening, .speaking: return isMuted ? ScarfColor.warningHue : tint
+        default: return tint
+        }
+    }
+
     private var symbol: String {
         switch phase {
         case .failed: return "exclamationmark"
@@ -308,7 +319,7 @@ private struct VoiceLiveStatusOrb: View {
         let live = phase.isLive && !isMuted
         ZStack {
             Circle()
-                .fill(tint.opacity(0.18))
+                .fill(halo.opacity(0.18))
                 .scaleEffect(live ? 1 + min(max(level, 0), 1) * 0.45 : 1)
                 .animation(.easeOut(duration: 0.12), value: level)
             Circle()

@@ -214,7 +214,7 @@ struct SessionInfoBar: View {
                     .scarfStyle(.captionUppercase)
                     .padding(.horizontal, ScarfSpace.s2)
                     .padding(.vertical, 2)
-                    .background(Capsule().fill(ScarfColor.warning.opacity(0.18)))
+                    .background(Capsule().fill(ScarfColor.warningTint))
                     .foregroundStyle(ScarfColor.warning)
                     .help("Approvals are off — dangerous commands run without asking. Change Approval Mode in Settings → Agent.")
                 }
@@ -261,12 +261,16 @@ struct SessionInfoBar: View {
                             Image(systemName: "rectangle.split.3x1")
                             Text("Kanban")
                             if let count = kanbanLiveCount, count > 0 {
+                                // A solid accent count pill (onAccent on
+                                // accent): a stronger accent wash nested in
+                                // the chip's tint drops accent text under AA.
                                 Text("\(count)")
                                     .scarfStyle(.captionStrong)
+                                    .foregroundStyle(ScarfColor.onAccent)
                                     .padding(.horizontal, 5)
                                     .padding(.vertical, 1)
                                     .background(
-                                        Capsule().fill(ScarfColor.accent.opacity(0.22))
+                                        Capsule().fill(ScarfColor.accent)
                                     )
                                     // Verbless noun phrase on purpose: no
                                     // locale has to agree an adjective or a
@@ -279,7 +283,7 @@ struct SessionInfoBar: View {
                         .scarfStyle(.caption)
                         .padding(.horizontal, ScarfSpace.s2)
                         .padding(.vertical, 2)
-                        .background(Capsule().fill(ScarfColor.accent.opacity(0.12)))
+                        .background(Capsule().fill(ScarfColor.accentTint))
                         .foregroundStyle(ScarfColor.accent)
                     }
                     .buttonStyle(.plain)
@@ -479,7 +483,7 @@ struct SessionInfoBar: View {
             .padding(.horizontal, ScarfSpace.s2)
             .padding(.vertical, 2)
             .background(
-                Capsule().fill(isOn ? ScarfColor.accent.opacity(0.12) : ScarfColor.foregroundFaint.opacity(0.10))
+                Capsule().fill(isOn ? ScarfColor.accentTint : ScarfColor.foregroundFaint.opacity(0.10))
             )
             .foregroundStyle(isOn ? ScarfColor.accent : ScarfColor.foregroundFaint)
         }

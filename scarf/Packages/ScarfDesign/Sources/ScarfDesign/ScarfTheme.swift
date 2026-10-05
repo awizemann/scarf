@@ -75,13 +75,18 @@ public enum ScarfColor {
     public static let foregroundFaint   = asset("Foreground/ForegroundFaint")
     public static let onAccent          = asset("Foreground/OnAccent")
 
-    // Semantic. `danger` is for danger TEXT and icons: red-600 #B83C38 in
-    // light (5.34:1 on backgroundPrimary, 5.61 on secondary, 4.98 on
-    // tertiary), #E36864 in dark (5.68 / 5.20 / 4.97). A filled danger
-    // surface uses `dangerFill` + `onDanger` instead (white on the #E36864
-    // dark value is only 3.27:1).
+    // Semantic status colors: TEXT and icons, on any surface and on their
+    // own `*Tint`. Light mode sits on the 700 step of each hue so the color
+    // itself is text-safe: success #186D4C, warning #8A5A12, info #1B6396,
+    // danger #A33430 (5.25-6.79:1 on backgroundPrimary / Secondary /
+    // Tertiary); dark keeps the lighter hues (#3DBE89 / #F4BE71 / #5BAFE3,
+    // danger #EA7F7B, 6.04-11.0:1). A status dot or icon is the same color.
+    // A filled danger surface uses `dangerFill` + `onDanger` (white on the
+    // dark danger is under 3:1).
     public static let success = asset("Semantic/SemanticSuccess")
     public static let danger  = asset("Semantic/SemanticDanger")
+    public static let warning = asset("Semantic/SemanticWarning")
+    public static let info    = asset("Semantic/SemanticInfo")
 
     /// Filled danger surface (destructive buttons, stop controls): red-600
     /// #B83C38 in both appearances, so the white `onDanger` label is 5.61:1.
@@ -89,16 +94,50 @@ public enum ScarfColor {
     /// tools/check-design-tokens.py fails on drift or a contrast regression.
     public static let dangerFill = asset("Danger/DangerFill")
     public static let onDanger   = asset("Danger/OnDanger")
-    public static let warning = asset("Semantic/SemanticWarning")
-    public static let info    = asset("Semantic/SemanticInfo")
 
-    // Tool kinds (chat message decorations)
+    /// The wash behind status text: badges, pills, status strips and tiles.
+    /// Each keeps the ORIGINAL, lighter hue of its kind (green-500, orange-500,
+    /// blue-500, red-600 in light) at 0.16 (warning 0.18), so a tint reads
+    /// as color, not mud. The status color is >= 4.5:1 on its tint over
+    /// backgroundPrimary, Secondary and Tertiary in both appearances; for a
+    /// lighter banner wash use `warningTint.opacity(0.5)`, which only raises
+    /// contrast. Don't wash with `ScarfColor.warning.opacity(...)`: that is
+    /// the darker text hue and drops text under AA (4.12:1 at 0.18 on
+    /// tertiary). Mirrored as --<kind>-tint; tools/check-design-tokens.py
+    /// checks drift and contrast and fails a view that puts a status color
+    /// on a wash of itself.
+    public static let successTint = asset("Status/SuccessTint")
+    public static let warningTint = asset("Status/WarningTint")
+    public static let infoTint    = asset("Status/InfoTint")
+    public static let dangerTint  = asset("Status/DangerTint")
+
+    /// The wash behind muted (neutral) text: ink at 0.06, so it shows on
+    /// every surface, backgroundTertiary included (a backgroundTertiary fill
+    /// vanished there). foregroundMuted on it is >= 4.5:1 everywhere.
+    public static let neutralTint = asset("Status/NeutralTint")
+
+    /// The ORIGINAL, lighter status hues, opaque: for borders, hairlines,
+    /// halos and chart marks that sit at a stronger opacity than a tint can
+    /// carry (`warningHue.opacity(0.3)` for a banner stroke). Never text, and
+    /// never a wash under text (use `*Tint`): light warningHue is 1.9:1 on the
+    /// page.
+    public static let successHue = asset("Status/SuccessHue")
+    public static let warningHue = asset("Status/WarningHue")
+    public static let infoHue    = asset("Status/InfoHue")
+    public static let dangerHue  = asset("Status/DangerHue")
+
+    // Tool kinds (chat message decorations). Read / edit / execute use the
+    // status colors (success / info / warning; see ScarfToolTone); web fetch
+    // and browser have their own.
     public enum Tool {
-        public static let bash   = ScarfColor.asset("Tool/ToolBash")
-        public static let edit   = ScarfColor.asset("Tool/ToolEdit")
+        /// Text-safe like the status colors: #3F4FB8 / #8C99E8 and #6E3FA6 /
+        /// #B48FDC (>= 4.5:1 on every surface and on their tint, both
+        /// appearances). `searchTint` / `webTint` are the chip washes, in the
+        /// original lighter hue at 0.16.
         public static let search = ScarfColor.asset("Tool/ToolSearch")
         public static let web    = ScarfColor.asset("Tool/ToolWeb")
-        public static let think  = ScarfColor.asset("Tool/ToolThink")
+        public static let searchTint = ScarfColor.asset("Tool/ToolSearchTint")
+        public static let webTint    = ScarfColor.asset("Tool/ToolWebTint")
     }
 }
 

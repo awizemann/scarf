@@ -36,9 +36,9 @@
   --border: #E5DED2;
   --border-strong: #C9BFAE;
 
-  --success: #4F8B5F;
-  --warning: #C9821C;
-  --info: #4A6F8E;
+  --success: #186D4C;  /* Semantic/SemanticSuccess */
+  --warning: #8A5A12;  /* Semantic/SemanticWarning */
+  --info: #1B6396;     /* Semantic/SemanticInfo */
 
   /* Spacing — ScarfSpace s1..s10 */
   --s1: 4px;
@@ -95,9 +95,9 @@
     --border: #2F2A26;
     --border-strong: #4A413A;
 
-    --success: #6FA37E;
-    --warning: #DDA653;
-    --info: #7397B5;
+    --success: #3DBE89;
+    --warning: #F4BE71;
+    --info: #5BAFE3;
 
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.3);
     --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.4);
@@ -122,9 +122,9 @@
   --bg-tertiary: #F2EDE5;
   --border: #E5DED2;
   --border-strong: #C9BFAE;
-  --success: #4F8B5F;
-  --warning: #C9821C;
-  --info: #4A6F8E;
+  --success: #186D4C;  /* Semantic/SemanticSuccess */
+  --warning: #8A5A12;  /* Semantic/SemanticWarning */
+  --info: #1B6396;     /* Semantic/SemanticInfo */
   --shadow-sm: 0 1px 2px rgba(26, 24, 24, 0.04), 0 2px 6px rgba(26, 24, 24, 0.04);
   --shadow-md: 0 2px 4px rgba(26, 24, 24, 0.06), 0 8px 20px rgba(26, 24, 24, 0.06);
   --shadow-lg: 0 4px 8px rgba(26, 24, 24, 0.08), 0 16px 40px rgba(26, 24, 24, 0.10);
@@ -146,9 +146,9 @@
   --bg-tertiary: #2A2622;
   --border: #2F2A26;
   --border-strong: #4A413A;
-  --success: #6FA37E;
-  --warning: #DDA653;
-  --info: #7397B5;
+  --success: #3DBE89;
+  --warning: #F4BE71;
+  --info: #5BAFE3;
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 2px 6px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.4), 0 8px 20px rgba(0, 0, 0, 0.4);
   --shadow-lg: 0 4px 8px rgba(0, 0, 0, 0.45), 0 16px 40px rgba(0, 0, 0, 0.5);

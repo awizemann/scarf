@@ -53,10 +53,10 @@ struct HermesVersionBanner: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(ScarfColor.warning.opacity(0.12))
+            .background(ScarfColor.warningTint.opacity(0.67))
             .overlay(
                 Rectangle()
-                    .fill(ScarfColor.warning.opacity(0.4))
+                    .fill(ScarfColor.warningHue.opacity(0.4))
                     .frame(height: 1),
                 alignment: .bottom
             )

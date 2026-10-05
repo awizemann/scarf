@@ -139,7 +139,7 @@ struct ProjectCockpitView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.warning.opacity(0.14))
+        .background(ScarfColor.warningTint.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 
@@ -678,7 +678,7 @@ private struct CronTenantWarning: View {
         }
         .padding(ScarfSpace.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.warning.opacity(0.14))
+        .background(ScarfColor.warningTint.opacity(0.78))
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 }

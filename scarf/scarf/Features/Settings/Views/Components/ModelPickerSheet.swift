@@ -359,7 +359,7 @@ struct ModelPickerSheet: View {
         HStack(spacing: 6) {
             Text(provider.providerName)
             if provider.subscriptionGated {
-                capsuleTag("Subscription", tint: .accentColor)
+                capsuleTag("Subscription", tone: .brand)
             }
             Spacer()
             if !provider.isOverlay {
@@ -454,7 +454,7 @@ struct ModelPickerSheet: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(provider.providerName).font(.title3.bold())
                     if provider.subscriptionGated {
-                        capsuleTag("Subscription", tint: .accentColor)
+                        capsuleTag("Subscription", tone: .brand)
                     }
                 }
                 if provider.subscriptionGated {
@@ -605,7 +605,7 @@ struct ModelPickerSheet: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(provider.providerName).font(.title3.bold())
                     if provider.subscriptionGated {
-                        capsuleTag("Subscription", tint: .accentColor)
+                        capsuleTag("Subscription", tone: .brand)
                     }
                 }
                 if provider.subscriptionGated {
@@ -1447,13 +1447,15 @@ struct ModelPickerSheet: View {
         }
     }
 
-    private func capsuleTag(_ text: String, tint: Color = .secondary) -> some View {
+    /// A small tag; with a `tone` it takes that badge kind's text-on-tint
+    /// pair (AA in both appearances) instead of a color on a wash of itself.
+    private func capsuleTag(_ text: String, tone: ScarfBadgeKind? = nil) -> some View {
         Text(text)
             .font(.caption2)
-            .foregroundStyle(tint == .secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(tint))
+            .foregroundStyle(tone.map { AnyShapeStyle($0.text) } ?? AnyShapeStyle(.secondary))
             .padding(.horizontal, 5)
             .padding(.vertical, 1)
-            .background(tint == .secondary ? AnyShapeStyle(.quaternary) : AnyShapeStyle(tint.opacity(0.15)))
+            .background(tone.map { AnyShapeStyle($0.fill) } ?? AnyShapeStyle(.quaternary))
             .clipShape(Capsule())
     }
 }

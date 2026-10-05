@@ -39,10 +39,10 @@ struct StateReadErrorBanner: View {
         .padding(ScarfSpace.s3)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.10))
+                .fill(ScarfColor.warningTint.opacity(0.56))
                 .overlay(
                     RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                        .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1)
+                        .strokeBorder(ScarfColor.warningHue.opacity(0.30), lineWidth: 1)
                 )
         )
         // Sweep contract: the section sweep (SectionSweepUITests) asserts

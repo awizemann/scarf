@@ -623,7 +623,7 @@ private struct ChatSessionRow: View {
             Circle()
                 .fill(ScarfColor.success)
                 .frame(width: 7, height: 7)
-                .overlay(Circle().stroke(ScarfColor.success.opacity(0.20), lineWidth: 2))
+                .overlay(Circle().stroke(ScarfColor.successHue.opacity(0.20), lineWidth: 2))
         } else {
             Circle()
                 .fill(ScarfColor.foregroundFaint.opacity(0.4))

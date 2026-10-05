@@ -874,7 +874,7 @@ struct BotsView: View {
         .padding(ScarfSpace.s3)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .fill(ScarfColor.danger.opacity(0.12))
+                .fill(ScarfColor.dangerTint.opacity(0.75))
         )
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Error: \(text)")

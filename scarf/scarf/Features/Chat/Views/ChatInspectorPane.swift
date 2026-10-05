@@ -156,17 +156,17 @@ struct ChatInspectorPane: View {
             HStack(spacing: ScarfSpace.s2) {
                 ZStack {
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(toolColor(call).opacity(0.16))
+                        .fill(call.toolKind.tone.wash)
                     Image(systemName: call.toolKind.icon)
                         .font(.system(size: 11))
-                        .foregroundStyle(toolColor(call))
+                        .foregroundStyle(call.toolKind.tone.color)
                 }
                 .frame(width: 24, height: 24)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("\(toolLabel(call)) CALL")
                         .scarfStyle(.captionStrong)
                         .tracking(0.5)
-                        .foregroundStyle(toolColor(call))
+                        .foregroundStyle(call.toolKind.tone.color)
                     Text(call.functionName)
                         .font(ScarfFont.mono)
                         .fontWeight(.semibold)
@@ -217,11 +217,11 @@ struct ChatInspectorPane: View {
             HStack(spacing: ScarfSpace.s2) {
                 Image(systemName: statusIcon(call: call, result: result))
                     .font(.system(size: 14))
-                    .foregroundStyle(statusColor(call: call, result: result))
+                    .foregroundStyle(statusTone(call: call, result: result).text)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(statusTitle(call: call, result: result))
                         .scarfStyle(.captionStrong)
-                        .foregroundStyle(statusColor(call: call, result: result))
+                        .foregroundStyle(statusTone(call: call, result: result).text)
                     Text(statusSubtitle(call: call))
                         .scarfStyle(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
@@ -230,10 +230,10 @@ struct ChatInspectorPane: View {
             }
             .padding(ScarfSpace.s2)
             .background(
-                RoundedRectangle(cornerRadius: 7).fill(statusColor(call: call, result: result).opacity(0.12))
+                RoundedRectangle(cornerRadius: 7).fill(statusTone(call: call, result: result).tinted(0.12))
                     .overlay(
                         RoundedRectangle(cornerRadius: 7)
-                            .strokeBorder(statusColor(call: call, result: result).opacity(0.25), lineWidth: 1)
+                            .strokeBorder(statusTone(call: call, result: result).text.opacity(0.25), lineWidth: 1)
                     )
             )
         }
@@ -433,16 +433,6 @@ struct ChatInspectorPane: View {
 
     // MARK: - Helpers
 
-    private func toolColor(_ call: HermesToolCall) -> Color {
-        switch call.toolKind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
 
     private func toolLabel(_ call: HermesToolCall) -> String {
         switch call.toolKind {
@@ -461,10 +451,11 @@ struct ChatInspectorPane: View {
         return "circle"
     }
 
-    private func statusColor(call: HermesToolCall, result: HermesMessage?) -> Color {
-        if let exit = call.exitCode { return exit == 0 ? ScarfColor.success : ScarfColor.danger }
-        if result != nil { return ScarfColor.success }
-        return ScarfColor.foregroundMuted
+    /// Status text and icon use the tone's `text` step on its `color` wash.
+    private func statusTone(call: HermesToolCall, result: HermesMessage?) -> ScarfBadgeKind {
+        if let exit = call.exitCode { return exit == 0 ? .success : .danger }
+        if result != nil { return .success }
+        return .neutral
     }
 
     private func statusTitle(call: HermesToolCall, result: HermesMessage?) -> String {

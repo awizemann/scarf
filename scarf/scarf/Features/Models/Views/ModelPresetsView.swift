@@ -116,7 +116,7 @@ struct ModelPresetsView: View {
             }
             .padding(ScarfSpace.s2)
             .background(
-                (viewModel.statusIsError ? ScarfColor.danger : ScarfColor.success).opacity(0.1)
+                (viewModel.statusIsError ? ScarfColor.dangerTint : ScarfColor.successTint).opacity(0.62)
             )
         }
     }

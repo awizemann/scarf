@@ -462,9 +462,9 @@ struct RichMessageBubble: View, Equatable {
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 7).fill(ScarfColor.warning.opacity(0.10))
+            RoundedRectangle(cornerRadius: 7).fill(ScarfColor.warningTint.opacity(0.56))
                 .overlay(RoundedRectangle(cornerRadius: 7)
-                    .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1))
+                    .strokeBorder(ScarfColor.warningHue.opacity(0.30), lineWidth: 1))
         )
         // Upgrade to the richer reasoning_content the first time the user
         // opens the disclosure (it's excluded from the bulk fetch). (t-aud21)
@@ -547,14 +547,14 @@ struct RichMessageBubble: View, Equatable {
             ForEach(message.toolCalls) { call in
                 let result = toolResults[call.callId]
                 let isFocused = chatViewModel.focusedToolCallId == call.callId
-                let color = compactToolColor(for: call.toolKind)
+                let tone = call.toolKind.tone
                 Button {
                     chatViewModel.focusedToolCallId = call.callId
                 } label: {
                     HStack(spacing: 6) {
                         Image(systemName: call.toolKind.icon)
                             .font(.system(size: 10))
-                            .foregroundStyle(color)
+                            .foregroundStyle(tone.color)
                         Text(call.functionName)
                             .font(ChatFontScale.monoSmall(chatFontScale))
                             .fontWeight(.medium)
@@ -568,11 +568,11 @@ struct RichMessageBubble: View, Equatable {
                     .padding(.vertical, 3)
                     .background(
                         RoundedRectangle(cornerRadius: 5)
-                            .fill(color.opacity(isFocused ? 0.16 : 0.08))
+                            .fill(tone.tinted(isFocused ? 0.16 : 0.08))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 5)
                                     .strokeBorder(
-                                        color.opacity(isFocused ? 0.45 : 0.20),
+                                        tone.color.opacity(isFocused ? 0.45 : 0.20),
                                         lineWidth: isFocused ? 1.2 : 1
                                     )
                             )
@@ -599,16 +599,7 @@ struct RichMessageBubble: View, Equatable {
         }
     }
 
-    private func compactToolColor(for kind: ToolKind) -> Color {
-        switch kind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
+
 
     // MARK: - Metadata Footer
 

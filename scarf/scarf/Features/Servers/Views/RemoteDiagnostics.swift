@@ -112,7 +112,7 @@ struct RemoteDiagnosticsView: View {
                 if probe.status == .fail, let hint = probe.id.failureHint {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "lightbulb")
-                            .foregroundStyle(.yellow)
+                            .foregroundStyle(ScarfColor.warning)
                             .font(.caption)
                         Text(hint)
                             .font(.caption)
@@ -121,7 +121,7 @@ struct RemoteDiagnosticsView: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     .padding(8)
-                    .background(Color.yellow.opacity(0.08))
+                    .background(ScarfColor.warningTint.opacity(0.44))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
                 }
             }

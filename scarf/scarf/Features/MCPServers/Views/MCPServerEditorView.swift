@@ -50,10 +50,10 @@ struct MCPServerEditorView: View {
                     if let error = viewModel.saveError {
                         Text(error)
                             .font(.caption)
-                            .foregroundStyle(.red)
+                            .foregroundStyle(ScarfColor.danger)
                             .padding(10)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.red.opacity(0.12))
+                            .background(ScarfColor.dangerTint.opacity(0.75))
                             .clipShape(RoundedRectangle(cornerRadius: 6))
                     }
                     if viewModel.server.transport == .stdio {

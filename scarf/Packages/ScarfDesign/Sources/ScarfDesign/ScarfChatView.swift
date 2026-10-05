@@ -44,7 +44,18 @@ public enum ChatToolKind: String, Hashable, CaseIterable {
         }
     }
 
-    var tint: Color { color.opacity(0.12) }
+    /// The chip wash in the kind's lighter tint hue at 0.12 (the status
+    /// colors are the darker text hue: a wash of them is muddy).
+    var tint: Color {
+        switch self {
+        case .read:    return ScarfToolTone.read.tinted(0.12)
+        case .edit:    return ScarfToolTone.edit.tinted(0.12)
+        case .execute: return ScarfToolTone.execute.tinted(0.12)
+        case .fetch:   return ScarfToolTone.fetch.tinted(0.12)
+        case .browser: return ScarfToolTone.browser.tinted(0.12)
+        case .search:  return ScarfColor.accentTint
+        }
+    }
 
     var icon: String {
         switch self {
@@ -340,7 +351,7 @@ struct ChatSessionRow: View {
         switch session.status {
         case .live:
             Circle().fill(ScarfColor.success).frame(width: 7, height: 7)
-                .overlay(Circle().stroke(ScarfColor.success.opacity(0.20), lineWidth: 2))
+                .overlay(Circle().stroke(ScarfColor.successHue.opacity(0.20), lineWidth: 2))
         case .error:
             Circle().fill(ScarfColor.dangerFill).frame(width: 6, height: 6)
         case .idle:
@@ -580,8 +591,8 @@ struct ReasoningBlock: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background(
-            RoundedRectangle(cornerRadius: 7).fill(ScarfColor.warning.opacity(0.10))
-                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1))
+            RoundedRectangle(cornerRadius: 7).fill(ScarfColor.warningTint.opacity(0.56))
+                .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(ScarfColor.warningHue.opacity(0.30), lineWidth: 1))
         )
     }
 }
@@ -722,8 +733,8 @@ private struct DiffPreview: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 1) {
             row("3", "  \"schedule\": \"0 9 * * *\",", bg: nil, color: ScarfColor.foregroundPrimary)
-            row("-", "  \"timezone\": \"UTC\",", bg: ScarfColor.danger.opacity(0.10), color: ScarfColor.danger)
-            row("+", "  \"timezone\": \"America/New_York\",", bg: ScarfColor.success.opacity(0.10), color: ScarfColor.success)
+            row("-", "  \"timezone\": \"UTC\",", bg: ScarfColor.dangerTint.opacity(0.62), color: ScarfColor.danger)
+            row("+", "  \"timezone\": \"America/New_York\",", bg: ScarfColor.successTint.opacity(0.62), color: ScarfColor.success)
             row("5", "  \"enabled\": true", bg: nil, color: ScarfColor.foregroundPrimary)
         }
         .padding(8)
@@ -986,8 +997,8 @@ private struct InspectorDetails: View {
                 }
                 .padding(ScarfSpace.s2)
                 .background(
-                    RoundedRectangle(cornerRadius: 7).fill(ScarfColor.success.opacity(0.12))
-                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(ScarfColor.success.opacity(0.25), lineWidth: 1))
+                    RoundedRectangle(cornerRadius: 7).fill(ScarfColor.successTint.opacity(0.75))
+                        .overlay(RoundedRectangle(cornerRadius: 7).strokeBorder(ScarfColor.successHue.opacity(0.25), lineWidth: 1))
                 )
             }
             section("ARGUMENTS") {

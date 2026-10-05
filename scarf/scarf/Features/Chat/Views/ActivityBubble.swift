@@ -276,14 +276,14 @@ struct ActivityBubbleView: View {
         let call = entry.call
         let result = toolResults[call.callId]
         let isFocused = chatViewModel.focusedToolCallId == call.callId
-        let color = chipColor(for: call.toolKind)
+        let tone = call.toolKind.tone
         return Button {
             chatViewModel.focusedToolCallId = call.callId
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: call.toolKind.icon)
                     .font(.system(size: 10))
-                    .foregroundStyle(color)
+                    .foregroundStyle(tone.color)
                 Text(call.functionName)
                     .font(ChatFontScale.monoSmall(chatFontScale))
                     .fontWeight(.medium)
@@ -321,11 +321,11 @@ struct ActivityBubbleView: View {
             .padding(.vertical, 3)
             .background(
                 RoundedRectangle(cornerRadius: 5)
-                    .fill(color.opacity(isFocused ? 0.16 : 0.08))
+                    .fill(tone.tinted(isFocused ? 0.16 : 0.08))
                     .overlay(
                         RoundedRectangle(cornerRadius: 5)
                             .strokeBorder(
-                                color.opacity(isFocused ? 0.45 : 0.20),
+                                tone.color.opacity(isFocused ? 0.45 : 0.20),
                                 lineWidth: isFocused ? 1.2 : 1
                             )
                     )
@@ -335,16 +335,7 @@ struct ActivityBubbleView: View {
         .help("Click to inspect this tool call")
     }
 
-    private func chipColor(for kind: ToolKind) -> Color {
-        switch kind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
+
 }
 
 /// Recall-mode marker for a paged-in turn (Alan, 2026-09-03): earlier

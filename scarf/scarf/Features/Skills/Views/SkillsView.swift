@@ -350,10 +350,10 @@ struct SkillsView: View {
                                     .font(.caption.monospaced())
                             }
                         }
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(ScarfColor.warning)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(.orange.opacity(0.1))
+                        .background(ScarfColor.warningTint.opacity(0.56))
                         .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                     // v2.5 Spotify auth affordance — only when this skill
@@ -547,7 +547,7 @@ struct SkillsView: View {
     private var asDocumentInfoRow: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "doc.badge.gearshape")
-                .foregroundStyle(.blue)
+                .foregroundStyle(ScarfColor.info)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Document-attachment directive present (v0.13+)")
                     .font(.caption.bold())
@@ -559,7 +559,7 @@ struct SkillsView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.blue.opacity(0.08))
+        .background(ScarfColor.infoTint.opacity(0.5))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -577,10 +577,10 @@ struct SkillsView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .foregroundStyle(.orange)
+        .foregroundStyle(ScarfColor.warning)
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.orange.opacity(0.1))
+        .background(ScarfColor.warningTint.opacity(0.56))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
@@ -590,7 +590,7 @@ struct SkillsView: View {
     private var spotifyAuthRow: some View {
         HStack(spacing: 10) {
             Image(systemName: "music.note")
-                .foregroundStyle(.green)
+                .foregroundStyle(ScarfColor.success)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sign in to Spotify")
                     .font(.callout.weight(.medium))
@@ -605,7 +605,7 @@ struct SkillsView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.1))
+        .background(ScarfColor.successTint.opacity(0.62))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 

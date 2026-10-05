@@ -187,7 +187,7 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(ScarfColor.warning)
                     VStack(alignment: .leading, spacing: 2) {
                         if let hint = viewModel.acpErrorHint {
                             Text(hint)
@@ -244,17 +244,17 @@ struct ChatView: View {
                 }
             }
             .padding(10)
-            .background(Color.orange.opacity(0.08))
+            .background(ScarfColor.warningTint.opacity(0.44))
             .overlay(
                 Rectangle()
-                    .fill(Color.orange.opacity(0.25))
+                    .fill(ScarfColor.warningHue.opacity(0.25))
                     .frame(height: 1),
                 alignment: .bottom
             )
         } else if viewModel.missingCredentials && !viewModel.hasActiveProcess {
             HStack(spacing: 8) {
                 Image(systemName: "key.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(ScarfColor.warning)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("No AI provider credentials detected")
                         .font(.callout)
@@ -265,10 +265,10 @@ struct ChatView: View {
                 Spacer()
             }
             .padding(10)
-            .background(Color.orange.opacity(0.08))
+            .background(ScarfColor.warningTint.opacity(0.44))
             .overlay(
                 Rectangle()
-                    .fill(Color.orange.opacity(0.25))
+                    .fill(ScarfColor.warningHue.opacity(0.25))
                     .frame(height: 1),
                 alignment: .bottom
             )
@@ -278,7 +278,7 @@ struct ChatView: View {
             // 127.0.0.1:8080). Offer the switch; never migrate silently.
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(ScarfColor.warning)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("llama.cpp server address is ignored")
                         .font(.callout)
@@ -297,10 +297,10 @@ struct ChatView: View {
                 Spacer()
             }
             .padding(10)
-            .background(Color.orange.opacity(0.08))
+            .background(ScarfColor.warningTint.opacity(0.44))
             .overlay(
                 Rectangle()
-                    .fill(Color.orange.opacity(0.25))
+                    .fill(ScarfColor.warningHue.opacity(0.25))
                     .frame(height: 1),
                 alignment: .bottom
             )
@@ -310,7 +310,7 @@ struct ChatView: View {
             // Warn and offer the picker; never rewrite config silently.
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(ScarfColor.warning)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Hermes can't use provider \(provider)")
                         .font(.callout)
@@ -329,10 +329,10 @@ struct ChatView: View {
                 Spacer()
             }
             .padding(10)
-            .background(Color.orange.opacity(0.08))
+            .background(ScarfColor.warningTint.opacity(0.44))
             .overlay(
                 Rectangle()
-                    .fill(Color.orange.opacity(0.25))
+                    .fill(ScarfColor.warningHue.opacity(0.25))
                     .frame(height: 1),
                 alignment: .bottom
             )
@@ -348,7 +348,7 @@ struct ChatView: View {
             // picker and replace both keys with a valid pair.
             HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(ScarfColor.warning)
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Model/provider mismatch in config.yaml")
                         .font(.callout)
@@ -404,10 +404,10 @@ struct ChatView: View {
                 Spacer()
             }
             .padding(10)
-            .background(Color.orange.opacity(0.08))
+            .background(ScarfColor.warningTint.opacity(0.44))
             .overlay(
                 Rectangle()
-                    .fill(Color.orange.opacity(0.25))
+                    .fill(ScarfColor.warningHue.opacity(0.25))
                     .frame(height: 1),
                 alignment: .bottom
             )

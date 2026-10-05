@@ -352,7 +352,7 @@ struct KanbanCreateSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.12))
+                .fill(ScarfColor.warningTint.opacity(0.67))
         )
     }
 

@@ -332,11 +332,11 @@ struct HealthView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .fill(ScarfColor.warning.opacity(0.12))
+                .fill(ScarfColor.warningTint.opacity(0.67))
         )
         .overlay(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .strokeBorder(ScarfColor.warning.opacity(0.4), lineWidth: 1)
+                .strokeBorder(ScarfColor.warningHue.opacity(0.4), lineWidth: 1)
         )
         .padding(.horizontal, ScarfSpace.s6)
         .padding(.bottom, ScarfSpace.s2)

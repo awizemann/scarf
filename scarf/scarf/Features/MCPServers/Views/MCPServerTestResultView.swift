@@ -1,5 +1,6 @@
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 
 struct MCPServerTestResultView: View {
     // MARK: - Three states, not two (P54, round-6)
@@ -18,11 +19,14 @@ struct MCPServerTestResultView: View {
         }
     }
 
-    static func tint(for confidence: HermesCLIOutcome.Confidence) -> Color {
+    /// The verdict's tone: its `text` for the glyph, a lighter `fill` for the
+    /// card's light wash (the system green / red / orange on their own wash
+    /// miss 3:1 in light mode).
+    static func tone(for confidence: HermesCLIOutcome.Confidence) -> ScarfBadgeKind {
         switch confidence {
-        case .confirmed: .green
-        case .failed: .red
-        case .unconfirmed: .orange
+        case .confirmed: .success
+        case .failed: .danger
+        case .unconfirmed: .warning
         }
     }
 
@@ -41,7 +45,7 @@ struct MCPServerTestResultView: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 Image(systemName: Self.glyph(for: result.confidence))
-                    .foregroundStyle(Self.tint(for: result.confidence))
+                    .foregroundStyle(Self.tone(for: result.confidence).text)
                 VStack(alignment: .leading, spacing: 2) {
                     Self.headline(for: result.confidence)
                         .font(.subheadline.bold())
@@ -80,7 +84,7 @@ struct MCPServerTestResultView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Self.tint(for: result.confidence).opacity(0.08))
+        .background(Self.tone(for: result.confidence).tinted(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }

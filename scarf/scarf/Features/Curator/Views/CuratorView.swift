@@ -558,7 +558,7 @@ struct CuratorView: View {
         .padding(.vertical, ScarfSpace.s2)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.md)
-                .fill(ScarfColor.warning.opacity(0.12))
+                .fill(ScarfColor.warningTint.opacity(0.67))
         )
     }
 }

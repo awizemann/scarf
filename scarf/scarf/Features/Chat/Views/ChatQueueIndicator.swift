@@ -39,7 +39,7 @@ struct ChatQueueIndicator: View {
             .scarfStyle(.caption)
             .padding(.horizontal, ScarfSpace.s2)
             .padding(.vertical, 2)
-            .background(Capsule().fill(ScarfColor.warning.opacity(0.16)))
+            .background(Capsule().fill(ScarfColor.warningTint.opacity(0.89)))
             .foregroundStyle(ScarfColor.warning)
         }
         .buttonStyle(.plain)

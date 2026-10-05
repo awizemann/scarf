@@ -408,7 +408,7 @@ struct TemplateUninstallSheet: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(ScarfColor.warning.opacity(0.10))
+                .fill(ScarfColor.warningTint.opacity(0.56))
         )
         .accessibilityElement(children: .combine)
     }
@@ -425,7 +425,7 @@ struct TemplateUninstallSheet: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "folder.badge.questionmark")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(ScarfColor.warning)
                 Text("Project folder kept")
                     .scarfStyle(.headline)
             }
@@ -455,7 +455,7 @@ struct TemplateUninstallSheet: View {
         .padding(12)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color.orange.opacity(0.10))
+                .fill(ScarfColor.warningTint.opacity(0.56))
         )
     }
 

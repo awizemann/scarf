@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guard the Scarf accent tokens against drift and contrast regressions.
+"""Guard the Scarf accent and status tokens against drift and contrast regressions.
 
 The asset catalog is the source of truth:
 
@@ -11,8 +11,11 @@ The asset catalog is the source of truth:
         Foreground/OnAccent                          -> --on-accent
         Surface/BackgroundPrimary                    -> --bg
         Surface/BackgroundSecondary                  -> --bg-card
-        Semantic/SemanticDanger                      -> --danger       (text / icons)
+        Semantic/Semantic{Success,Warning,Info,Danger} -> --success, --warning, --info,
+                                                        --danger (text / icons / dots)
         Danger/DangerFill, Danger/OnDanger           -> --danger-fill, --on-danger
+        Status/{Success,Warning,Info,Danger}Tint     -> --success-tint, ... --danger-tint
+        Tool/ToolWeb, Tool/ToolSearch (+ *Tint)       -> --tool-web(-tint), --tool-search(-tint)
 
 The guard FAILS CLOSED: anything it can't place or parse is an error, not a pass.
 
@@ -42,7 +45,13 @@ Checks, for light and dark:
      the dark bg, card and tertiary surfaces; it is #D87844 (accentActive dark): white
      3.14:1, text 5.91 / 5.41. Text on an accent FILL in our own views uses
      ScarfPrimaryButton / onAccent, never the system tint. ScarfTheme.swift (comments
-     stripped) still binds ScarfColor.accent* / onAccent / danger* to their assets.
+     stripped) still binds ScarfColor.accent* / onAccent / danger* / success / warning /
+     info / <kind>Tint / Tool.web / search / webTint / searchTint to their assets;
+     ScarfComponents.swift's ScarfBadgeKind `text` / `fill` return ScarfColor.<kind> /
+     ScarfColor.<kind>Tint for success, warning, info, danger, and ScarfToolTone
+     `color` / `wash` return the verified pairs (read/edit/execute -> the status pairs,
+     fetch/browser -> Tool.web(Tint) / Tool.search(Tint), other -> foregroundMuted on
+     backgroundTertiary).
   3. WCAG 2.x contrast: on-accent on accent / hover / active >= 4.5; accent, hover and
      active as text on the page and card backgrounds >= 4.5; accent and active text on
      --accent-tint and hover text on --accent-tint-strong (composited over both) >= 4.5;
@@ -53,6 +62,18 @@ Checks, for light and dark:
      the xcassets; the danger tokens are optional per stylesheet but must match when
      present): --danger text on --bg, --bg-card and --bg-tertiary >= 4.5, --on-danger on
      --danger-fill >= 4.5. The xcassets run includes Surface/BackgroundTertiary.
+     Status and tool colors (success, warning, info, danger, tool-web, tool-search),
+     where defined (always in the xcassets; optional per stylesheet, but a --X-tint
+     needs its --X, and both must match): --X is opaque and >= 4.5 as text and >= 3.0
+     as a dot / icon on --bg, --bg-card and --bg-tertiary; --X-tint is translucent and
+     --X is >= 4.5 on it composited over each surface. The tint keeps the LIGHTER hue
+     (green/orange/blue-500, red-600, purple-tool / indigo-500); a lighter wash of it
+     only raises contrast. --on-accent is >= 4.5 on each solid --X (the verified
+     on-color for a solid status / tool fill). xcassets only: ForegroundMuted on
+     Status/NeutralTint over each surface >= 4.5 (neutral badge, "other" tool chip), and
+     ScarfBadgeKind.fillAlpha / ScarfToolTone.washAlpha equal their tint colorsets' alpha.
+     Accent text on --accent-tint-strong: only --accent-hover is checked (and allowed,
+     check 4); dark --accent-active on it is 3.28-3.81:1, --accent 3.65-4.19.
   4. Fill lint, in the CSS mirrors, the <style> blocks and style="" attributes of
      design/static-site/**/*.html, and the ui-kit .jsx style objects: a rule (or style
      object) whose background / background-color / background-image is an accent fill
@@ -66,8 +87,21 @@ Checks, for light and dark:
      red-600, var(--danger*) or a danger colorset value, and that sets a text color, must
      fill with var(--danger-fill) and color the text var(--on-danger) (white on the
      dark-mode --danger is 3.27:1). The red-100 pastel isn't a danger fill.
+     Status washes too: a rule or style object whose fill is a status / tool tint
+     (var(--<kind>-tint), var(--tool-web|search-tint), a green/red/orange/blue-100
+     pastel, or a translucent tint-hue color such as rgba(217, 83, 79, 0.12)) must not
+     color its text with a tint hue (green/red-500/600, orange/blue-500, purple-tool /
+     indigo-500, a *Tint colorset RGB, a var resolving to one, or one named
+     --green/red/orange/blue(-500|600), --purple-tool-500, --indigo-500 even where
+     it's undefined): use var(--<kind>). A ternary color is flagged if any branch is.
+     And a rule / style object filled with var(--accent-tint-strong) must color its
+     text var(--accent-hover) (a missing color counts: it would inherit). A rule / style
+     object with a SOLID status / tool fill (var(--success|warning|info|tool-web|
+     tool-search|green|orange|blue), a green/orange/blue-500..700, --purple-tool-500,
+     --indigo-500) that sets a text color must use var(--on-accent).
 
-  5. The ui-kit bundle (design/static-site/ui-kit/index.html) is fresh: its embedded
+  5. (Run last, and collected rather than raised, so it never hides the other results.)
+     The ui-kit bundle (design/static-site/ui-kit/index.html) is fresh: its embedded
      colors_and_type.css (ignoring the inlined @font-face swap for the Google Fonts
      @import) and each embedded .jsx equal the sources in design/static-site. Decoding
      is shared with tools/refresh-ui-kit-bundle.py, which fixes a stale bundle.
@@ -94,6 +128,25 @@ Checks, for light and dark:
          its red (3.55 / 3.41:1) or the app tint (3.14:1 dark) under a white label.
        - no `.fill(ScarfColor.danger)` / `.background(ScarfColor.danger, ...)` without an
          opacity: a solid danger surface is ScarfColor.dangerFill (+ onDanger).
+       - text on a wash of its own color. For every `.background(...)` / `.background {
+         }` whose argument (outside `.stroke` / `.strokeBorder` calls) holds
+         `X.opacity(...)`, where X is ScarfColor.success / warning / info / danger /
+         accent, a system color (`.orange`, `Color.red`, ...), a bare local (`tint`,
+         `color`: it may hold one), a call (`statusColor(...)`, matched as text) or a
+         parenthesized ternary of those: no `.foregroundStyle` / `.foregroundColor`
+         anywhere in that modifier chain (the root's content closures included; same
+         bracket matching as above) may name X. The status colors are the darker text
+         hue, so a wash of themselves is mud and misses AA (light warning on its own
+         0.18 wash is 4.12:1 on tertiary): wash with ScarfColor.<kind>Tint
+         (`.opacity(f)` for a lighter banner), ScarfBadgeKind `.fill` or ScarfToolTone
+         `.wash`, which check 3 verifies.
+       - text on a SOLID status / tool fill in one chain (`.background(X)`,
+         `Capsule|Circle|Rectangle|RoundedRectangle().fill(X)`, X a bare ScarfColor.
+         success / warning / info / danger / Tool.web / Tool.search or a system color, or
+         X.opacity(a) with a >= 0.5) must be ScarfColor.onAccent (verified in check 3);
+         on a system color nothing is verified. White on system orange is about 2:1.
+       - no `ScarfColor.<token>.opacity(f)` with a literal f > 1 (it can't add density;
+         a stronger border uses the *Hue token).
      A missing source root, no .swift files found, or unbalanced brackets / an
      unterminated literal is a setup error (fail closed).
 
@@ -108,6 +161,23 @@ default button created by AppKit/UIKit itself (alerts, confirmation dialogs, NSA
 which takes the system tint, hence check 2's dark AccentColor; a `.tint` applied outside
 the `.swipeActions` closure; and a danger fill reached through a variable or a custom
 ShapeStyle. Checkboxes / switches draw on the system tint, covered by check 2.
+The text-on-tint lint compares expressions, not values: it can't see a wash and a text
+color that hold the same color under DIFFERENT names (`toneBackground` /
+`toneForeground` computed properties, a `.fill(kind.fill)` with `.foregroundStyle(kind.fg)`
+on another type), siblings layered in a ZStack (a tinted Circle under an Image), a wash
+in `.overlay` / `.listRowBackground`, a `.foregroundStyle(.tint)` over `.tint(X)`, or a
+member path other than the listed semantic / system colors (`tone.color`, `x.fill`)
+— those wash colors are ignored, not failed (the tone APIs are pinned by check 2
+instead). Raw semantic text on a plain surface needs no lint: check 3 holds every
+status color at 4.5:1 on all three surfaces. In CSS / JSX, a wash and its text color
+must sit in one rule / style object; a `t.fg` / `t.bg` lookup isn't resolved.
+Also not seen, by design (documented, not chased): a solid fill or wash reached through a
+local or a computed property (`Circle().fill(tint)` with an icon on it, as in the voice
+orb); `.tinted(f)` above a kind's tint alpha (it clamps, so it can't over-saturate); an
+opacity given as an expression rather than a literal; a JSX tone object with `bg` / `fg`
+keys rather than `background` / `color`; chart and sparkline marks (non-text, judged by
+the 3.0 dot / icon check on the tokens, not per rule); and the Hue tokens as text (they
+have no contrast floor: they are for borders, halos and chart marks only).
 
 Stdlib only. Exit 0 when clean, 1 on any failure (each one printed), 2 on a setup
 error (missing file, unparseable colorset).
@@ -130,6 +200,7 @@ APP_ACCENT_COLORSETS = (
     "scarf/Scarf iOS/Assets.xcassets/AccentColor.colorset",
 )
 THEME_SWIFT = "scarf/Packages/ScarfDesign/Sources/ScarfDesign/ScarfTheme.swift"
+COMPONENTS_SWIFT = "scarf/Packages/ScarfDesign/Sources/ScarfDesign/ScarfComponents.swift"
 BRAND_SCALE_CSS = "design/static-site/colors_and_type.css"
 CSS_MIRRORS = (
     "design/static-site/colors_and_type.css",
@@ -156,7 +227,26 @@ TOKENS = {
     "danger": "Semantic/SemanticDanger",
     "danger-fill": "Danger/DangerFill",
     "on-danger": "Danger/OnDanger",
+    # Status colors (text, icons, dots; text-safe on every surface) and the tint they
+    # sit on in badges, pills, status strips / tiles. Optional per stylesheet; a
+    # --<kind>-tint needs its --<kind>, and both must match.
+    "success": "Semantic/SemanticSuccess",
+    "warning": "Semantic/SemanticWarning",
+    "info": "Semantic/SemanticInfo",
+    "success-tint": "Status/SuccessTint",
+    "warning-tint": "Status/WarningTint",
+    "info-tint": "Status/InfoTint",
+    "danger-tint": "Status/DangerTint",
+    # Tool-kind chip colors without a status equivalent (web fetch, browser).
+    "tool-web": "Tool/ToolWeb",
+    "tool-web-tint": "Tool/ToolWebTint",
+    "tool-search": "Tool/ToolSearch",
+    "tool-search-tint": "Tool/ToolSearchTint",
 }
+STATUS_KINDS = ("success", "warning", "info", "danger")
+# (text token, its tint) pairs verified like the status kinds.
+TEXT_ON_TINT = tuple((k, f"{k}-tint") for k in STATUS_KINDS) + \
+    (("tool-web", "tool-web-tint"), ("tool-search", "tool-search-tint"))
 # Every theme block must resolve these (the tints are optional per file).
 REQUIRED = ("accent", "accent-hover", "accent-active", "on-accent", "bg", "bg-card")
 # Contrast-checked but not mirrored from the xcassets.
@@ -173,6 +263,16 @@ SWIFT_BINDINGS = {
     "danger": "Semantic/SemanticDanger",
     "dangerFill": "Danger/DangerFill",
     "onDanger": "Danger/OnDanger",
+    "success": "Semantic/SemanticSuccess",
+    "warning": "Semantic/SemanticWarning",
+    "info": "Semantic/SemanticInfo",
+    **{f"{k}Tint": f"Status/{k.capitalize()}Tint" for k in STATUS_KINDS},
+    "web": "Tool/ToolWeb",
+    "search": "Tool/ToolSearch",
+    "webTint": "Tool/ToolWebTint",
+    "searchTint": "Tool/ToolSearchTint",
+    "neutralTint": "Status/NeutralTint",
+    **{f"{k}Hue": f"Status/{k.capitalize()}Hue" for k in STATUS_KINDS},
 }
 
 TEXT_AA = 4.5
@@ -473,15 +573,102 @@ def danger_fill_error(fill: str, color: str) -> str | None:
     return None
 
 
+STATUS_FAMILY: list[RGBA] = []  # filled by run(): the lighter tint hues (not text-safe)
+STATUS_TINT_VAR = re.compile(r"var\(\s*--(?:(?:success|warning|info|danger|tool-web|tool-search)-tint"
+                             r"|(?:green|red|orange|blue)-100)\s*[,)]")
+
+
+# Raw status colors by name, caught even where the stylesheet doesn't define them.
+RAW_STATUS_VAR = re.compile(r"var\(\s*--(?:(?:green|red|orange|blue)-[56]00|green|red|orange|blue"
+                            r"|purple-tool-500|indigo-500)\s*[,)]")
+
+
+def read_status_family(repo: Path) -> list[RGBA]:
+    """The LIGHTER, tint hues that aren't text-safe on a tint: green/red-500/600,
+    orange/blue-500, purple-tool-500 / indigo-500 from colors_and_type.css plus the
+    RGB of every Status/*Tint and Tool/*Tint colorset. The text-safe status colors
+    (Semantic/*, --success.., the 700 steps) aren't in it."""
+    css = strip_comments((repo / BRAND_SCALE_CSS).read_text())
+    fam = [parse_css_color(hx) for name, step, hx in
+           re.findall(r"--(green|red|orange|blue)-(\d+)\s*:\s*(#[0-9A-Fa-f]{6})", css)
+           if 500 <= int(step) <= 600]
+    fam += [parse_css_color(hx) for hx in
+            re.findall(r"--(?:purple-tool|indigo)-500\s*:\s*(#[0-9A-Fa-f]{6})", css)]
+    if len(fam) < 8:
+        raise SetupError(f"{BRAND_SCALE_CSS}: couldn't read the green/red/orange/blue/tool 500-600 scale")
+    for asset in [f"Status/{k.capitalize()}Tint" for k in STATUS_KINDS] + \
+            ["Tool/ToolWebTint", "Tool/ToolSearchTint"]:
+        cs = read_colorset(repo / XCASSETS / f"{asset}.colorset")
+        fam += [cs["light"][:3] + (1.0,), cs["dark"][:3] + (1.0,)]
+    return fam
+
+
+def _raw_status(c: RGBA) -> bool:
+    return any(c[:3] == f[:3] for f in STATUS_FAMILY)
+
+
+def is_status_wash(value: str, scope: dict[str, str]) -> bool:
+    """A status tint behind text: var(--<kind>-tint), a -100 pastel, or a translucent
+    raw status color (rgba(217, 83, 79, 0.12))."""
+    if STATUS_TINT_VAR.search(value):
+        return True
+    return any(c[3] < 1 and _raw_status(c) for c in colors_in(resolve(value, scope)))
+
+
+def status_text_error(fill: str, color: str, scope: dict[str, str]) -> str | None:
+    """Tint-hue text (a 500/600 or a *Tint RGB) on a status wash misses AA: light
+    orange-500 is 1.6:1 on its tint. Use var(--<kind>) (text-safe)."""
+    cols = colors_in(resolve(color, scope))
+    if RAW_STATUS_VAR.search(color) or any(c[3] >= 0.9 and _raw_status(c) for c in cols):
+        return (f"tint-hue text `{color.strip()}` on a status tint (`{fill.strip()}`); "
+                f"use var(--<kind>) on var(--<kind>-tint)")
+    return None
+
+
+# A SOLID status / tool fill: only --on-accent is verified on it (check 3). Danger has
+# its own rule (--danger-fill + --on-danger).
+SOLID_STATUS_VAR = re.compile(r"^var\(\s*--(?:success|warning|info|tool-web|tool-search|green|orange|blue"
+                              r"|(?:green|orange|blue)-[5-7]00|purple-tool-500|indigo-500)\s*(?:,[^)]*)?\)$")
+
+
+def solid_status_error(fill: str, color: str) -> str | None:
+    f = re.sub(r"\s+", "", fill).strip("'\"")
+    if SOLID_STATUS_VAR.match(f) and re.sub(r"\s+", "", color).strip("'\"") != "var(--on-accent)":
+        return (f"text `{color.strip()}` on a solid status fill (`{fill.strip()}`); only "
+                f"var(--on-accent) is verified on it (or use a --<kind>-tint pill)")
+    return None
+
+
+TINT_STRONG_VAR = re.compile(r"var\(\s*--accent-tint-strong\s*[,)]")
+
+
+def tint_strong_error(fill: str, color: str) -> str | None:
+    """--accent-tint-strong carries only --accent-hover text: dark --accent-active on it
+    is 3.28-3.81:1, --accent 3.65-4.19."""
+    if TINT_STRONG_VAR.search(fill) and re.sub(r"\s+", "", color).strip("'\"") != "var(--accent-hover)":
+        return (f"text `{color.strip()}` on --accent-tint-strong; only var(--accent-hover) "
+                f"clears AA on it in dark mode")
+    return None
+
+
 def fill_lint(rules, scope, family, where) -> list[str]:
     errs = []
     for context, sel, body in rules:
         decls = declarations(body)
         fills = [v for p, v in decls if p in FILL_PROPS and is_accent_fill(v, scope, family)]
         dfills = [v for p, v in decls if p in FILL_PROPS and is_danger_fill(v, scope)]
+        sfills = [v for p, v in decls if p in FILL_PROPS and is_status_wash(v, scope)]
         for p, v in decls:
             if p != "color":
                 continue
+            if sfills:
+                e = status_text_error(sfills[0], v, scope)
+                if e:
+                    errs.append(f"{where}: `{sel}` puts {e}")
+            for fv in (fv for fp, fv in decls if fp in FILL_PROPS):
+                for e in (tint_strong_error(fv, v), solid_status_error(fv, v)):
+                    if e:
+                        errs.append(f"{where}: `{sel}` puts {e}")
             if fills and re.sub(r"\s+", "", v) != "var(--on-accent)":
                 errs.append(f"{where}: `{sel}` puts text color `{v}` on an accent fill "
                             f"(`{fills[0]}`); use var(--on-accent)")
@@ -563,6 +750,21 @@ def jsx_lint(repo: Path, family: list[RGBA], scope: dict[str, str]) -> list[str]
             if fill and "color" in props and _JSX_WHITE.search(props["color"]):
                 errs.append(f"{rel}:{line}: white text ({props['color'].strip()}) on an accent fill "
                             f"({fill.strip()}); use 'var(--on-accent)'")
+            sfill = next((props[k] for k in ("background", "backgroundColor", "backgroundImage")
+                          if k in props and is_status_wash(props[k], scope)), None)
+            if sfill and "color" in props:
+                e = status_text_error(sfill, props["color"], scope)
+                if e:
+                    errs.append(f"{rel}:{line}: {e}")
+            for k in ("background", "backgroundColor"):
+                if k in props and "color" in props:
+                    e = solid_status_error(props[k], props["color"])
+                    if e:
+                        errs.append(f"{rel}:{line}: {e}")
+                if k in props and TINT_STRONG_VAR.search(props[k]):
+                    e = tint_strong_error(props[k], props.get("color", "<none: inherited>"))
+                    if e:
+                        errs.append(f"{rel}:{line}: {e}")
             dfill = next((props[k] for k in ("background", "backgroundColor", "backgroundImage")
                           if k in props and is_danger_fill(props[k], scope)), None)
             if dfill and "color" in props:
@@ -844,6 +1046,145 @@ def top_level_button_styles(chain: str, where: str) -> list[str]:
     return out
 
 
+BACKGROUND = re.compile(r"\.background\b")
+# A translucent wash of some color: `<receiver>.opacity(<arg>)`, where the receiver is a
+# dotted identifier path or a parenthesized expression (a ternary of colors).
+OPACITY = re.compile(r"\.opacity\s*\(")
+PATH = re.compile(r"(?<![\w.])((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)")
+SYSTEM_COLORS = "red|green|orange|yellow|blue|purple|pink|mint|teal|cyan|indigo|brown"
+SYSTEM_COLOR_END = re.compile(rf"(?<![\w.])(?:Color)?\.({SYSTEM_COLORS})\s*$")
+PATH_END = re.compile(r"(?<![\w.])((?:[A-Za-z_]\w*\.)*[A-Za-z_]\w*)\s*$")
+FOREGROUND = re.compile(r"\.(?:foregroundStyle|foregroundColor)\s*\(")
+STROKE = re.compile(r"\.(?:stroke|strokeBorder)\s*\(")
+SEMANTIC_KINDS = ("success", "warning", "info", "danger", "accent")
+# A SOLID status fill under white / onAccent text: `.background(.red)`,
+# `.fill(ScarfColor.warning)` (white on system orange is about 2:1, on the dark-mode
+# status colors under 3:1). A solid danger surface is dangerFill + onDanger; a status
+# pill is <kind> text on <kind>Tint.
+SOLID_STATUS = re.compile(
+    rf"^\s*(?:(?:Capsule|Circle|Rectangle|RoundedRectangle)\([^()]*\)\s*\.fill\(\s*)?"
+    rf"(?P<fill>ScarfColor\.(?:success|warning|info|danger|Tool\.web|Tool\.search)"
+    rf"|(?:Color)?\.(?:{'red|green|orange|yellow|blue|purple|indigo|mint|teal|cyan|pink'}))"
+    rf"(?:\s*\.opacity\(\s*(?P<alpha>[0-9.]+)\s*\))?"
+    rf"\s*\)?\s*(?:,.*)?$", re.S)
+# The text colors verified on a solid status / tool fill (check 3: onAccent on each
+# status and tool color >= 4.5 in both appearances). A system color has none.
+SOLID_ON = re.compile(r"^ScarfColor\.onAccent$")
+
+
+def _tinted_by(path: str) -> str | None:
+    """The color a `<path>.opacity(...)` wash is OF, if the lint cares about it: a raw
+    semantic ScarfColor (success / warning / info / danger / accent), or a bare local
+    (a parameter like `tint` or `color`, which may hold one: fail closed). Other
+    ScarfColor members (Tool.*, foreground*, border*) and SwiftUI statics aren't."""
+    if path in {f"ScarfColor.{k}" for k in SEMANTIC_KINDS} | {"ScarfColor.Tool.web", "ScarfColor.Tool.search"}:
+        return path
+    if "." not in path and path[0].islower() and path != "self":
+        return path
+    return None
+
+
+def _mentions(expr: str, path: str) -> bool:
+    if "(" in path:  # a call expression: compare whitespace-free text
+        return path in re.sub(r"\s+", "", expr)
+    if path.startswith("Color.") and path[6:] in SYSTEM_COLORS.split("|"):
+        # `.red`, `Color.red` (but not `ScarfColor.red` or `x.red`)
+        return re.search(rf"(?<![\w.])(?:Color)?\.{path[6:]}(?![\w])", expr) is not None
+    return re.search(rf"(?<![\w.]){re.escape(path)}(?![\w])", expr) is not None
+
+
+def text_on_tint_lint(code: str, rel: str, line_of) -> list[str]:
+    """Text in a semantic color on a wash of the SAME color, in one modifier chain:
+    `.foregroundStyle(X)` / `.foregroundColor(X)` anywhere in the chain (the root's
+    content closures included) and a `.background(...)` holding `X.opacity(...)`, where
+    X is ScarfColor.success / warning / info / danger / accent or a bare local (`tint`,
+    `color`).
+    The status colors are the darker, text-safe hue: a wash of themselves is muddy and
+    drops text under AA (light warning on its own 0.18 wash is 4.12:1 on tertiary).
+    Wash with ScarfColor.<kind>Tint / ScarfBadgeKind .fill / ScarfToolTone .wash,
+    which check 3 verifies under the text color.
+    """
+    errs = []
+    for m in BACKGROUND.finditer(code):
+        where = f"{rel}:{line_of(m.start())}"
+        k = _ws_fwd(code, m.end())
+        if k >= len(code) or code[k] not in "({":
+            continue
+        end = _match_fwd(code, k, where)
+        k2 = _ws_fwd(code, end)
+        if code[k] == "(" and k2 < len(code) and code[k2] == "{":
+            end = _match_fwd(code, k2, where)   # .background(alignment:) { ... }
+        arg = code[k:end]
+        washes: dict[str, set] = {}             # wash color -> its opacity arguments
+        # A `.stroke` / `.strokeBorder` outline isn't under the text: skip colors in it.
+        strokes = []
+        for sm in STROKE.finditer(arg):
+            strokes.append((sm.end() - 1, _match_fwd(arg, sm.end() - 1, where)))
+        for om in OPACITY.finditer(arg):
+            if any(s0 <= om.start() < s1 for s0, s1 in strokes):
+                continue
+            e = _match_fwd(arg, om.end() - 1, where)
+            alpha = re.sub(r"\s+", "", arg[om.end():e - 1])
+            j = _ws_back(arg, om.start() - 1)
+            if j >= 0 and arg[j] == ")":
+                # `(cond ? ScarfColor.danger : ScarfColor.success).opacity(0.1)`: every
+                # color path inside the parenthesized receiver is washed.
+                k = _match_back(arg, j, where)
+                pm = PATH_END.search(arg, 0, k)
+                if pm and pm.end() == k:
+                    # A call (`statusColor(call: c, result: r).opacity(...)`, `Self.tint(for:
+                    # x)`): it returns some color, so match the call expression itself.
+                    washes.setdefault(re.sub(r"\s+", "", arg[pm.start(1):j + 1]), set()).add(alpha)
+                    continue
+                paths = PATH.findall(arg[k:j + 1])
+            else:
+                sm = SYSTEM_COLOR_END.search(arg, 0, j + 1)
+                if sm:
+                    # `.orange.opacity(0.1)` / `Color.red.opacity(...)`: a system color.
+                    washes.setdefault(f"Color.{sm.group(1)}", set()).add(alpha)
+                    continue
+                pm = PATH_END.search(arg, 0, j + 1)
+                paths = [pm.group(1)] if pm else []
+            for path in paths:
+                w = _tinted_by(path)
+                if w:
+                    washes.setdefault(w, set()).add(alpha)
+        inner = arg[1:-1] if arg[:1] in "({" else arg
+        sm = SOLID_STATUS.match(inner)
+        solid = sm is not None and (sm.group("alpha") is None or float(sm.group("alpha")) >= 0.5)
+        if not washes and not solid:
+            continue
+        a, b = modifier_chain(code, m.start(), end, where)
+        chain = code[a:b]
+        if solid:
+            for fm in FOREGROUND.finditer(chain):
+                e = _match_fwd(chain, fm.end() - 1, where)
+                fg = chain[fm.end():e - 1]
+                fgc = re.sub(r"\s+", "", fg)
+                if not (sm.group("fill").startswith("ScarfColor.") and SOLID_ON.match(fgc)):
+                    errs.append(
+                        f"{rel}:{line_of(a + fm.start())}: `{' '.join(fg.split())}` text on a solid "
+                        f"status fill (`{' '.join(inner.split())}`, line {line_of(m.start())}) isn't a "
+                        f"verified on-color. On a ScarfColor status / tool fill use "
+                        f"ScarfColor.onAccent; a danger surface is dangerFill + onDanger; or use a "
+                        f"pill (<kind> text on ScarfColor.<kind>Tint)")
+            if not washes:
+                continue
+        for fm in FOREGROUND.finditer(chain):
+            e = _match_fwd(chain, fm.end() - 1, where)
+            fg = chain[fm.end():e - 1]
+            shown = " ".join(fg.split())
+            line = line_of(a + fm.start())
+            for w, alphas in sorted(washes.items()):
+                if _mentions(fg, w):
+                    errs.append(
+                        f"{rel}:{line}: `{shown}` text sits on a `{w}` wash (background at "
+                        f"line {line_of(m.start())}); a color on a wash of itself misses AA. "
+                        f"Wash with ScarfColor.<kind>Tint (`.opacity(f)` for a lighter one) "
+                        f"or ScarfBadgeKind .fill / ScarfToolTone .wash")
+    return errs
+
+
 def swift_files(repo: Path) -> list[Path]:
     roots = [repo / r for r in SWIFT_ROOTS] + sorted(repo.glob(SWIFT_PACKAGES_GLOB))
     for r in roots[:len(SWIFT_ROOTS)]:
@@ -859,6 +1200,9 @@ def swift_files(repo: Path) -> list[Path]:
     if not files:
         raise SetupError("no .swift files found to lint")
     return files
+
+
+TOKEN_OPACITY = re.compile(r"ScarfColor\.[\w.]+?\s*\.opacity\(\s*([0-9]*\.?[0-9]+)\s*\)")
 
 
 def swift_lint(repo: Path) -> list[str]:
@@ -917,6 +1261,12 @@ def swift_lint(repo: Path) -> list[str]:
                     errs.append(f"{rel}:{line_of(b + 1 + bt.start())}: swipe Button has no `.tint(...)`; "
                                 f"the system default (red / app tint) is under AA with its white "
                                 f"label. Use one of {', '.join(sorted(SWIPE_TINT_ALLOWED))}")
+        errs += text_on_tint_lint(dcode, rel, line_of)
+        for om in TOKEN_OPACITY.finditer(code):
+            if float(om.group(1)) > 1:
+                errs.append(f"{rel}:{line_of(om.start())}: `{om.group(0)}`: an opacity above 1 "
+                            f"can't add density (a *Tint carries at most its own alpha); use the "
+                            f"*Hue token for a stronger stroke or wash")
         for m in DANGER_SOLID_FILL.finditer(code):
             errs.append(f"{rel}:{line_of(m.start())}: `{m.group(0).rstrip(',)')})` fills with the "
                         f"text/icon danger color (white on its dark value is 3.27:1); fill with "
@@ -954,6 +1304,26 @@ def contrast_failures(source: str, theme: str, c: dict[str, RGBA]) -> list[str]:
         need("--on-danger on --danger-fill", c["on-danger"], c["danger-fill"], TEXT_AA)
     elif "danger-fill" in c or "on-danger" in c:
         errs.append(f"{source} [{theme}]: --danger-fill and --on-danger must be defined together")
+    surfaces = [("--bg", c["bg"]), ("--bg-card", c["bg-card"])]
+    if "bg-tertiary" in c:
+        surfaces.append(("--bg-tertiary", over(c["bg-tertiary"], c["bg"])))
+    for text, tint in TEXT_ON_TINT:
+        if tint in c and text not in c:
+            errs.append(f"{source} [{theme}]: --{tint} needs --{text}")
+            continue
+        if text not in c:
+            continue
+        if c[text][3] < 1:
+            errs.append(f"{source} [{theme}]: --{text} must be opaque ({hexstr(c[text])})")
+        for name, bg in surfaces:
+            need(f"--{text} text on --{name[2:]}", c[text], bg, TEXT_AA)
+            need(f"--{text} dot / icon vs --{name[2:]}", c[text], bg, NON_TEXT)
+            if tint in c:
+                need(f"--{text} text on --{tint} over {name}", c[text], over(c[tint], bg), TEXT_AA)
+        if "on-accent" in c:
+            need(f"--on-accent on a solid --{text} fill", c["on-accent"], c[text], TEXT_AA)
+        if tint in c and not 0 < c[tint][3] < 1:
+            errs.append(f"{source} [{theme}]: --{tint} must be a translucent wash ({hexstr(c[tint])})")
     if "bg-tertiary" in c:
         tert = over(c["bg-tertiary"], c["bg"])
         if "danger" in c:
@@ -987,8 +1357,43 @@ def run(repo: Path) -> tuple[list[str], list[str]]:
         c["bg-tertiary"] = tertiary_cs[theme]
         notes.append(f"xcassets [{theme}]: " + ", ".join(f"--{t} {hexstr(v)}" for t, v in c.items()))
         errors += contrast_failures("xcassets", theme, c)
+    # The neutral badge / "other" tool chip: foregroundMuted on Status/NeutralTint over
+    # each surface; and onAccent on every solid status / tool color (the verified
+    # on-color for a solid status fill, lint rule below).
+    muted = read_colorset(repo / XCASSETS / "Foreground/ForegroundMuted.colorset")
+    neutral = read_colorset(repo / XCASSETS / "Status/NeutralTint.colorset")
+    for theme in ("light", "dark"):
+        surfaces = {"bg": truth["bg"][theme], "bg-card": truth["bg-card"][theme],
+                    "bg-tertiary": tertiary_cs[theme]}
+        if not 0 < neutral[theme][3] < 1:
+            errors.append(f"xcassets [{theme}]: Status/NeutralTint must be translucent")
+        for name, bg in surfaces.items():
+            r = contrast(muted[theme], over(neutral[theme], bg))
+            if r + 1e-9 < TEXT_AA:
+                errors.append(f"xcassets [{theme}]: ForegroundMuted on NeutralTint over --{name} "
+                              f"(neutral badge, other tool chip) is {r:.2f}:1, needs >= {TEXT_AA}:1")
+        for tok in ("success", "warning", "info", "danger", "tool-web", "tool-search"):
+            r = contrast(truth["on-accent"][theme], truth[tok][theme])
+            if r + 1e-9 < TEXT_AA:
+                errors.append(f"xcassets [{theme}]: onAccent on a solid --{tok} fill is {r:.2f}:1, "
+                              f"needs >= {TEXT_AA}:1")
+    # ScarfBadgeKind.fillAlpha / ScarfToolTone.washAlpha must equal the colorsets'.
+    want_alpha = {("fillAlpha", "warning"): "Status/WarningTint", ("fillAlpha", "success"): "Status/SuccessTint",
+                  ("fillAlpha", "info"): "Status/InfoTint", ("fillAlpha", "danger"): "Status/DangerTint",
+                  ("fillAlpha", "neutral"): "Status/NeutralTint", ("fillAlpha", "brand"): "Accent/AccentTint",
+                  ("washAlpha", "execute"): "Status/WarningTint", ("washAlpha", "other"): "Status/NeutralTint",
+                  ("washAlpha", "default"): "Status/SuccessTint"}
+    alpha_src = strip_swift_comments((repo / COMPONENTS_SWIFT).read_text())
+    for (prop, case), asset in want_alpha.items():
+        cs = read_colorset(repo / XCASSETS / f"{asset}.colorset")
+        pm = re.search(rf"var\s+{prop}\s*:\s*Double\s*\{{(.*?)\n    \}}", alpha_src, re.S)
+        got = pm and re.search(rf"(?:case[^\n]*\.{case}\b|{case})[^\n:]*:\s*return\s+([0-9.]+)", pm.group(1))
+        if not got or any(abs(float(got.group(1)) - cs[t][3]) > ALPHA_TOLERANCE for t in ("light", "dark")):
+            errors.append(f"{COMPONENTS_SWIFT}: {prop} for .{case} is "
+                          f"{got.group(1) if got else '?'}, but {asset} has alpha {cs['light'][3]:g}")
     family = read_brand_family(repo, truth)
     DANGER_FAMILY[:] = read_danger_family(repo, truth)
+    STATUS_FAMILY[:] = read_status_family(repo)
 
     # App (system) tint colorsets: see check 2 in the module docstring for why dark differs.
     tertiary = read_colorset(repo / XCASSETS / "Surface/BackgroundTertiary.colorset")
@@ -1020,11 +1425,43 @@ def run(repo: Path) -> tuple[list[str], list[str]]:
         raise SetupError(f"missing {THEME_SWIFT}")
     swift = strip_swift_comments((repo / THEME_SWIFT).read_text())
     for prop, asset in SWIFT_BINDINGS.items():
-        pat = rf'\b(?:let|var)\s+{prop}\s*(?::\s*Color\s*)?=\s*asset\("{re.escape(asset)}"\)'
+        pat = rf'\b(?:let|var)\s+{prop}\s*(?::\s*Color\s*)?=\s*(?:ScarfColor\.)?asset\("{re.escape(asset)}"\)'
         hits = re.findall(rf'\b(?:let|var)\s+{prop}\b', swift)
         if not re.search(pat, swift) or len(hits) != 1:
             errors.append(f"{THEME_SWIFT}: ScarfColor.{prop} must be declared once, as "
                           f"`asset(\"{asset}\")` (the semantic colorset), not an alias or a brand color")
+
+    # ScarfBadgeKind and ScarfToolTone (badges, chips and every view that takes a tone)
+    # must hand out the verified text-on-tint pairs.
+    comp = repo / COMPONENTS_SWIFT
+    if not comp.is_file():
+        raise SetupError(f"missing {COMPONENTS_SWIFT}")
+    csrc = strip_swift_comments(comp.read_text())
+    status = {k: (f"ScarfColor.{k}", f"ScarfColor.{k}Tint") for k in STATUS_KINDS}
+    tone_maps = (
+        ("ScarfBadgeKind", ("text", "fill"), status),
+        ("ScarfToolTone", ("color", "wash"), {
+            "read": status["success"], "edit": status["info"], "execute": status["warning"],
+            "fetch": ("ScarfColor.Tool.web", "ScarfColor.Tool.webTint"),
+            "browser": ("ScarfColor.Tool.search", "ScarfColor.Tool.searchTint"),
+            "other": ("ScarfColor.foregroundMuted", "ScarfColor.neutralTint")}),
+    )
+    for enum, props, mapping in tone_maps:
+        em = re.search(rf"public enum {enum}\b", csrc)
+        if not em:
+            raise SetupError(f"{COMPONENTS_SWIFT}: no `public enum {enum}`")
+        enum_body = csrc[em.end():csrc.find("\n}\n", em.end())]
+        for idx, prop in enumerate(props):
+            pm = re.search(rf"\bvar\s+{prop}\s*:\s*Color\s*\{{(.*?)\n    \}}", enum_body, re.S)
+            if not pm:
+                raise SetupError(f"{COMPONENTS_SWIFT}: {enum} has no `var {prop}: Color`")
+            for case, pair in mapping.items():
+                want = pair[idx]
+                got = re.search(rf"case\s+\.{case}\s*:\s*return\s+([\w.]+(?:\([^)]*\))?)", pm.group(1))
+                if not got or got.group(1) != want:
+                    errors.append(f"{COMPONENTS_SWIFT}: {enum}.{prop} for .{case} is "
+                                  f"`{got.group(1) if got else '?'}`, must be {want} (the pair "
+                                  f"check 3 verifies)")
 
     # CSS mirrors.
     design_root: dict[str, str] = {}
@@ -1069,7 +1506,15 @@ def run(repo: Path) -> tuple[list[str], list[str]]:
                 errors += contrast_failures(where, theme, resolved)
         errors += fill_lint(rules, root, family, rel)
 
-    # The UI-kit bundle must carry the current sources.
+    # Inline styles in the design system's previews and UI kit.
+    errors += html_lint(repo, family, design_root)
+    errors += jsx_lint(repo, family, design_root)
+
+    # Swift: no system prominent button styles, no accent-tinted swipe actions.
+    errors += swift_lint(repo)
+
+    # The UI-kit bundle must carry the current sources. Checked LAST and collected,
+    # not raised, so a stale or unreadable bundle never hides the lint results above.
     spec = importlib.util.spec_from_file_location(
         "refresh_ui_kit_bundle", Path(__file__).resolve().parent / "refresh-ui-kit-bundle.py")
     bundle = importlib.util.module_from_spec(spec)
@@ -1077,18 +1522,16 @@ def run(repo: Path) -> tuple[list[str], list[str]]:
     try:
         stale = bundle.stale_parts(repo)
     except bundle.BundleError as e:
-        raise SetupError(str(e))
+        stale = None
+        errors.append(f"{SETUP_PREFIX}ui-kit bundle: {e}")
     if stale:
         errors.append(f"ui-kit bundle is stale — run tools/refresh-ui-kit-bundle.py "
                       f"({', '.join(stale)} differ from design/static-site)")
 
-    # Inline styles in the design system's previews and UI kit.
-    errors += html_lint(repo, family, design_root)
-    errors += jsx_lint(repo, family, design_root)
-
-    # Swift: no system prominent button styles, no accent-tinted swipe actions.
-    errors += swift_lint(repo)
     return errors, notes
+
+
+SETUP_PREFIX = "setup error: "
 
 
 def main() -> int:
@@ -1105,17 +1548,19 @@ def main() -> int:
     if args.verbose:
         for n in notes:
             print(n)
+    setup = any(e.startswith(SETUP_PREFIX) for e in errors)
     if errors:
         for e in errors:
             print(f"design-token check FAILED: {e}", file=sys.stderr)
         print(f"check-design-tokens: {len(errors)} failure(s). The xcassets under {XCASSETS} are "
               f"the source of truth; mirror them into the CSS, keep contrast at AA.", file=sys.stderr)
-        return 1
-    print("check-design-tokens: OK — accent/on-accent/danger/bg tokens match the xcassets in "
-          f"{len(CSS_MIRRORS)} stylesheets, every contrast pair clears AA, no text sits "
-          "on an accent or danger fill without --on-accent / --on-danger, and no Swift view "
-          "uses a system prominent "
-          "button style or an accent-tinted swipe action.")
+        return 2 if setup else 1
+    print("check-design-tokens: OK — accent/on-accent/danger/status/bg tokens match the "
+          f"xcassets in {len(CSS_MIRRORS)} stylesheets, every contrast pair (status text on "
+          "its tint included) clears AA, no text sits on an accent or danger fill without "
+          "--on-accent / --on-danger or on a status tint in a raw status color, and no Swift "
+          "view uses a system prominent button style, an accent-tinted swipe action, or a "
+          "semantic color as text on a wash of itself.")
     return 0
 
 

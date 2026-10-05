@@ -252,20 +252,46 @@ public struct ScarfCard<Content: View>: View {
 
 // MARK: - Badge / Pill
 
+/// A status tone: a tint fill and the text color that reads on it. Use it for
+/// any badge, pill, status strip or tile, not only `ScarfBadge`:
+/// `.foregroundStyle(kind.text)` on `.background(kind.fill)` (or a lighter
+/// `kind.fill.opacity(f)` banner wash; `kind.text.opacity(a)` for a border).
+/// Every pair is >= 4.5:1 over backgroundPrimary / Secondary / Tertiary in
+/// both appearances (tools/check-design-tokens.py, which also pins this
+/// mapping). Don't wash with the status color itself
+/// (`ScarfColor.warning.opacity(...)`): that's the darker text hue.
 public enum ScarfBadgeKind {
     case neutral, brand, success, danger, warning, info
 
-    var fill: Color {
+    /// The tint behind the text.
+    public var fill: Color {
         switch self {
-        case .neutral: return ScarfColor.backgroundTertiary
+        case .neutral: return ScarfColor.neutralTint
         case .brand:   return ScarfColor.accentTint
-        case .success: return ScarfColor.success.opacity(0.16)
-        case .danger:  return ScarfColor.danger.opacity(0.16)
-        case .warning: return ScarfColor.warning.opacity(0.18)
-        case .info:    return ScarfColor.info.opacity(0.16)
+        case .success: return ScarfColor.successTint
+        case .danger:  return ScarfColor.dangerTint
+        case .warning: return ScarfColor.warningTint
+        case .info:    return ScarfColor.infoTint
         }
     }
-    var fg: Color {
+
+    /// The kind's tint at an absolute wash `alpha` (<= `fillAlpha`): a lighter
+    /// banner wash in the same hue, e.g. `.warning.tinted(0.12)`.
+    public func tinted(_ alpha: Double) -> Color { fill.opacity(min(alpha / fillAlpha, 1)) }
+
+    /// The alpha baked into `fill` (Status/*Tint, Accent/AccentTint,
+    /// Status/NeutralTint); tools/check-design-tokens.py pins these.
+    public var fillAlpha: Double {
+        switch self {
+        case .neutral: return 0.06
+        case .brand:   return 0.10
+        case .warning: return 0.18
+        case .success, .danger, .info: return 0.16
+        }
+    }
+
+    /// Text and icons on `fill` (and on any surface): the status color.
+    public var text: Color {
         switch self {
         case .neutral: return ScarfColor.foregroundMuted
         case .brand:   return ScarfColor.accent
@@ -273,6 +299,49 @@ public enum ScarfBadgeKind {
         case .danger:  return ScarfColor.danger
         case .warning: return ScarfColor.warning
         case .info:    return ScarfColor.info
+        }
+    }
+}
+
+/// A tool-call kind's chip colors, mirroring `ToolKind` (ScarfCore): `color`
+/// for the kind's icon and label, `wash` for the chip behind them (use
+/// `wash.opacity(f)` for an unfocused, lighter chip). Every pair is >= 4.5:1
+/// in both appearances on every surface (tools/check-design-tokens.py pins
+/// this mapping too).
+public enum ScarfToolTone {
+    case read, edit, execute, fetch, browser, other
+
+    public var color: Color {
+        switch self {
+        case .read:    return ScarfColor.success
+        case .edit:    return ScarfColor.info
+        case .execute: return ScarfColor.warning
+        case .fetch:   return ScarfColor.Tool.web
+        case .browser: return ScarfColor.Tool.search
+        case .other:   return ScarfColor.foregroundMuted
+        }
+    }
+
+    /// The chip at an absolute wash `alpha` (<= its tint's 0.16 / 0.18).
+    public func tinted(_ alpha: Double) -> Color { wash.opacity(min(alpha / washAlpha, 1)) }
+
+    /// The alpha baked into `wash`; tools/check-design-tokens.py pins these.
+    public var washAlpha: Double {
+        switch self {
+        case .execute: return 0.18
+        case .other:   return 0.06
+        default:       return 0.16
+        }
+    }
+
+    public var wash: Color {
+        switch self {
+        case .read:    return ScarfColor.successTint
+        case .edit:    return ScarfColor.infoTint
+        case .execute: return ScarfColor.warningTint
+        case .fetch:   return ScarfColor.Tool.webTint
+        case .browser: return ScarfColor.Tool.searchTint
+        case .other:   return ScarfColor.neutralTint
         }
     }
 }
@@ -302,7 +371,7 @@ public struct ScarfBadge: View {
     public var body: some View {
         text
             .scarfStyle(.captionStrong)
-            .foregroundStyle(kind.fg)
+            .foregroundStyle(kind.text)
             .padding(.horizontal, ScarfSpace.s2)
             .padding(.vertical, 3)
             .background(

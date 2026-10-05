@@ -20,12 +20,17 @@
   --accent-tint: rgba(166, 72, 30, 0.10);
   --accent-tint-strong: rgba(166, 72, 30, 0.18);
   --on-accent: #FFFFFF;     /* Foreground/OnAccent */
-  --success: #2AA876;       /* SemanticSuccess */
-  --success-text: #1F7F5A;  /* design-system --green-600 */
   --success-rgb: 42, 168, 118;
-  --red: #d9534f;
-  --blue: #3498db;
-  --orange: #f0ad4e;
+  /* Status colors (Semantic/*): text-safe on --bg / --bg-card and on their
+   * --<kind>-tint (Status/*Tint, the lighter hue) in both themes. */
+  --success: #186D4C;       /* SemanticSuccess (green-700) */
+  --success-tint: rgba(42, 168, 118, 0.16);
+  --warning: #8A5A12;       /* SemanticWarning (orange-700) */
+  --warning-tint: rgba(240, 173, 78, 0.18);
+  --info: #1B6396;          /* SemanticInfo (blue-700) */
+  --info-tint: rgba(52, 152, 219, 0.16);
+  --danger: #A33430;        /* SemanticDanger (red-700) */
+  --danger-tint: rgba(184, 60, 56, 0.16);
   --radius: 8px;
   --shadow: 0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.04);
   --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -45,9 +50,15 @@
     --accent-tint: rgba(232, 147, 96, 0.10);
     --accent-tint-strong: rgba(232, 147, 96, 0.24);
     --on-accent: #3B1608;    /* Foreground/OnAccent (dark, brand-900) */
-    --success: #3DBE89;      /* SemanticSuccess (dark) */
-    --success-text: #3DBE89;
     --success-rgb: 61, 190, 137;
+    --success: #3DBE89;
+    --success-tint: rgba(61, 190, 137, 0.16);
+    --warning: #F4BE71;
+    --warning-tint: rgba(244, 190, 113, 0.18);
+    --info: #5BAFE3;
+    --info-tint: rgba(91, 175, 227, 0.16);
+    --danger: #EA7F7B;
+    --danger-tint: rgba(227, 104, 100, 0.16);
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.3);
   }
 }
@@ -296,12 +307,12 @@ h1, h2, h3 { line-height: 1.25; }
 }
 .config-field-required {
   font-size: 11px;
-  color: var(--red);
+  color: var(--danger);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 1px 6px;
   border-radius: 10px;
-  background: rgba(217,83,79,0.12);
+  background: var(--danger-tint);
 }
 .config-field-body {
   margin: 0 0 4px 0;
@@ -387,10 +398,11 @@ h1, h2, h3 { line-height: 1.25; }
 .widget-stat-icon { font-size: 14px; color: var(--fg-muted); }
 .widget-stat-value { font-size: 32px; font-weight: 600; line-height: 1.1; }
 .widget-stat-subtitle { font-size: 11px; color: var(--fg-muted); }
+/* Glyphs on the card take the text-safe status colors (the 500s are under 3:1 in light). */
 .widget-stat[data-color="green"] .widget-stat-icon { color: var(--success); }
-.widget-stat[data-color="red"] .widget-stat-icon { color: var(--red); }
-.widget-stat[data-color="blue"] .widget-stat-icon { color: var(--blue); }
-.widget-stat[data-color="orange"] .widget-stat-icon { color: var(--orange); }
+.widget-stat[data-color="red"] .widget-stat-icon { color: var(--danger); }
+.widget-stat[data-color="blue"] .widget-stat-icon { color: var(--info); }
+.widget-stat[data-color="orange"] .widget-stat-icon { color: var(--warning); }
 
 /* progress */
 .widget-progress-label { font-size: 13px; margin: 6px 0 8px; }
@@ -429,15 +441,16 @@ h1, h2, h3 { line-height: 1.25; }
   letter-spacing: 0.5px;
   flex-shrink: 0;
 }
-.widget-list-status[data-status="up"] { background: rgba(var(--success-rgb),0.18); color: var(--success-text); }
-.widget-list-status[data-status="down"] { background: rgba(217,83,79,0.18); color: var(--red); }
+.widget-list-status[data-status="up"] { background: var(--success-tint); color: var(--success); }
+.widget-list-status[data-status="down"] { background: var(--danger-tint); color: var(--danger); }
 /* v2.7 typed semantic statuses (mirrors ScarfDesign palette + Swift ListItemStatus enum). */
-.widget-list-status.status-success { background: rgba(var(--success-rgb),0.18); color: var(--success-text); }
-.widget-list-status.status-warning { background: rgba(240,173,78,0.20); color: var(--orange); }
-.widget-list-status.status-danger  { background: rgba(217,83,79,0.18);  color: var(--red); }
-.widget-list-status.status-info    { background: rgba(91,143,225,0.20); color: var(--blue); }
+/* Text on a status tint is --<kind> on --<kind>-tint (AA, both themes). */
+.widget-list-status.status-success { background: var(--success-tint); color: var(--success); }
+.widget-list-status.status-warning { background: var(--warning-tint); color: var(--warning); }
+.widget-list-status.status-danger  { background: var(--danger-tint);  color: var(--danger); }
+.widget-list-status.status-info    { background: var(--info-tint);    color: var(--info); }
 .widget-list-status.status-pending { background: rgba(0,0,0,0.06); color: var(--fg-muted); }
-.widget-list-status.status-done    { background: rgba(var(--success-rgb),0.14); color: var(--success-text); }
+.widget-list-status.status-done    { background: var(--success-tint); color: var(--success); }
 .widget-list-status.status-neutral { background: rgba(0,0,0,0.06); color: var(--fg-muted); }
 .widget-list-status.status-unknown { background: rgba(0,0,0,0.06); color: var(--fg-muted); font-style: italic; }
 .widget-list-item-done .widget-list-text { text-decoration: line-through; color: var(--fg-muted); }
@@ -448,7 +461,7 @@ h1, h2, h3 { line-height: 1.25; }
   border: 1px solid rgba(240,173,78,0.30);
 }
 .widget-error-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
-.widget-error-icon { color: var(--orange); font-size: 14px; }
+.widget-error-icon { color: var(--warning); font-size: 14px; }
 .widget-error-reason { font-size: 14px; color: var(--fg); }
 .widget-error-hint { margin-top: 4px; font-size: 11px; color: var(--fg-muted); }
 
@@ -485,19 +498,22 @@ h1, h2, h3 { line-height: 1.25; }
 /* v2.7 sparkline under stat value. Inherits color from widget-stat data-color. */
 .widget-stat-sparkline { display: block; margin-top: 4px; width: 100%; }
 .widget-stat[data-color="accent"] .widget-stat-sparkline { color: var(--accent-hover); }
-.widget-stat[data-color="green"]  .widget-stat-sparkline { color: var(--success-text); }
-.widget-stat[data-color="red"]    .widget-stat-sparkline { color: var(--red); }
-.widget-stat[data-color="blue"]   .widget-stat-sparkline { color: var(--blue); }
-.widget-stat[data-color="orange"] .widget-stat-sparkline { color: var(--orange); }
+.widget-stat[data-color="green"]  .widget-stat-sparkline { color: var(--success); }
+.widget-stat[data-color="red"]    .widget-stat-sparkline { color: var(--danger); }
+.widget-stat[data-color="blue"]   .widget-stat-sparkline { color: var(--info); }
+.widget-stat[data-color="orange"] .widget-stat-sparkline { color: var(--warning); }
 
 /* chart */
 .widget-chart-svg { width: 100%; height: auto; margin-top: 8px; }
 .chart-axis { stroke: var(--border); stroke-width: 1; }
 .chart-line { fill: none; stroke-width: 2; }
 .chart-line[data-color="accent"], .chart-bar[data-color="accent"] { stroke: var(--accent); fill: var(--accent); }
-.chart-line[data-color="red"],    .chart-bar[data-color="red"]    { stroke: var(--red);    fill: var(--red); }
-.chart-line[data-color="blue"],   .chart-bar[data-color="blue"]   { stroke: var(--blue);   fill: var(--blue); }
-.chart-line[data-color="orange"], .chart-bar[data-color="orange"] { stroke: var(--orange); fill: var(--orange); }
+/* Series use the semantic tokens (>= 5.2:1 on the card in both themes; the raw 500s
+   are 1.9-3.6:1 in light and weren't redefined for dark). */
+.chart-line[data-color="green"],  .chart-bar[data-color="green"]  { stroke: var(--success); fill: var(--success); }
+.chart-line[data-color="red"],    .chart-bar[data-color="red"]    { stroke: var(--danger);  fill: var(--danger); }
+.chart-line[data-color="blue"],   .chart-bar[data-color="blue"]   { stroke: var(--info);    fill: var(--info); }
+.chart-line[data-color="orange"], .chart-bar[data-color="orange"] { stroke: var(--warning); fill: var(--warning); }
 .widget-chart-empty { color: var(--fg-muted); font-size: 13px; padding: 20px 0; text-align: center; }
 
 /* webview */

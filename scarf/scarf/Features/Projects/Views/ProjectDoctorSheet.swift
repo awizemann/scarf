@@ -177,7 +177,7 @@ struct ProjectDoctorSheet: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.danger.opacity(0.12))
+        .background(ScarfColor.dangerTint.opacity(0.75))
     }
 
     private func findingRow(_ finding: ProjectDoctorFinding, blocked: Bool) -> some View {

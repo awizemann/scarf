@@ -316,9 +316,9 @@ struct KanbanBoardView: View {
             .padding(.vertical, 3)
             .background(
                 Capsule().fill(
-                    (viewModel.scopeToThisChat
-                        ? ScarfColor.accent
-                        : ScarfColor.foregroundFaint).opacity(0.16)
+                    viewModel.scopeToThisChat
+                        ? ScarfColor.accentTint
+                        : ScarfColor.foregroundFaint.opacity(0.16)
                 )
             )
             .foregroundStyle(
@@ -587,7 +587,7 @@ struct KanbanBoardView: View {
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.warning.opacity(0.12))
+        .background(ScarfColor.warningTint.opacity(0.67))
     }
 
     /// Show the toolset-off banner only when the host genuinely lacks
@@ -643,7 +643,7 @@ struct KanbanBoardView: View {
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, ScarfSpace.s2)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.warning.opacity(0.12))
+        .background(ScarfColor.warningTint.opacity(0.67))
     }
 
     private func refreshToolsetState() async {
@@ -697,6 +697,6 @@ struct KanbanBoardView: View {
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.info.opacity(0.12))
+        .background(ScarfColor.infoTint.opacity(0.75))
     }
 }

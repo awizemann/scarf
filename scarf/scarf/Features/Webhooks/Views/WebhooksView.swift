@@ -232,10 +232,10 @@ struct WebhooksView: View {
                     ForEach(webhook.events, id: \.self) { event in
                         Text(event)
                             .font(.caption2)
-                            .foregroundStyle(.blue)
+                            .foregroundStyle(ScarfColor.info)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 1)
-                            .background(.blue.opacity(0.12))
+                            .background(ScarfColor.infoTint.opacity(0.75))
                             .clipShape(Capsule())
                     }
                 }

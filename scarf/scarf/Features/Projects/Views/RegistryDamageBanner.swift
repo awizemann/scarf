@@ -66,7 +66,7 @@ struct RegistryDamageBanner: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(ScarfColor.warning.opacity(0.14))
+        .background(ScarfColor.warningTint.opacity(0.78))
         .onAppear {
             // Registry damage used to arrive silently — a project just
             // vanished from the sidebar. VoiceOver users get no visual

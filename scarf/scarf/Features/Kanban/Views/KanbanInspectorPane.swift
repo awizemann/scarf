@@ -412,7 +412,7 @@ struct KanbanInspectorPane: View {
             if let failure = lastFailureError {
                 bannerRow(
                     icon: "exclamationmark.octagon.fill",
-                    tint: ScarfColor.danger,
+                    tone: .danger,
                     title: "Last failure",
                     // Verbatim — Hermes-side message is the source of truth.
                     message: failure
@@ -421,7 +421,7 @@ struct KanbanInspectorPane: View {
             if needsAssignee {
                 bannerRow(
                     icon: "exclamationmark.triangle.fill",
-                    tint: ScarfColor.warning,
+                    tone: .warning,
                     title: "Won't run automatically",
                     message: "Unassigned tasks are silently skipped by Hermes's dispatcher. Add an assignee to get this scheduled."
                 )
@@ -432,7 +432,7 @@ struct KanbanInspectorPane: View {
                 let detail = lastEndedRun.error ?? lastEndedRun.summary ?? "no details"
                 bannerRow(
                     icon: "exclamationmark.octagon.fill",
-                    tint: ScarfColor.danger,
+                    tone: .danger,
                     title: "Last run: \(label)",
                     message: detail
                 )
@@ -482,13 +482,13 @@ struct KanbanInspectorPane: View {
 
     private func bannerRow(
         icon: String,
-        tint: Color,
+        tone: ScarfBadgeKind,
         title: String,
         message: String
     ) -> some View {
         HStack(alignment: .top, spacing: ScarfSpace.s2) {
             Image(systemName: icon)
-                .foregroundStyle(tint)
+                .foregroundStyle(tone.text)
                 .font(.system(size: 13, weight: .semibold))
             VStack(alignment: .leading, spacing: 2) {
                 Text(title)
@@ -503,11 +503,11 @@ struct KanbanInspectorPane: View {
         .padding(ScarfSpace.s2)
         .background(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .fill(tint.opacity(0.10))
+                .fill(tone.tinted(0.10))
         )
         .overlay(
             RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                .strokeBorder(tint.opacity(0.4), lineWidth: 1)
+                .strokeBorder(tone.text.opacity(0.4), lineWidth: 1)
         )
     }
 

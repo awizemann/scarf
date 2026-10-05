@@ -251,7 +251,7 @@ struct SidebarProjectsWell: View {
             .padding(.vertical, 4)
             .background(
                 RoundedRectangle(cornerRadius: ScarfRadius.sm, style: .continuous)
-                    .fill(ScarfColor.warning.opacity(0.16))
+                    .fill(ScarfColor.warningTint.opacity(0.89))
             )
             .contentShape(Rectangle())
         }

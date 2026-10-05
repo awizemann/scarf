@@ -254,7 +254,7 @@ struct PluginsView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background((report.inEffect ? ScarfColor.danger : ScarfColor.warning).opacity(0.12))
+            .background((report.inEffect ? ScarfColor.dangerTint.opacity(0.75) : ScarfColor.warningTint.opacity(0.67)))
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
     }
@@ -382,7 +382,7 @@ struct PluginsView: View {
     private var spotifyAuthRow: some View {
         HStack(spacing: 10) {
             Image(systemName: "music.note")
-                .foregroundStyle(.green)
+                .foregroundStyle(ScarfColor.success)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sign in to Spotify")
                     .font(.callout.weight(.medium))
@@ -397,7 +397,7 @@ struct PluginsView: View {
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.green.opacity(0.1))
+        .background(ScarfColor.successTint.opacity(0.62))
         .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 

@@ -182,6 +182,6 @@ struct KanbanListView: View {
         .padding(.horizontal, ScarfSpace.s3)
         .padding(.vertical, 8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(ScarfColor.warning.opacity(0.12))
+        .background(ScarfColor.warningTint.opacity(0.67))
     }
 }

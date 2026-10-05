@@ -152,7 +152,7 @@ struct SettingsView: View {
             }
             .buttonStyle(.plain)
         }
-        .listRowBackground(ScarfColor.success.opacity(0.06))
+        .listRowBackground(ScarfColor.successTint.opacity(0.38))
     }
 
     @ViewBuilder

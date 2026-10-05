@@ -87,11 +87,11 @@ public struct ScarfPreviewGallery: View {
                 // ── Tool kind swatches (chat) ───────────────────────────
                 section("Tool kinds") {
                     HStack(spacing: ScarfSpace.s3) {
-                        toolSwatch("Bash",   ScarfColor.Tool.bash)
-                        toolSwatch("Edit",   ScarfColor.Tool.edit)
-                        toolSwatch("Search", ScarfColor.Tool.search)
-                        toolSwatch("Web",    ScarfColor.Tool.web)
-                        toolSwatch("Think",  ScarfColor.Tool.think)
+                        toolSwatch("Read",    ScarfToolTone.read.color)
+                        toolSwatch("Edit",    ScarfToolTone.edit.color)
+                        toolSwatch("Execute", ScarfToolTone.execute.color)
+                        toolSwatch("Fetch",   ScarfToolTone.fetch.color)
+                        toolSwatch("Browser", ScarfToolTone.browser.color)
                     }
                 }
 

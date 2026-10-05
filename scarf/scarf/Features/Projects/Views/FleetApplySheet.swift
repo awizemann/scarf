@@ -242,26 +242,26 @@ struct FleetApplySheet: View {
     @ViewBuilder
     private func outcomeBanner(_ results: [FleetApplyExecutor.TargetResult]) -> some View {
         let outcome = FleetApplyViewModel.outcome(for: results)
-        let (icon, color, text): (String, Color, String) = {
+        let (icon, tone, text): (String, ScarfBadgeKind, String) = {
             switch outcome {
             case .allApplied:
-                return ("checkmark.circle.fill", ScarfColor.success,
+                return ("checkmark.circle.fill", .success,
                         "Applied to \(results.count) host\(results.count == 1 ? "" : "s")")
             case .partialFailure(let failed, let total):
-                return ("exclamationmark.triangle.fill", ScarfColor.danger,
+                return ("exclamationmark.triangle.fill", .danger,
                         "Partly failed — \(failed) of \(total) hosts had errors")
             case .allFailed(let total):
-                return ("xmark.octagon.fill", ScarfColor.danger,
+                return ("xmark.octagon.fill", .danger,
                         "Failed on all ^[\(total) host](inflect: true)")
             case .nothingApplied:
-                return ("minus.circle", ScarfColor.foregroundMuted,
+                return ("minus.circle", .neutral,
                         "Nothing was applied")
             }
         }()
         VStack(alignment: .leading, spacing: 4) {
             Label(text, systemImage: icon)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(color)
+                .foregroundStyle(tone.text)
             if viewModel.didCancel {
                 Text("Cancelled — hosts below that show \"cancelled\" were never touched.")
                     .font(.caption2)
@@ -270,7 +270,7 @@ struct FleetApplySheet: View {
         }
         .padding(8)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(color.opacity(0.10))
+        .background(tone.tinted(0.10))
         .clipShape(RoundedRectangle(cornerRadius: ScarfRadius.md))
     }
 

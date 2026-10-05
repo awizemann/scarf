@@ -39,7 +39,7 @@ struct ChatModelBadge: View {
             .scarfStyle(.caption)
             .padding(.horizontal, ScarfSpace.s2)
             .padding(.vertical, 2)
-            .background(Capsule().fill(ScarfColor.info.opacity(0.12)))
+            .background(Capsule().fill(ScarfColor.infoTint.opacity(0.75)))
             .foregroundStyle(ScarfColor.info)
         }
         .buttonStyle(.plain)

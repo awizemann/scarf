@@ -113,7 +113,7 @@ struct ProjectSlashCommandsView: View {
     private func errorBanner(_ message: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(ScarfColor.warning)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Couldn't update slash commands")
                     .font(.subheadline.weight(.semibold))
@@ -128,7 +128,7 @@ struct ProjectSlashCommandsView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color.orange.opacity(0.08))
+        .background(ScarfColor.warningTint.opacity(0.44))
     }
 }
 

@@ -59,7 +59,7 @@ struct ConnectionStatusPill: View {
         switch status.status {
         case .connected: return ScarfColor.success
         case .degraded: return ScarfColor.warning
-        case .idle: return ScarfColor.warning.opacity(0.7)
+        case .idle: return ScarfColor.foregroundMuted   // a faded warning was 2.95:1 on tertiary
         case .error: return ScarfColor.danger
         }
     }
@@ -257,7 +257,7 @@ private struct HostKeyMismatchHint: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Host key changed", systemImage: "exclamationmark.shield")
                 .font(.subheadline).bold()
-                .foregroundStyle(.orange)
+                .foregroundStyle(ScarfColor.warning)
             Text("The remote's SSH fingerprint no longer matches what your `~/.ssh/known_hosts` file expected. This usually means the remote was reinstalled — or, less commonly, that someone is intercepting the connection.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -281,7 +281,7 @@ private struct HostKeyMismatchHint: View {
             }
         }
         .padding(8)
-        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 6))
+        .background(ScarfColor.warningTint.opacity(0.56), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -297,7 +297,7 @@ private struct SshAddHint: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Authentication uses ssh-agent", systemImage: "key.viewfinder")
                 .font(.subheadline).bold()
-                .foregroundStyle(.blue)
+                .foregroundStyle(ScarfColor.info)
             Text("Scarf never prompts for passphrases. Add your key to ssh-agent in Terminal, then click Retry. If your key isn't `id_ed25519`, swap the path:")
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -321,6 +321,6 @@ private struct SshAddHint: View {
                 .foregroundStyle(.tertiary)
         }
         .padding(8)
-        .background(Color.blue.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
+        .background(ScarfColor.infoTint.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
     }
 }

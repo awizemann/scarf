@@ -42,8 +42,8 @@ struct ChatApprovalModeBadge: View {
             .scarfStyle(.caption)
             .padding(.horizontal, ScarfSpace.s2)
             .padding(.vertical, 2)
-            .background(Capsule().fill(tint.opacity(0.12)))
-            .foregroundStyle(tint)
+            .background(Capsule().fill(tone.tinted(0.12)))
+            .foregroundStyle(tone.text)
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -61,10 +61,10 @@ struct ChatApprovalModeBadge: View {
 
     /// Default mode stays neutral/info; the looser modes warn so the user
     /// can see at a glance they've opted into auto-approving edits.
-    private var tint: Color {
+    private var tone: ScarfBadgeKind {
         switch mode {
-        case .default: return ScarfColor.info
-        case .acceptEdits, .dontAsk: return ScarfColor.warning
+        case .default: return .info
+        case .acceptEdits, .dontAsk: return .warning
         }
     }
 }

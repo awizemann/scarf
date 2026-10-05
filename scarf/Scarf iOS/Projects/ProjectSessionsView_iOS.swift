@@ -118,7 +118,7 @@ struct ProjectSessionsView_iOS: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
-        .background(ScarfColor.warning.opacity(0.10))
+        .background(ScarfColor.warningTint.opacity(0.56))
         .accessibilityElement(children: .combine)
     }
 

@@ -71,7 +71,7 @@ struct MemoryEditorView: View {
                         // failed" in words, so the glyph would only add a
                         // "warning triangle" stop ahead of the sentence.
                         Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(ScarfColor.warning)
                             .accessibilityHidden(true)
                         Text(err)
                             .font(.caption)
@@ -82,7 +82,7 @@ struct MemoryEditorView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(.orange.opacity(0.12))
+                    .background(ScarfColor.warningTint.opacity(0.67))
                     // One VoiceOver stop for glyph + prose (AX M6). The
                     // strip already draws ABOVE the keyboard (it lives in
                     // the bottom safe-area inset), so what was missing was

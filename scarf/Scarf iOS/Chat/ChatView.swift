@@ -607,13 +607,13 @@ struct ChatView: View {
             // `attemptReconnect` actually fires on `.active`.
             connectionBannerStrip(
                 text: attempt == 0 ? "Resuming…" : "Reconnecting (\(attempt)/\(total))…",
-                tint: ScarfColor.warning,
+                tone: .warning,
                 showSpinner: true
             )
         case .offline(let reason):
             connectionBannerStrip(
                 text: reason,
-                tint: ScarfColor.danger,
+                tone: .danger,
                 showSpinner: false
             )
         default:
@@ -626,7 +626,7 @@ struct ChatView: View {
             if controller.vm.isStreamingThoughtsOnly {
                 connectionBannerStrip(
                     text: "Thinking…",
-                    tint: ScarfColor.info,
+                    tone: .info,
                     showSpinner: true
                 )
             } else if controller.vm.isHydratingTools {
@@ -636,7 +636,7 @@ struct ChatView: View {
                 // about to fill in.
                 connectionBannerStrip(
                     text: "Loading tool details…",
-                    tint: ScarfColor.info,
+                    tone: .info,
                     showSpinner: true
                 )
             } else {
@@ -647,28 +647,28 @@ struct ChatView: View {
 
     private func connectionBannerStrip(
         text: String,
-        tint: Color,
+        tone: ScarfBadgeKind,
         showSpinner: Bool
     ) -> some View {
         HStack(spacing: 8) {
             if showSpinner {
                 ProgressView()
                     .scaleEffect(0.7)
-                    .tint(tint)
+                    .tint(tone.text)
             } else {
                 Image(systemName: "wifi.slash")
                     .font(.caption)
-                    .foregroundStyle(tint)
+                    .foregroundStyle(tone.text)
             }
             Text(text)
                 .font(.caption)
-                .foregroundStyle(tint)
+                .foregroundStyle(tone.text)
             Spacer(minLength: 0)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.16))
+        .background(tone.fill)
         .transition(.move(edge: .top).combined(with: .opacity))
     }
 
@@ -1112,13 +1112,13 @@ struct ChatView: View {
             dictationStrip(
                 icon: "waveform",
                 text: Text("Recording… slide away to cancel"),
-                tint: ScarfColor.danger
+                tone: .danger
             )
         case .transcribing:
             dictationStrip(
                 icon: nil,
                 text: Text("Transcribing…"),
-                tint: ScarfColor.info,
+                tone: .info,
                 showsSpinner: true
             )
         case .idle:
@@ -1126,7 +1126,7 @@ struct ChatView: View {
                 dictationStrip(
                     icon: "exclamationmark.circle",
                     text: Self.dictationNoticeText(notice),
-                    tint: ScarfColor.warning,
+                    tone: .warning,
                     showsSettingsLink: notice.opensSystemSettings
                 )
             }
@@ -1136,7 +1136,7 @@ struct ChatView: View {
     private func dictationStrip(
         icon: String?,
         text: Text,
-        tint: Color,
+        tone: ScarfBadgeKind,
         showsSpinner: Bool = false,
         showsSettingsLink: Bool = false
     ) -> some View {
@@ -1144,11 +1144,11 @@ struct ChatView: View {
             if showsSpinner {
                 ProgressView()
                     .scaleEffect(0.7)
-                    .tint(tint)
+                    .tint(tone.text)
             } else if let icon {
                 Image(systemName: icon)
                     .font(.caption)
-                    .foregroundStyle(tint)
+                    .foregroundStyle(tone.text)
             }
             text
                 .font(.caption)
@@ -1160,13 +1160,13 @@ struct ChatView: View {
                 }
                 .font(.caption.weight(.semibold))
                 .buttonStyle(.plain)
-                .foregroundStyle(tint)
+                .foregroundStyle(tone.text)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(tint.opacity(0.16))
+        .background(tone.fill)
     }
 
     /// Deep-links to the app's Settings page so a denied microphone or
@@ -1257,26 +1257,26 @@ struct ChatView: View {
             dictationStrip(
                 icon: "mic.slash",
                 text: Text("Microphone access is off. Enable it in Settings to use Live Voice."),
-                tint: ScarfColor.warning,
+                tone: .warning,
                 showsSettingsLink: true
             )
         case .interrupted:
             dictationStrip(
                 icon: "phone.down",
                 text: Text("Live Voice ended because another app or a call took the audio."),
-                tint: ScarfColor.warning
+                tone: .warning
             )
         case .hermesConnectionLost:
             dictationStrip(
                 icon: "bolt.horizontal.circle",
                 text: Text("Live Voice ended because the connection to Hermes was lost."),
-                tint: ScarfColor.warning
+                tone: .warning
             )
         case .busyWithTypedTurn:
             dictationStrip(
                 icon: "keyboard",
                 text: Text("Hermes is busy with a typed request, so Live Voice didn't interrupt it. Ask again when it's finished."),
-                tint: ScarfColor.warning
+                tone: .warning
             )
         }
     }
@@ -1381,7 +1381,7 @@ struct ChatView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                        .foregroundStyle(ScarfColor.warning)
                     VStack(alignment: .leading, spacing: 2) {
                         if let hint = controller.vm.acpErrorHint {
                             Text(hint)
@@ -1431,7 +1431,7 @@ struct ChatView: View {
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.orange.opacity(0.12))
+            .background(ScarfColor.warningTint.opacity(0.67))
         }
     }
 
@@ -3938,10 +3938,10 @@ private struct ReasoningDisclosure: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 7)
-                .fill(ScarfColor.warning.opacity(0.10))
+                .fill(ScarfColor.warningTint.opacity(0.56))
                 .overlay(
                     RoundedRectangle(cornerRadius: 7)
-                        .strokeBorder(ScarfColor.warning.opacity(0.30), lineWidth: 1)
+                        .strokeBorder(ScarfColor.warningHue.opacity(0.30), lineWidth: 1)
                 )
         )
         // Upgrade to reasoning_content on first open if it wasn't bulk-loaded. (t-aud21)
@@ -3966,13 +3966,13 @@ private struct ToolCallCard: View {
                 HStack(spacing: 8) {
                     HStack(spacing: 4) {
                         Image(systemName: call.toolKind.icon)
-                            .foregroundStyle(toolColor)
+                            .foregroundStyle(call.toolKind.tone.color)
                             .font(.caption2)
                         Text(toolLabel)
                             .font(.caption2)
                             .fontWeight(.semibold)
                             .tracking(0.4)
-                            .foregroundStyle(toolColor)
+                            .foregroundStyle(call.toolKind.tone.color)
                     }
                     Text(call.functionName)
                         .font(.caption.monospaced())
@@ -3992,10 +3992,10 @@ private struct ToolCallCard: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(toolColor.opacity(0.10))
+                        .fill(call.toolKind.tone.tinted(0.10))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7)
-                                .strokeBorder(toolColor.opacity(0.30), lineWidth: 1)
+                                .strokeBorder(call.toolKind.tone.color.opacity(0.30), lineWidth: 1)
                         )
                 )
             }
@@ -4035,16 +4035,8 @@ private struct ToolCallCard: View {
         }
     }
 
-    private var toolColor: Color {
-        switch call.toolKind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
+
+
 }
 
 /// Row showing a tool-result (role="tool"). Styled as a small

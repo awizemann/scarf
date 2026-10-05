@@ -81,7 +81,7 @@ struct ProjectChatSettingsSheet: View {
                             }
                             .padding(ScarfSpace.s2)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(ScarfColor.danger.opacity(0.1))
+                            .background(ScarfColor.dangerTint.opacity(0.62))
                         }
                     }
                 }

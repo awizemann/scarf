@@ -42,12 +42,12 @@ struct ToolCallCard: View {
                 HStack(spacing: 9) {
                     HStack(spacing: 5) {
                         Image(systemName: call.toolKind.icon)
-                            .foregroundStyle(toolColor)
+                            .foregroundStyle(call.toolKind.tone.color)
                             .font(.system(size: 11))
                         Text(toolLabel)
                             .scarfStyle(.captionStrong)
                             .tracking(0.4)
-                            .foregroundStyle(toolColor)
+                            .foregroundStyle(call.toolKind.tone.color)
                     }
                     Text(call.functionName)
                         .font(ScarfFont.monoSmall)
@@ -90,11 +90,11 @@ struct ToolCallCard: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 7)
-                        .fill(toolColor.opacity(isFocused ? 0.16 : 0.10))
+                        .fill(call.toolKind.tone.tinted(isFocused ? 0.16 : 0.10))
                         .overlay(
                             RoundedRectangle(cornerRadius: 7)
                                 .strokeBorder(
-                                    toolColor.opacity(isFocused ? 0.55 : 0.30),
+                                    call.toolKind.tone.color.opacity(isFocused ? 0.55 : 0.30),
                                     lineWidth: isFocused ? 1.4 : 1
                                 )
                         )
@@ -174,16 +174,8 @@ struct ToolCallCard: View {
         }
     }
 
-    private var toolColor: Color {
-        switch call.toolKind {
-        case .read:    return ScarfColor.success
-        case .edit:    return ScarfColor.info
-        case .execute: return ScarfColor.warning
-        case .fetch:   return ScarfColor.Tool.web
-        case .browser: return ScarfColor.Tool.search
-        case .other:   return ScarfColor.foregroundMuted
-        }
-    }
+
+
 
     private func formatJSON(_ raw: String) -> String {
         guard let data = raw.data(using: .utf8),

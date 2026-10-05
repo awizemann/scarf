@@ -95,10 +95,10 @@ struct PersonalitiesView: View {
                             if personality.name == viewModel.activeName {
                                 Text("active")
                                     .font(.caption2.bold())
-                                    .foregroundStyle(.green)
+                                    .foregroundStyle(ScarfColor.success)
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 1)
-                                    .background(.green.opacity(0.15))
+                                    .background(ScarfColor.successTint.opacity(0.94))
                                     .clipShape(Capsule())
                             }
                             if personality.isBuiltin {
