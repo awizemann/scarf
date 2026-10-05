@@ -600,7 +600,7 @@ struct SkillsView: View {
             }
             Spacer()
             Button("Sign In") { showSpotifySignIn = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
         }
         .padding(10)
@@ -617,7 +617,7 @@ struct SkillsView: View {
                 Spacer()
                 Button("Cancel") { viewModel.cancelEditing() }
                 Button("Save") { Task { await viewModel.saveEdit() } }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(viewModel.isSavingContent)
             }
             .padding()
@@ -832,7 +832,7 @@ struct SkillsView: View {
                 if !viewModel.updates.isEmpty {
                     Button("Update All") { viewModel.updateAll() }
                         .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ScarfPrimaryButton())
                 }
                 Spacer()
             }

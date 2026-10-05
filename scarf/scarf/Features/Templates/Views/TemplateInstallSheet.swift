@@ -430,6 +430,7 @@ struct TemplateInstallSheet: View {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
@@ -576,6 +577,7 @@ private struct ParentDirectoryStep: View {
                 onContinue(trimmed)
             }
             .keyboardShortcut(.defaultAction)
+            .buttonStyle(ScarfPrimaryButton())
             .disabled(parentPath.trimmingCharacters(in: .whitespaces).isEmpty)
             .accessibilityIdentifier("templateInstall.parentDir.continue")
         }

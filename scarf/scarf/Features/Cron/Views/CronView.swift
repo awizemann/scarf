@@ -1548,7 +1548,6 @@ struct CronJobEditor: View {
             if supportsNoAgent {
                 Toggle("Run script only (no agent call)", isOn: $form.noAgent)
                     .scarfStyle(.body)
-                    .tint(ScarfColor.accent)
                 if form.noAgent {
                     Text("Watchdog mode — Hermes runs the pre-run script and skips the AI turn. Prompt + skills are ignored.")
                         .scarfStyle(.caption)
@@ -1559,7 +1558,6 @@ struct CronJobEditor: View {
             if supportsModelPin && !form.noAgent {
                 Toggle(modelPinToggleTitle, isOn: $form.pinModel)
                     .scarfStyle(.body)
-                    .tint(ScarfColor.accent)
                     .accessibilityIdentifier("cron.editor.pinModel")
                 Text(modelPinCaption)
                     .scarfStyle(.caption)
@@ -1591,7 +1589,6 @@ struct CronJobEditor: View {
                                 ))
                                 .font(ScarfFont.monoSmall)
                                 .toggleStyle(.checkbox)
-                                .tint(ScarfColor.accent)
                             }
                         }
                     }
@@ -1610,7 +1607,6 @@ struct CronJobEditor: View {
                     if isEditMode {
                         Toggle("Clear all skills on save", isOn: $form.clearSkills)
                             .scarfStyle(.caption)
-                            .tint(ScarfColor.accent)
                         if form.clearSkills {
                             Text("Every skill is removed from this job on save. Turn this off to pick skills individually.")
                                 .scarfStyle(.caption)

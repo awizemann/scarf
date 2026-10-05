@@ -42,6 +42,14 @@ public enum ScarfColor {
     /// #D87844) and pairs with a dark `onAccent` (brand-900 #3B1608).
     /// Mirrored in design/static-site/colors_and_type.css and the site
     /// stylesheets; tools/check-design-tokens.py fails on drift.
+    ///
+    /// The apps' own AccentColor.colorset (the SYSTEM tint for checkboxes,
+    /// switches, default buttons) matches this in light but is #D87844
+    /// (accentActive dark) in dark, not #E89360: the system draws WHITE
+    /// glyphs on its tint, and white on #E89360 is 2.39:1. No color can give
+    /// white 4.5:1 and also be 4.5:1 text on the dark page, so the tint clears
+    /// the 3:1 non-text bar (3.14:1) and stays 5.9:1 as text. Our own filled
+    /// buttons use ScarfPrimaryButton (onAccent), never the system tint.
     public static let accent       = asset("Accent/Accent")
     public static let accentHover  = asset("Accent/AccentHover")
     public static let accentActive = asset("Accent/AccentActive")
@@ -67,9 +75,20 @@ public enum ScarfColor {
     public static let foregroundFaint   = asset("Foreground/ForegroundFaint")
     public static let onAccent          = asset("Foreground/OnAccent")
 
-    // Semantic
+    // Semantic. `danger` is for danger TEXT and icons: red-600 #B83C38 in
+    // light (5.34:1 on backgroundPrimary, 5.61 on secondary, 4.98 on
+    // tertiary), #E36864 in dark (5.68 / 5.20 / 4.97). A filled danger
+    // surface uses `dangerFill` + `onDanger` instead (white on the #E36864
+    // dark value is only 3.27:1).
     public static let success = asset("Semantic/SemanticSuccess")
     public static let danger  = asset("Semantic/SemanticDanger")
+
+    /// Filled danger surface (destructive buttons, stop controls): red-600
+    /// #B83C38 in both appearances, so the white `onDanger` label is 5.61:1.
+    /// Mirrored as --danger-fill / --on-danger in colors_and_type.css;
+    /// tools/check-design-tokens.py fails on drift or a contrast regression.
+    public static let dangerFill = asset("Danger/DangerFill")
+    public static let onDanger   = asset("Danger/OnDanger")
     public static let warning = asset("Semantic/SemanticWarning")
     public static let info    = asset("Semantic/SemanticInfo")
 

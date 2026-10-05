@@ -246,6 +246,7 @@ struct AddServerSheet: View {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
+            .buttonStyle(ScarfPrimaryButton())
             .disabled(!viewModel.canSave)
         }
         .padding(.horizontal, 20)

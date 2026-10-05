@@ -187,12 +187,12 @@ struct VoiceLivePanel: View {
                 Label("End", systemImage: "phone.down.fill")
                     .labelStyle(.titleAndIcon)
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(ScarfColor.onAccent)
+                    .foregroundStyle(ScarfColor.onDanger)
                     .padding(.horizontal, 10)
                     .frame(height: 28)
                     .background(
                         RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                            .fill(ScarfColor.danger)
+                            .fill(ScarfColor.dangerFill)
                     )
             }
             .buttonStyle(.plain)

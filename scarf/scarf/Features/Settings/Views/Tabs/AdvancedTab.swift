@@ -1,6 +1,7 @@
 import AppKit
 import SwiftUI
 import ScarfCore
+import ScarfDesign
 import UniformTypeIdentifiers
 
 /// Advanced tab — network, compression, checkpoints, logging, delegation, file read cap,
@@ -729,6 +730,7 @@ private struct RemoteBackupPathSheet: View {
                     guard !trimmed.isEmpty else { return }
                     onConfirm(trimmed)
                 }
+                .buttonStyle(ScarfPrimaryButton())
                 .keyboardShortcut(.defaultAction)
                 .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
             }

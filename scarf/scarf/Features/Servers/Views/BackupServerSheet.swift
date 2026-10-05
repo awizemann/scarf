@@ -223,12 +223,13 @@ struct BackupServerSheet: View {
             case .ready(let summary):
                 Button("Back up…") { presentSavePanel(summary: summary) }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     // A live state.db is never archived without a snapshot.
                     .disabled(summary.snapshotUnavailable)
             case .failed:
                 Button("Try again") { Task { await viewModel.start() } }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(ScarfPrimaryButton())
             default:
                 EmptyView()
             }

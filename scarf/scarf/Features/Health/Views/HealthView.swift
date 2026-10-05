@@ -595,7 +595,7 @@ struct SectionCard: View {
                             }
                             if errorCount > 0 {
                                 HStack(spacing: 2) {
-                                    Circle().fill(ScarfColor.danger).frame(width: 5, height: 5)
+                                    Circle().fill(ScarfColor.dangerFill).frame(width: 5, height: 5)
                                     Text("\(errorCount)").font(ScarfFont.caption2).foregroundStyle(ScarfColor.foregroundMuted)
                                 }
                                 // Colour is the only thing separating these

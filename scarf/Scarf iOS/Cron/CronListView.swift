@@ -88,6 +88,9 @@ struct CronListView: View {
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                            // White label: system red is 3.55:1 / 3.41:1,
+                            // dangerFill 5.61:1 in both appearances.
+                            .tint(ScarfColor.dangerFill)
                             // Round-5 review (P50b). Every refusal sentence
                             // this screen shows in its top banner names
                             // Duplicate as the remedy
@@ -102,7 +105,12 @@ struct CronListView: View {
                             } label: {
                                 Label("Duplicate", systemImage: "plus.square.on.square")
                             }
-                            .tint(ScarfColor.accent)
+                            // The system always draws a WHITE swipe label, so
+                            // the tint must be dark in BOTH appearances.
+                            // ScarfColor.accent is #E89360 in dark (white on
+                            // it 2.39:1, fails AA); brandRustDeep is #7A2E14
+                            // light (9.42:1) / #A6481E dark (5.89:1).
+                            .tint(ScarfColor.brandRustDeep)
                         }
                         .contextMenu {
                             // The SAME shared offer the Mac's detail pane and

@@ -1030,7 +1030,7 @@ private struct AddCredentialSheet: View {
                         Label("Open in Browser", systemImage: "safari")
                     }
                     .controlSize(.small)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url, forType: .string)
@@ -1075,7 +1075,7 @@ private struct AddCredentialSheet: View {
                     .onSubmit { submitCode(flow: flow) }
                 Button("Submit") { submitCode(flow: flow) }
                     .controlSize(.small)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(!flow.awaitingCode || authCode.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if !flow.awaitingCode && flow.isRunning {
@@ -1140,7 +1140,7 @@ private struct AddCredentialSheet: View {
                         label = ""
                         onDismiss()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     // Keyless providers have nothing to store — a stale
                     // key left in the field from a previous selection
                     // must not re-enable the save.
@@ -1260,7 +1260,7 @@ private struct AddCredentialSheet: View {
                         }
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(providerSwapInFlight)
                 .keyboardShortcut(.defaultAction)
             }
@@ -1278,22 +1278,22 @@ private struct AddCredentialSheet: View {
         switch oauthGate(for: providerID) {
         case .providerEmpty:
             Button("Start OAuth") {}
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(true)
         case .ok:
             Button("Start OAuth") {
                 viewModel.startOAuth(provider: providerID, label: label)
                 oauthStarted = true
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         case .useNousSignIn:
             Button("Sign in to Nous Portal") {
                 showNousSignIn = true
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
         case .useCLI:
             Button("Start OAuth") {}
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(true)
         }
     }

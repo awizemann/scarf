@@ -299,7 +299,7 @@ struct FleetApplySheet: View {
                     Task { await viewModel.apply() }
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(!viewModel.canApply)
             case .applying:
                 Button("Stop") { viewModel.cancel() }
@@ -316,7 +316,7 @@ struct FleetApplySheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
             }
         }
         .padding()

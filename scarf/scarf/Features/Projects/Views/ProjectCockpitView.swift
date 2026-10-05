@@ -264,7 +264,7 @@ struct ProjectCockpitView: View {
                 let hasKanban = capabilitiesStore?.capabilities.hasKanban ?? false
                 Task { await coordinator.upgradeProject(project, context: serverContext, hasKanban: hasKanban) }
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
             .disabled(coordinator.isUpgrading(project.path))
         }
@@ -836,7 +836,7 @@ private struct CockpitProjectSkillsPanel: View {
                 } else {
                     Button("Trust Repo") { vm.setTrusted(true) }
                         .controlSize(.small)
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ScarfPrimaryButton())
                         .disabled(vm.isBusy)
                 }
             }

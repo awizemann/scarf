@@ -39,6 +39,7 @@ struct TemplateExportSheet: View {
                         }
                         Button("Done") { dismiss() }
                             .keyboardShortcut(.defaultAction)
+                            .buttonStyle(ScarfPrimaryButton())
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -54,6 +55,7 @@ struct TemplateExportSheet: View {
                         .multilineTextAlignment(.center)
                     Button("Close") { dismiss() }
                         .keyboardShortcut(.defaultAction)
+                        .buttonStyle(ScarfPrimaryButton())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()

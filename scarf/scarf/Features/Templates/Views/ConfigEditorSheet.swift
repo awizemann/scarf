@@ -82,6 +82,7 @@ struct ConfigEditorSheet: View {
                         .multilineTextAlignment(.center)
                     Button("Close") { dismiss() }
                         .keyboardShortcut(.defaultAction)
+                        .buttonStyle(ScarfPrimaryButton())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
@@ -98,6 +99,7 @@ struct ConfigEditorSheet: View {
                         .multilineTextAlignment(.center)
                     Button("Close") { dismiss() }
                         .keyboardShortcut(.defaultAction)
+                        .buttonStyle(ScarfPrimaryButton())
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
@@ -129,6 +131,7 @@ struct ConfigEditorSheet: View {
                 .foregroundStyle(.secondary)
             Button("Close") { dismiss() }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(ScarfPrimaryButton())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .frame(minWidth: 560, minHeight: 280)

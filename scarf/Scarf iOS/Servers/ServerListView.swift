@@ -76,6 +76,9 @@ struct ServerListView: View {
                             } label: {
                                 Label("Forget", systemImage: "trash")
                             }
+                            // The system draws a white label; its destructive
+                            // red is 3.55:1 / 3.41:1. dangerFill is 5.61:1.
+                            .tint(ScarfColor.dangerFill)
                         }
                     }
                 } footer: {

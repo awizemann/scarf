@@ -232,7 +232,7 @@ struct ProjectsView: View {
                     }
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(URL(string: installURLInput)?.scheme?.lowercased() != "https")
                 .accessibilityIdentifier("templates.installURL.confirm")
             }
@@ -432,6 +432,7 @@ struct AddProjectSheet: View {
                     dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(projectName.isEmpty || projectPath.isEmpty)
             }
         }

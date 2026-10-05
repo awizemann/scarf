@@ -97,8 +97,7 @@ struct TemplateUninstallSheet: View {
                     // lead to an error screen.
                     .disabled(plan.rootRefused)
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(ScarfPrimaryButton())
-                    .tint(.red)
+                    .buttonStyle(ScarfDestructiveButton())
                     .accessibilityIdentifier("templateUninstall.confirmRemove")
             }
             .padding(.top, 8)
@@ -496,6 +495,7 @@ struct TemplateUninstallSheet: View {
                 dismiss()
             }
             .keyboardShortcut(.defaultAction)
+            .buttonStyle(ScarfPrimaryButton())
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()

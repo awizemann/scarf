@@ -113,7 +113,7 @@ struct BotConversationView: View {
                     .textSelection(.enabled)
                 unsentNote
                 Button("Try Again") { viewModel.open() }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -235,7 +235,7 @@ private struct BotConversationStarter: View {
                 .lineLimit(1...4)
                 .onSubmit(send)
             Button("Send", action: send)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
         }
     }

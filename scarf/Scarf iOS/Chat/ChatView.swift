@@ -923,10 +923,10 @@ struct ChatView: View {
                     controller.stopCurrentTurn()
                 } label: {
                     ZStack {
-                        Circle().fill(ScarfColor.danger)
+                        Circle().fill(ScarfColor.dangerFill)
                         Image(systemName: "stop.fill")
                             .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(ScarfColor.onAccent)
+                            .foregroundStyle(ScarfColor.onDanger)
                     }
                     .frame(width: 44, height: 44)
                     .contentShape(Circle())

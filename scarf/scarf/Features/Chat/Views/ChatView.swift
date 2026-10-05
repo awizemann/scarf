@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfDesign
 import ScarfCore
 
 struct ChatView: View {
@@ -205,7 +206,7 @@ struct ChatView: View {
                             coordinator.pendingOAuthReauth = provider
                             coordinator.selectedSection = .credentialPools
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ScarfPrimaryButton())
                         .controlSize(.small)
                         .help("Open Credential Pools and re-authenticate \(provider).")
                     }
@@ -288,7 +289,7 @@ struct ChatView: View {
                     Button("Switch to Custom endpoint") {
                         viewModel.switchLlamaCppToCustom()
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .controlSize(.small)
                     .help("Set model.provider = custom and keep model.base_url and model.default.")
                     .padding(.top, 2)
@@ -320,7 +321,7 @@ struct ChatView: View {
                     Button("Choose model…") {
                         viewModel.chooseModelForUnroutableProvider(provider)
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .controlSize(.small)
                     .help("Pick a model and provider Hermes supports — Scarf saves both to config.yaml.")
                     .padding(.top, 2)
@@ -370,7 +371,7 @@ struct ChatView: View {
                             Button("Use \(mismatch.prefixProvider)") {
                                 viewModel.alignProviderToModelPrefix(mismatch)
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(ScarfPrimaryButton())
                             .controlSize(.small)
                             .help("Set model.provider = \(mismatch.prefixProvider) and model.default = \(mismatch.bareModel).")
                         }
@@ -395,7 +396,7 @@ struct ChatView: View {
                         if mismatch.prefixIsKnownProvider {
                             choose.buttonStyle(.bordered)
                         } else {
-                            choose.buttonStyle(.borderedProminent)
+                            choose.buttonStyle(ScarfPrimaryButton())
                         }
                     }
                     .padding(.top, 2)
@@ -934,7 +935,7 @@ struct PermissionApprovalView: View {
                                 onRespond(option.optionId)
                                 dismiss()
                             }
-                            .buttonStyle(.borderedProminent)
+                            .buttonStyle(ScarfPrimaryButton())
                         }
                     }
                     .fixedSize()

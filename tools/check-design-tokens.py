@@ -11,6 +11,8 @@ The asset catalog is the source of truth:
         Foreground/OnAccent                          -> --on-accent
         Surface/BackgroundPrimary                    -> --bg
         Surface/BackgroundSecondary                  -> --bg-card
+        Semantic/SemanticDanger                      -> --danger       (text / icons)
+        Danger/DangerFill, Danger/OnDanger           -> --danger-fill, --on-danger
 
 The guard FAILS CLOSED: anything it can't place or parse is an error, not a pass.
 
@@ -30,16 +32,27 @@ Checks, for light and dark:
      context — another selector, @layer, @supports, a non-dark or nested @media — is an
      error. A dark block inherits what it leaves out from :root, as the cascade does,
      so a dark block that forgets --on-accent is caught too. `!important` is ignored.
-  2. The two app AccentColor colorsets (macOS + iOS) equal Accent/Accent, and
-     ScarfTheme.swift (comments stripped) still binds ScarfColor.accent* / onAccent to
-     those assets.
+  2. The two app AccentColor colorsets (macOS + iOS) are the SYSTEM tint: checkboxes,
+     switches, default buttons and links that AppKit/UIKit draw, often with a WHITE glyph
+     or label on the tint. Light must equal Accent/Accent light (#A6481E: white on it is
+     5.89:1). Dark deliberately differs from Accent/Accent: no single color can carry
+     white at 4.5:1 (needs luminance <= 0.183) AND read as 4.5:1 text on the dark page
+     (needs >= 0.205 on --bg, >= 0.228 on --bg-card). So the dark tint must give white
+     >= 3.0:1 (the non-text bar for a checkmark / switch knob) and be >= 4.5:1 as text on
+     the dark bg, card and tertiary surfaces; it is #D87844 (accentActive dark): white
+     3.14:1, text 5.91 / 5.41. Text on an accent FILL in our own views uses
+     ScarfPrimaryButton / onAccent, never the system tint. ScarfTheme.swift (comments
+     stripped) still binds ScarfColor.accent* / onAccent / danger* to their assets.
   3. WCAG 2.x contrast: on-accent on accent / hover / active >= 4.5; accent, hover and
      active as text on the page and card backgrounds >= 4.5; accent and active text on
      --accent-tint and hover text on --accent-tint-strong (composited over both) >= 4.5;
      accent as a focus ring / border vs both >= 3.0. Where a stylesheet defines
      --bg-tertiary (composited over --bg if translucent): accent and hover text on it
      >= 4.5, hover text on either tint over it >= 4.5 (tinted accent text on a tertiary
-     surface uses the hover step), focus ring >= 3.0.
+     surface uses the hover step), focus ring >= 3.0. Danger, where defined (always in
+     the xcassets; the danger tokens are optional per stylesheet but must match when
+     present): --danger text on --bg, --bg-card and --bg-tertiary >= 4.5, --on-danger on
+     --danger-fill >= 4.5. The xcassets run includes Surface/BackgroundTertiary.
   4. Fill lint, in the CSS mirrors, the <style> blocks and style="" attributes of
      design/static-site/**/*.html, and the ui-kit .jsx style objects: a rule (or style
      object) whose background / background-color / background-image is an accent fill
@@ -49,16 +62,52 @@ Checks, for light and dark:
      colors_and_type.css plus the xcassets accent states), including gradients. The
      brand-50..200 pastels are not accent fills: they take dark text, not --on-accent.
      In .jsx only white text ('#fff' / '#FFF' / '#ffffff' / 'white') is flagged.
+     Danger fills get the same treatment: a rule or style object whose fill is red-500 /
+     red-600, var(--danger*) or a danger colorset value, and that sets a text color, must
+     fill with var(--danger-fill) and color the text var(--on-danger) (white on the
+     dark-mode --danger is 3.27:1). The red-100 pastel isn't a danger fill.
 
   5. The ui-kit bundle (design/static-site/ui-kit/index.html) is fresh: its embedded
      colors_and_type.css (ignoring the inlined @font-face swap for the Google Fonts
      @import) and each embedded .jsx equal the sources in design/static-site. Decoding
      is shared with tools/refresh-ui-kit-bundle.py, which fixes a stale bundle.
 
+  6. Swift lint (comments and string-literal contents stripped, identifier backticks
+     dropped, #if/#else/#endif lines blanked) over every .swift file under scarf/scarf,
+     "scarf/Scarf iOS" and scarf/Packages/*/Sources (build output such as .build/ is
+     skipped):
+       - no `.borderedProminent` / `BorderedProminentButtonStyle`, `.glassProminent` /
+         `GlassProminentButtonStyle`, or `.controlProminence(.increased)`. The system
+         prominent styles fill with the app AccentColor and draw a WHITE label. Use
+         `.buttonStyle(ScarfPrimaryButton())`, which draws ScarfColor.onAccent.
+       - a Button with `.keyboardShortcut(.defaultAction)` (or `.return` with no
+         modifiers) must carry a Scarf style (`ScarfPrimaryButton()` /
+         `ScarfDestructiveButton()`, or Secondary / Ghost for an "Enter cancels" sheet)
+         in the SAME modifier chain: otherwise macOS draws its default-button look, a
+         white label on the system tint. The chain is found by bracket matching: back
+         over `.member`, call parens, trailing and `label:` closures to the root, forward
+         over following `.modifier(...)` links; only `.buttonStyle` at depth 0 of the
+         chain counts (not one inside the label closure).
+       - inside a `.swipeActions { ... }` closure, every `.tint(...)` must be in
+         SWIPE_TINT_ALLOWED (brandRustDeep, dangerFill: white clears AA on both in both
+         appearances), and every swipe Button must carry one: untinted, the system uses
+         its red (3.55 / 3.41:1) or the app tint (3.14:1 dark) under a white label.
+       - no `.fill(ScarfColor.danger)` / `.background(ScarfColor.danger, ...)` without an
+         opacity: a solid danger surface is ScarfColor.dangerFill (+ onDanger).
+     A missing source root, no .swift files found, or unbalanced brackets / an
+     unterminated literal is a setup error (fail closed).
+
 Known limitation: the fill lint only pairs declarations within one rule / style object.
 A fill set on `.btn:hover` with the text color on `.btn` (or a JSX conditional that
 splits them across objects) isn't paired. The ui-kit/index.html bundle is not scanned
 (its sources are).
+The Swift lint can't see: a button style applied to a CONTAINER (`HStack {...}
+.buttonStyle(...)`) or to a stored view (`let b = Button(...)`; `b.buttonStyle(...)`),
+which the default-action rule reports as missing (a false positive, never a pass); a
+default button created by AppKit/UIKit itself (alerts, confirmation dialogs, NSAlert),
+which takes the system tint, hence check 2's dark AccentColor; a `.tint` applied outside
+the `.swipeActions` closure; and a danger fill reached through a variable or a custom
+ShapeStyle. Checkboxes / switches draw on the system tint, covered by check 2.
 
 Stdlib only. Exit 0 when clean, 1 on any failure (each one printed), 2 on a setup
 error (missing file, unparseable colorset).
@@ -90,6 +139,9 @@ CSS_MIRRORS = (
 DESIGN_HTML_ROOT = "design/static-site"
 DESIGN_HTML_SKIP = {"design/static-site/ui-kit/index.html"}  # generated bundle
 JSX_GLOB = "design/static-site/ui-kit/*.jsx"
+SWIFT_ROOTS = ("scarf/scarf", "scarf/Scarf iOS")
+SWIFT_PACKAGES_GLOB = "scarf/Packages/*/Sources"
+SWIFT_SKIP_DIRS = {".build", ".dd", "build", "DerivedData", ".swiftpm"}
 
 # CSS token -> colorset (relative to XCASSETS).
 TOKENS = {
@@ -101,6 +153,9 @@ TOKENS = {
     "on-accent": "Foreground/OnAccent",
     "bg": "Surface/BackgroundPrimary",
     "bg-card": "Surface/BackgroundSecondary",
+    "danger": "Semantic/SemanticDanger",
+    "danger-fill": "Danger/DangerFill",
+    "on-danger": "Danger/OnDanger",
 }
 # Every theme block must resolve these (the tints are optional per file).
 REQUIRED = ("accent", "accent-hover", "accent-active", "on-accent", "bg", "bg-card")
@@ -115,6 +170,9 @@ SWIFT_BINDINGS = {
     "accentTint": "Accent/AccentTint",
     "accentTintStrong": "Accent/AccentTintStrong",
     "onAccent": "Foreground/OnAccent",
+    "danger": "Semantic/SemanticDanger",
+    "dangerFill": "Danger/DangerFill",
+    "onDanger": "Danger/OnDanger",
 }
 
 TEXT_AA = 4.5
@@ -384,17 +442,53 @@ def is_accent_fill(value: str, scope: dict[str, str], family: list[RGBA]) -> boo
     return any(is_accent_color(c, family) for c in colors_in(resolve(value, scope)))
 
 
+DANGER_VAR = re.compile(r"var\(\s*--(?:danger|danger-fill|red-500|red-600)\s*[,)]")
+DANGER_FILL_VAR = re.compile(r"^var\(\s*--danger-fill\s*(?:,[^)]*)?\)$")
+DANGER_FAMILY: list[RGBA] = []  # filled by run(): red-500/600 + danger colorset values
+
+
+def read_danger_family(repo: Path, truth: dict) -> list[RGBA]:
+    css = strip_comments((repo / BRAND_SCALE_CSS).read_text())
+    fam = [parse_css_color(hx) for step, hx in
+           re.findall(r"--red-(\d+)\s*:\s*(#[0-9A-Fa-f]{6})", css) if int(step) >= 500]
+    if len(fam) < 2:
+        raise SetupError(f"{BRAND_SCALE_CSS}: couldn't read the red-500/600 scale")
+    for t in ("danger", "danger-fill"):
+        fam += [truth[t]["light"], truth[t]["dark"]]
+    return fam
+
+
+def is_danger_fill(value: str, scope: dict[str, str]) -> bool:
+    if DANGER_VAR.search(value):
+        return True
+    return any(is_accent_color(c, DANGER_FAMILY) for c in colors_in(resolve(value, scope)))
+
+
+def danger_fill_error(fill: str, color: str) -> str | None:
+    """A danger fill that carries text must be var(--danger-fill) + var(--on-danger)."""
+    f, c = re.sub(r"\s+", "", fill).strip("'\""), re.sub(r"\s+", "", color).strip("'\"")
+    if c != "var(--on-danger)" or not DANGER_FILL_VAR.match(f):
+        return (f"text color `{color.strip()}` on a danger fill (`{fill.strip()}`); fill with "
+                f"var(--danger-fill) and color the text var(--on-danger)")
+    return None
+
+
 def fill_lint(rules, scope, family, where) -> list[str]:
     errs = []
     for context, sel, body in rules:
         decls = declarations(body)
         fills = [v for p, v in decls if p in FILL_PROPS and is_accent_fill(v, scope, family)]
-        if not fills:
-            continue
+        dfills = [v for p, v in decls if p in FILL_PROPS and is_danger_fill(v, scope)]
         for p, v in decls:
-            if p == "color" and re.sub(r"\s+", "", v) != "var(--on-accent)":
+            if p != "color":
+                continue
+            if fills and re.sub(r"\s+", "", v) != "var(--on-accent)":
                 errs.append(f"{where}: `{sel}` puts text color `{v}` on an accent fill "
                             f"(`{fills[0]}`); use var(--on-accent)")
+            if dfills:
+                e = danger_fill_error(dfills[0], v)
+                if e:
+                    errs.append(f"{where}: `{sel}` puts {e}")
     return errs
 
 
@@ -465,10 +559,368 @@ def jsx_lint(repo: Path, family: list[RGBA], scope: dict[str, str]) -> list[str]
                 props.setdefault(pm.group(1), pm.group(2))
             fill = next((props[k] for k in ("background", "backgroundColor", "backgroundImage")
                          if k in props and is_accent_fill(props[k], scope, family)), None)
+            line = text.count("\n", 0, m.start()) + 1
             if fill and "color" in props and _JSX_WHITE.search(props["color"]):
-                line = text.count("\n", 0, m.start()) + 1
                 errs.append(f"{rel}:{line}: white text ({props['color'].strip()}) on an accent fill "
                             f"({fill.strip()}); use 'var(--on-accent)'")
+            dfill = next((props[k] for k in ("background", "backgroundColor", "backgroundImage")
+                          if k in props and is_danger_fill(props[k], scope)), None)
+            if dfill and "color" in props:
+                e = danger_fill_error(dfill, props["color"])
+                if e:
+                    errs.append(f"{rel}:{line}: {e}")
+    return errs
+
+
+# ---------------------------------------------------------------- Swift sources
+
+def swift_code_only(src: str) -> str:
+    """Blank out comments (// and nested /* */) and the text of string literals (plain,
+    multi-line triple-quote and #-delimited raw forms), keeping every newline so line
+    numbers survive. Code inside a string interpolation is kept and scanned the same way,
+    so a nested literal there can't desynchronize the scan. An unterminated comment,
+    string or interpolation is a setup error (fail closed)."""
+    n = len(src)
+    out: list[str] = []
+    blank = lambda text: "".join("\n" if c == "\n" else " " for c in text)
+    raw_open = re.compile(r'(#*)("""|")')
+
+    def code(i: int, in_interp: bool) -> int:
+        """Copy code from i; in an interpolation, stop after its closing paren."""
+        depth = 0
+        while i < n:
+            ch = src[i]
+            if src.startswith("//", i):
+                j = src.find("\n", i)
+                j = n if j < 0 else j
+                out.append(" " * (j - i))
+                i = j
+            elif src.startswith("/*", i):
+                d, j = 1, i + 2
+                while j < n and d:
+                    if src.startswith("/*", j):
+                        d, j = d + 1, j + 2
+                    elif src.startswith("*/", j):
+                        d, j = d - 1, j + 2
+                    else:
+                        j += 1
+                if d:
+                    raise SetupError("unterminated /* comment")
+                out.append(blank(src[i:j]))
+                i = j
+            elif ch == '"' or (ch == "#" and raw_open.match(src, i) and raw_open.match(src, i).group(1)):
+                i = string(i)
+            else:
+                if in_interp:
+                    if ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        if depth == 0:
+                            out.append(ch)
+                            return i + 1
+                        depth -= 1
+                out.append(ch)
+                i += 1
+        if in_interp:
+            raise SetupError("unterminated string interpolation")
+        return i
+
+    def string(i: int) -> int:
+        m = raw_open.match(src, i)
+        hashes, quote = m.group(1), m.group(2)
+        close, multi = quote + hashes, len(quote) == 3
+        escape = "\\" + hashes
+        out.append(m.group(0))
+        j, start = m.end(), m.end()
+        while True:
+            if j >= n or (src[j] == "\n" and not multi):
+                raise SetupError("unterminated string literal")
+            if src.startswith(close, j):
+                out.append(blank(src[start:j]) + close)
+                return j + len(close)
+            if src.startswith(escape, j):
+                k = j + len(escape)
+                if k < n and src[k] == "(":
+                    out.append(blank(src[start:k]) + "(")
+                    j = start = code(k + 1, True)
+                    continue
+                j = k + 1
+                continue
+            j += 1
+
+    code(0, False)
+    return "".join(out)
+
+
+PROMINENT = re.compile(r"\.(?:bordered|glass)Prominent\b|\b(?:BorderedProminent|GlassProminent)ButtonStyle\b"
+                       r"|\.controlProminence\(\s*(?:Prominence)?\.increased\s*\)")
+SWIPE = re.compile(r"\.swipeActions\b")
+# Swipe-action tints the system's WHITE label clears AA on in BOTH appearances. Anything
+# else (a variable, Color("AccentColor"), accent*, brandRust, danger, .red, .gray) fails.
+SWIPE_TINT_ALLOWED = {
+    "ScarfColor.brandRustDeep",  # #7A2E14 light 9.42:1 / #A6481E dark 5.89:1 (Cron Duplicate)
+    "ScarfColor.dangerFill",     # #B83C38 both, 5.61:1 (destructive swipes; system red is 3.55 / 3.41)
+}
+SWIPE_BUTTON = re.compile(r"\bButton\b(?=\s*[({])")
+DANGER_SOLID_FILL = re.compile(r"\.(?:fill|background)\(\s*ScarfColor\.danger\s*[,)]")
+
+
+DEFAULT_ACTION = re.compile(
+    r"\.keyboardShortcut\(\s*(?:KeyboardShortcut)?\.defaultAction\s*\)"
+    r"|\.keyboardShortcut\(\s*(?:KeyEquivalent)?\.return\s*,\s*modifiers:\s*\[\s*\]\s*\)")
+# The system default-button look (accent fill, white label) is only drawn for the system
+# styles (automatic / bordered); any Scarf style draws its own label colors. A default
+# action is normally the primary or destructive filled style; Secondary / Ghost are
+# allowed for the deliberate "Enter cancels" sheets (Curator prune / purge), whose Cancel
+# owns .defaultAction precisely so it doesn't read as the primary action.
+SCARF_FILLED_STYLE = re.compile(
+    r"^\s*(?:ScarfPrimaryButton|ScarfDestructiveButton|ScarfSecondaryButton|ScarfGhostButton)"
+    r"\s*\(\s*\)\s*$")
+_OPEN, _CLOSE = "([{", ")]}"
+_IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def _blank_directives(code: str) -> str:
+    """Blank #if / #elseif / #else / #endif lines (postfix #if chains); both branches'
+    modifiers then read as one chain, which is the conservative view."""
+    return re.sub(r"(?m)^[ \t]*#(?:if|elseif|else|endif)\b[^\n]*",
+                  lambda mt: " " * len(mt.group(0)), code)
+
+
+def _match_fwd(code: str, i: int, where: str) -> int:
+    """code[i] is an opener; return the index just past its matching closer."""
+    stack = []
+    for k in range(i, len(code)):
+        c = code[k]
+        if c in _OPEN:
+            stack.append(_CLOSE[_OPEN.index(c)])
+        elif c in _CLOSE:
+            if not stack or stack.pop() != c:
+                raise SetupError(f"{where}: unbalanced brackets")
+            if not stack:
+                return k + 1
+    raise SetupError(f"{where}: unbalanced brackets")
+
+
+def _match_back(code: str, i: int, where: str) -> int:
+    """code[i] is a closer; return the index of its matching opener."""
+    stack = []
+    for k in range(i, -1, -1):
+        c = code[k]
+        if c in _CLOSE:
+            stack.append(_OPEN[_CLOSE.index(c)])
+        elif c in _OPEN:
+            if not stack or stack.pop() != c:
+                raise SetupError(f"{where}: unbalanced brackets")
+            if not stack:
+                return k
+    raise SetupError(f"{where}: unbalanced brackets")
+
+
+def _ws_back(code: str, i: int) -> int:
+    while i >= 0 and code[i].isspace():
+        i -= 1
+    return i
+
+
+def _ws_fwd(code: str, i: int) -> int:
+    while i < len(code) and code[i].isspace():
+        i += 1
+    return i
+
+
+def modifier_chain(code: str, start: int, end: int, where: str) -> tuple[int, int]:
+    """Extent of the postfix expression containing code[start:end] (one `.modifier(...)`):
+    walk back over `.member`, call parens, trailing closures and `label:` closures to the
+    root (`Button`), then forward over the following `.modifier(...) {...}` links."""
+    pos = start
+    while True:
+        j = _ws_back(code, pos - 1)
+        if j < 0:
+            break
+        c = code[j]
+        if c in ")]}":
+            pos = _match_back(code, j, where)
+            continue
+        if c == ":" and code[pos] == "{":
+            # `} label: {` — a labelled trailing closure belongs to the chain.
+            e = _ws_back(code, j - 1)
+            k = e
+            while k > 0 and (code[k - 1].isalnum() or code[k - 1] == "_"):
+                k -= 1
+            before = _ws_back(code, k - 1)
+            if e >= k and before >= 0 and code[before] == "}":
+                pos = k
+                continue
+            break
+        if c.isalnum() or c == "_":
+            k = j
+            while k > 0 and (code[k - 1].isalnum() or code[k - 1] == "_"):
+                k -= 1
+            before = _ws_back(code, k - 1)
+            if before >= 0 and code[before] == ".":
+                pos = before                      # `.member`
+                continue
+            if code[pos] in "({.":
+                pos = k                           # root identifier (`Button`, a variable)
+            break
+        break
+    i = end
+    while True:
+        j = _ws_fwd(code, i)
+        if j < len(code) and code[j] in "({" and code[i - 1] in ")}" and code[j] == "{":
+            i = _match_fwd(code, j, where)        # another trailing closure
+            continue
+        if j < len(code) and code[j] == ".":
+            m = _IDENT.match(code, j + 1)
+            if not m:
+                break
+            i = m.end()
+            k = _ws_fwd(code, i)
+            if k < len(code) and code[k] == "(":
+                i = _match_fwd(code, k, where)
+            continue
+        m = _IDENT.match(code, j)
+        if m and code[i - 1] == "}":
+            k = _ws_fwd(code, m.end())
+            if k < len(code) and code[k] == ":" and _ws_fwd(code, k + 1) < len(code) \
+                    and code[_ws_fwd(code, k + 1)] == "{":
+                i = _match_fwd(code, _ws_fwd(code, k + 1), where)
+                continue
+        break
+    return pos, i
+
+
+def chain_from_root(code: str, i: int, where: str) -> int:
+    """End of the postfix chain whose root identifier ends at i (`Button` -> its call
+    parens, trailing / labelled closures and every following `.modifier(...)`)."""
+    k = _ws_fwd(code, i)
+    if k < len(code) and code[k] == "(":
+        i = _match_fwd(code, k, where)
+        k = _ws_fwd(code, i)
+    if k < len(code) and code[k] == "{":
+        i = _match_fwd(code, k, where)
+    return modifier_chain(code, i, i, where)[1] if i > 0 else i
+
+
+def top_level_args(chain: str, modifier: str, where: str) -> list[str]:
+    out, depth, i = [], 0, 0
+    while i < len(chain):
+        c = chain[i]
+        if c in _OPEN:
+            depth += 1
+        elif c in _CLOSE:
+            depth -= 1
+        elif depth == 0 and chain.startswith(modifier, i) and \
+                not (chain[i + len(modifier):i + len(modifier) + 1].isalnum()):
+            k = _ws_fwd(chain, i + len(modifier))
+            if k < len(chain) and chain[k] == "(":
+                e = _match_fwd(chain, k, where)
+                out.append(chain[k + 1:e - 1])
+                i = e
+                continue
+        i += 1
+    return out
+
+
+def top_level_button_styles(chain: str, where: str) -> list[str]:
+    """Arguments of every `.buttonStyle(...)` at bracket depth 0 of a chain (so a style
+    inside the Button's label closure doesn't count)."""
+    out, depth, i = [], 0, 0
+    while i < len(chain):
+        c = chain[i]
+        if c in _OPEN:
+            depth += 1
+        elif c in _CLOSE:
+            depth -= 1
+        elif depth == 0 and chain.startswith(".buttonStyle", i):
+            k = _ws_fwd(chain, i + len(".buttonStyle"))
+            if k < len(chain) and chain[k] == "(":
+                e = _match_fwd(chain, k, where)
+                out.append(chain[k + 1:e - 1])
+                i = e
+                continue
+        i += 1
+    return out
+
+
+def swift_files(repo: Path) -> list[Path]:
+    roots = [repo / r for r in SWIFT_ROOTS] + sorted(repo.glob(SWIFT_PACKAGES_GLOB))
+    for r in roots[:len(SWIFT_ROOTS)]:
+        if not r.is_dir():
+            raise SetupError(f"missing Swift source root {r.relative_to(repo)}")
+    if len(roots) == len(SWIFT_ROOTS):
+        raise SetupError(f"no package sources match {SWIFT_PACKAGES_GLOB}")
+    files = []
+    for root in roots:
+        for path in sorted(root.rglob("*.swift")):
+            if SWIFT_SKIP_DIRS.isdisjoint(path.relative_to(root).parts[:-1]):
+                files.append(path)
+    if not files:
+        raise SetupError("no .swift files found to lint")
+    return files
+
+
+def swift_lint(repo: Path) -> list[str]:
+    errs = []
+    for path in swift_files(repo):
+        rel = str(path.relative_to(repo))
+        try:
+            # `.`borderedProminent`` is the same identifier; drop identifier backticks
+            # (never spans a newline, so line numbers survive).
+            code = re.sub(r"`([A-Za-z_][A-Za-z0-9_]*)`", r"\1", swift_code_only(path.read_text()))
+        except SetupError as e:
+            raise SetupError(f"{rel}: {e}")
+        line_of = lambda pos: code.count("\n", 0, pos) + 1
+        for m in PROMINENT.finditer(code):
+            errs.append(f"{rel}:{line_of(m.start())}: `{m.group(0)}` draws a white label on the "
+                        f"accent (2.39:1 in dark mode); use `.buttonStyle(ScarfPrimaryButton())`, "
+                        f"which uses ScarfColor.onAccent (ScarfDesign/ScarfComponents.swift)")
+        dcode = _blank_directives(code)
+        for m in DEFAULT_ACTION.finditer(dcode):
+            where = f"{rel}:{line_of(m.start())}"
+            a, b = modifier_chain(dcode, m.start(), m.end(), where)
+            styles = top_level_button_styles(dcode[a:b], where)
+            if not any(SCARF_FILLED_STYLE.match(st) for st in styles):
+                got = ", ".join(f".buttonStyle({st.strip()})" for st in styles) or "no .buttonStyle"
+                errs.append(f"{where}: a `.keyboardShortcut(.defaultAction)` button ({got}) gets "
+                            f"the system default-button look, a white label on the app accent; "
+                            f"give it `.buttonStyle(ScarfPrimaryButton())` (or "
+                            f"`ScarfDestructiveButton()`) in the same modifier chain")
+        for m in SWIPE.finditer(dcode):
+            where = f"{rel}:{line_of(m.start())}"
+            # The closure is the first `{` after the modifier's argument list.
+            j = m.end()
+            k = _ws_fwd(dcode, j)
+            if k < len(dcode) and dcode[k] == "(":
+                j = _match_fwd(dcode, k, where)
+            b = _ws_fwd(dcode, j)
+            if b >= len(dcode) or dcode[b] != "{":
+                raise SetupError(f"{where}: can't find the .swipeActions closure")
+            k = _match_fwd(dcode, b, where)
+            body = dcode[b + 1:k - 1]
+            # Every `.tint(...)` anywhere in the closure must be allowlisted.
+            for t in re.finditer(r"\.tint\s*\(", body):
+                e = _match_fwd(body, t.end() - 1, where)
+                arg = re.sub(r"\s+", "", body[t.end():e - 1])
+                if arg not in SWIPE_TINT_ALLOWED:
+                    errs.append(f"{rel}:{line_of(b + 1 + t.start())}: swipe action tint `{arg}` isn't "
+                                f"in the allowlist ({', '.join(sorted(SWIPE_TINT_ALLOWED))}); the "
+                                f"system draws a white label on it, which must clear AA in both "
+                                f"appearances")
+            # Every swipe Button must carry an allowlisted tint (untinted, the system uses
+            # its red / the app tint, both under AA with a white label).
+            for bt in SWIPE_BUTTON.finditer(body):
+                end = chain_from_root(body, bt.end(), where)
+                tints = top_level_args(body[bt.start():end], ".tint", where)
+                if not tints:
+                    errs.append(f"{rel}:{line_of(b + 1 + bt.start())}: swipe Button has no `.tint(...)`; "
+                                f"the system default (red / app tint) is under AA with its white "
+                                f"label. Use one of {', '.join(sorted(SWIPE_TINT_ALLOWED))}")
+        for m in DANGER_SOLID_FILL.finditer(code):
+            errs.append(f"{rel}:{line_of(m.start())}: `{m.group(0).rstrip(',)')})` fills with the "
+                        f"text/icon danger color (white on its dark value is 3.27:1); fill with "
+                        f"ScarfColor.dangerFill (+ onDanger for content)")
     return errs
 
 
@@ -495,8 +947,17 @@ def contrast_failures(source: str, theme: str, c: dict[str, RGBA]) -> list[str]:
                            ("accent-hover", "accent-tint-strong")):
             if tint in c:
                 need(f"--{text} text on --{tint} over --{bgname}", c[text], over(c[tint], bg), TEXT_AA)
+    if "danger" in c:
+        for bgname in ("bg", "bg-card"):
+            need(f"--danger text on --{bgname}", c["danger"], c[bgname], TEXT_AA)
+    if "danger-fill" in c and "on-danger" in c:
+        need("--on-danger on --danger-fill", c["on-danger"], c["danger-fill"], TEXT_AA)
+    elif "danger-fill" in c or "on-danger" in c:
+        errs.append(f"{source} [{theme}]: --danger-fill and --on-danger must be defined together")
     if "bg-tertiary" in c:
         tert = over(c["bg-tertiary"], c["bg"])
+        if "danger" in c:
+            need("--danger text on --bg-tertiary", c["danger"], tert, TEXT_AA)
         for state in ("accent", "accent-hover"):
             need(f"--{state} text on --bg-tertiary", c[state], tert, TEXT_AA)
         need("--accent focus ring / border vs --bg-tertiary", c["accent"], tert, NON_TEXT)
@@ -520,19 +981,39 @@ def run(repo: Path) -> tuple[list[str], list[str]]:
     truth: dict[str, dict[str, RGBA]] = {}
     for token, asset in TOKENS.items():
         truth[token] = read_colorset(repo / XCASSETS / f"{asset}.colorset")
+    tertiary_cs = read_colorset(repo / XCASSETS / "Surface/BackgroundTertiary.colorset")
     for theme in ("light", "dark"):
         c = {t: v[theme] for t, v in truth.items()}
+        c["bg-tertiary"] = tertiary_cs[theme]
         notes.append(f"xcassets [{theme}]: " + ", ".join(f"--{t} {hexstr(v)}" for t, v in c.items()))
         errors += contrast_failures("xcassets", theme, c)
     family = read_brand_family(repo, truth)
+    DANGER_FAMILY[:] = read_danger_family(repo, truth)
 
-    # App tint colorsets must equal the semantic accent.
+    # App (system) tint colorsets: see check 2 in the module docstring for why dark differs.
+    tertiary = read_colorset(repo / XCASSETS / "Surface/BackgroundTertiary.colorset")
+    white = (255, 255, 255, 1.0)
     for rel in APP_ACCENT_COLORSETS:
         cs = read_colorset(repo / rel)
-        for theme in ("light", "dark"):
-            if not same(cs[theme], truth["accent"][theme]):
-                errors.append(f"{rel} [{theme}] is {hexstr(cs[theme])}, but Accent/Accent is "
-                              f"{hexstr(truth['accent'][theme])}")
+        if not same(cs["light"], truth["accent"]["light"]):
+            errors.append(f"{rel} [light] is {hexstr(cs['light'])}, but Accent/Accent is "
+                          f"{hexstr(truth['accent']['light'])}")
+        tint = cs["dark"]
+        if tint[3] < 1:
+            errors.append(f"{rel} [dark] is translucent ({hexstr(tint)}); the system tint must be opaque")
+        r = contrast(white, tint)
+        if r + 1e-9 < NON_TEXT:
+            errors.append(f"{rel} [dark]: white glyphs on the system tint are {r:.2f}:1 "
+                          f"({hexstr(tint)}), needs >= {NON_TEXT}:1")
+        surfaces = (("--bg", truth["bg"]["dark"]), ("--bg-card", truth["bg-card"]["dark"]),
+                    ("--bg-tertiary", over(tertiary["dark"], truth["bg"]["dark"])))
+        for name, bg in surfaces:
+            r = contrast(tint, bg)
+            if r + 1e-9 < TEXT_AA:
+                errors.append(f"{rel} [dark]: the system tint as text on {name} is {r:.2f}:1 "
+                              f"({hexstr(tint)} on {hexstr(bg)}), needs >= {TEXT_AA}:1")
+        notes.append(f"{rel} [dark] {hexstr(tint)}: white {contrast(white, tint):.2f}:1, text "
+                     + " / ".join(f"{contrast(tint, bg):.2f}" for _, bg in surfaces))
 
     # ScarfTheme.swift must keep the semantic names bound to the semantic assets.
     if not (repo / THEME_SWIFT).is_file():
@@ -604,6 +1085,9 @@ def run(repo: Path) -> tuple[list[str], list[str]]:
     # Inline styles in the design system's previews and UI kit.
     errors += html_lint(repo, family, design_root)
     errors += jsx_lint(repo, family, design_root)
+
+    # Swift: no system prominent button styles, no accent-tinted swipe actions.
+    errors += swift_lint(repo)
     return errors, notes
 
 
@@ -627,9 +1111,11 @@ def main() -> int:
         print(f"check-design-tokens: {len(errors)} failure(s). The xcassets under {XCASSETS} are "
               f"the source of truth; mirror them into the CSS, keep contrast at AA.", file=sys.stderr)
         return 1
-    print("check-design-tokens: OK — accent/on-accent/bg tokens match the xcassets in "
-          f"{len(CSS_MIRRORS)} stylesheets, every contrast pair clears AA, and no text sits "
-          "on an accent fill without --on-accent.")
+    print("check-design-tokens: OK — accent/on-accent/danger/bg tokens match the xcassets in "
+          f"{len(CSS_MIRRORS)} stylesheets, every contrast pair clears AA, no text sits "
+          "on an accent or danger fill without --on-accent / --on-danger, and no Swift view "
+          "uses a system prominent "
+          "button style or an accent-tinted swipe action.")
     return 0
 
 

@@ -347,7 +347,7 @@ struct ProfilesView: View {
                 } label: {
                     Label("View this profile", systemImage: "eye")
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
                 .help("Show this profile's sessions, memory, cron, and chat in this window — without changing the server's active profile.")
             }
@@ -357,7 +357,7 @@ struct ProfilesView: View {
             } label: {
                 Label("Switch & Relaunch", systemImage: "arrow.triangle.2.circlepath")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
             .help("Set as active profile and relaunch Scarf so every tab loads from \(profile.name)")
         }
@@ -440,7 +440,7 @@ struct ProfilesView: View {
                     )
                     showCreate = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(createName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -468,7 +468,7 @@ struct ProfilesView: View {
                     }
                     renameTarget = nil
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(renameNewName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -533,6 +533,7 @@ private struct RemoteProfilePathSheet: View {
                     onConfirm(trimmed)
                 }
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(path.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }

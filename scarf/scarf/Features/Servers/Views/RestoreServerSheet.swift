@@ -276,14 +276,16 @@ struct RestoreServerSheet: View {
             case .ready(let inspection):
                 Button("Restore") { viewModel.runRestore(inspection: inspection) }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(viewModel.targetProjectsRoot.isEmpty)
             case .failed:
                 Button("Pick another file") { presentOpenPanel() }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(ScarfPrimaryButton())
             case .awaitingFile:
                 Button("Pick a backup…") { presentOpenPanel() }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(ScarfPrimaryButton())
             default:
                 EmptyView()
             }

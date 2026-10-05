@@ -397,7 +397,7 @@ struct MiniAppPermissionPreview: View {
                 }
                 Button("Approve & Run") { onApprove(checked) }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(isSaving)
                     .accessibilityHint("Grants only the checked permissions")
             }

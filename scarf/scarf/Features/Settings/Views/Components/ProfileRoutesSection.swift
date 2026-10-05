@@ -524,6 +524,7 @@ private struct ProfileRouteEditorSheet: View {
                 Button("Cancel", role: .cancel) { onCancel() }
                 Button("Save") { onSave(normalizedRoute()) }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(!canSave)
             }
         }

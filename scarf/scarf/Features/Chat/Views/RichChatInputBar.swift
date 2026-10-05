@@ -280,11 +280,11 @@ struct RichChatInputBar: View {
                     } label: {
                         Image(systemName: "stop.fill")
                             .font(.system(size: 11, weight: .bold))
-                            .foregroundStyle(ScarfColor.onAccent)
+                            .foregroundStyle(ScarfColor.onDanger)
                             .frame(width: 30, height: 30)
                             .background(
                                 RoundedRectangle(cornerRadius: ScarfRadius.lg, style: .continuous)
-                                    .fill(ScarfColor.danger)
+                                    .fill(ScarfColor.dangerFill)
                             )
                     }
                     .buttonStyle(.plain)

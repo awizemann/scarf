@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfDesign
 import ScarfCore
 
 /// Auxiliary tab — the 8 sub-model tasks hermes delegates to cheaper models.
@@ -404,7 +405,7 @@ struct AuxiliaryTab: View {
                     .foregroundStyle(.tertiary)
                 Button("Sign in first") { showNousSignIn = true }
                     .controlSize(.mini)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                 Spacer()
             }
             .padding(.horizontal, 12)

@@ -265,7 +265,7 @@ struct ProjectDoctorSheet: View {
                 Button(isRepairingAll ? "Repairing…" : "Repair All (\(count))") {
                     Task { await viewModel?.repairAllSafe() }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
                 .disabled(isBusy)
                 .help("Runs only the safe repairs. Removing entries and adding folders stay one-by-one.")
@@ -273,6 +273,7 @@ struct ProjectDoctorSheet: View {
             Button("Done") { dismiss() }
                 .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
+                .buttonStyle(ScarfPrimaryButton())
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

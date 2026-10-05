@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfDesign
 import ScarfCore
 import AppKit
 
@@ -191,6 +192,7 @@ struct RemoteDiagnosticsView: View {
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
+                    .buttonStyle(ScarfPrimaryButton())
             }
         }
         .padding(16)

@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfDesign
 
 struct RestartGatewayBanner: View {
     let onRestart: () -> Void
@@ -22,7 +23,7 @@ struct RestartGatewayBanner: View {
             Spacer()
             Button("Restart Now") { onRestart() }
                 .controlSize(.small)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
             Button {
                 onDismiss()
             } label: {

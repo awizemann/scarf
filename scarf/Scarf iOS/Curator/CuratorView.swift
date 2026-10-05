@@ -199,7 +199,7 @@ struct CuratorView: View {
             } label: {
                 Label("Run now", systemImage: "play.fill")
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
             .disabled(viewModel.isLoading)
 

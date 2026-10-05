@@ -94,7 +94,7 @@ struct QuickCommandsView: View {
             Text("No quick commands configured")
                 .foregroundStyle(.secondary)
             Button("Add your first command") { showAddSheet = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
         }
         .frame(maxWidth: .infinity)
@@ -193,7 +193,7 @@ private struct QuickCommandEditor: View {
                 Spacer()
                 Button("Cancel") { onCancel() }
                 Button("Save") { onSave(name, command) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty || command.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }

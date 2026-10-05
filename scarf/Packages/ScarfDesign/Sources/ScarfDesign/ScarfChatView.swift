@@ -342,7 +342,7 @@ struct ChatSessionRow: View {
             Circle().fill(ScarfColor.success).frame(width: 7, height: 7)
                 .overlay(Circle().stroke(ScarfColor.success.opacity(0.20), lineWidth: 2))
         case .error:
-            Circle().fill(ScarfColor.danger).frame(width: 6, height: 6)
+            Circle().fill(ScarfColor.dangerFill).frame(width: 6, height: 6)
         case .idle:
             Circle().fill(ScarfColor.foregroundFaint.opacity(0.4)).frame(width: 6, height: 6)
         }

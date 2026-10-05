@@ -184,7 +184,7 @@ struct WebhooksView: View {
                 resetAddForm()
                 showAddSheet = true
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -319,7 +319,7 @@ struct WebhooksView: View {
                     addSecret = ""
                     showAddSheet = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(addName.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }
@@ -350,7 +350,7 @@ struct WebhooksView: View {
             HStack {
                 Spacer()
                 Button("Done") { viewModel.createdSecret = nil }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
             }
         }
         .padding()

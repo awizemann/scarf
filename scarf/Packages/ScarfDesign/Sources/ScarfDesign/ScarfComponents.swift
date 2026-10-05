@@ -11,20 +11,160 @@ import SwiftUI
 
 // MARK: - Buttons
 
+/// The one primary (filled accent) button. Use it instead of
+/// `.buttonStyle(.borderedProminent)`: the system prominent style fills with
+/// the app AccentColor but always draws a WHITE label, which is 2.39:1 on the
+/// dark-mode accent (#E89360) and fails WCAG AA. This style draws the label in
+/// `ScarfColor.onAccent` (white in light, brand-900 #3B1608 in dark), so it
+/// clears AA in both appearances. tools/check-design-tokens.py fails the build
+/// check on any `.borderedProminent` in the app or package sources.
+///
+/// Honors the environment the system styles do:
+/// - `.controlSize`: mini 11pt semibold (6 × 2 padding), small 12pt
+///   semibold (s3 × s1), regular 14pt medium with s4 × s2 (the original
+///   look), large / extraLarge 16pt medium (s5 × s3). Sizes scale with
+///   Dynamic Type on iOS.
+/// - iOS: at least a 44 × 44pt hit target (the pill keeps its drawn size).
+/// - `.disabled(true)`: the whole button (fill + label, so their contrast
+///   relationship is preserved) drops to 45% opacity and loses its shadow.
+///   WCAG 1.4.3 exempts inactive controls; the dimming is the state cue.
+/// - Pressed: the fill steps to `accentActive`.
+///
+/// `.keyboardShortcut(.defaultAction)`, `.disabled`, and button roles work as
+/// with any `ButtonStyle`. For a red (destructive) filled button use
+/// `ScarfDestructiveButton`.
 public struct ScarfPrimaryButton: ButtonStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
+        ScarfFilledButtonBody(
+            configuration: configuration,
+            fill: ScarfColor.accent,
+            pressedFill: ScarfColor.accentActive,
+            label: ScarfColor.onAccent,
+            shadow: true
+        )
+    }
+}
+
+/// Minimum hit target for the filled button styles: 44pt on iOS (HIG), none on
+/// macOS (pointer). Internal so previews / snapshot tools can show the iOS frame.
+private struct ScarfMinimumHitTargetKey: EnvironmentKey {
+    #if os(iOS)
+    static let defaultValue: CGFloat = 44
+    #else
+    static let defaultValue: CGFloat = 0
+    #endif
+}
+
+extension EnvironmentValues {
+    var scarfMinimumHitTarget: CGFloat {
+        get { self[ScarfMinimumHitTargetKey.self] }
+        set { self[ScarfMinimumHitTargetKey.self] = newValue }
+    }
+}
+
+/// Shared body of the filled button styles (`ScarfPrimaryButton`,
+/// `ScarfDestructiveButton`): one place for controlSize sizing, Dynamic
+/// Type, the iOS hit target, the disabled treatment and the pressed state.
+/// It's a `View` so it can read the environment (a `ButtonStyle` itself
+/// isn't a `View`, so its `@Environment` isn't reliably updated).
+///
+/// Type per controlSize (sizes at the default Dynamic Type size, scaled
+/// with the named text style on iOS via `@ScaledMetric`, so the default
+/// look is unchanged): mini 11 semibold (caption2), small 12 semibold
+/// (caption, = ScarfFont.captionStrong), regular 14 medium (body,
+/// = bodyEmph), large / extraLarge 16 medium (callout, = subhead).
+///
+/// Hit target: on iOS the button's layout frame is at least 44 × 44pt and
+/// the whole frame is tappable; the drawn pill keeps its size and is
+/// centered in it. A small button in an HStack therefore lays out 44pt tall.
+private struct ScarfFilledButtonBody: View {
+    let configuration: ButtonStyleConfiguration
+    let fill: Color
+    /// Fill while pressed. `nil` darkens `fill` with a 12% black overlay,
+    /// which only raises a white label's contrast.
+    let pressedFill: Color?
+    let label: Color
+    let shadow: Bool
+
+    @Environment(\.isEnabled) private var isEnabled
+    @Environment(\.controlSize) private var controlSize
+    @Environment(\.scarfMinimumHitTarget) private var minimumHitTarget
+
+    @ScaledMetric(relativeTo: .caption2) private var miniSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .caption) private var smallSize: CGFloat = 12
+    @ScaledMetric(relativeTo: .body) private var regularSize: CGFloat = 14
+    @ScaledMetric(relativeTo: .callout) private var largeSize: CGFloat = 16
+
+    /// Opacity of the whole button (fill and label together) when disabled.
+    static let disabledOpacity: Double = 0.45
+    static let noShadow = ScarfShadow(color: .clear, radius: 0, x: 0, y: 0)
+
+    private var font: Font {
+        switch controlSize {
+        case .mini:                 return .system(size: miniSize, weight: .semibold)
+        case .small:                return .system(size: smallSize, weight: .semibold)
+        case .regular:              return .system(size: regularSize, weight: .medium)
+        case .large, .extraLarge:   return .system(size: largeSize, weight: .medium)
+        @unknown default:           return .system(size: regularSize, weight: .medium)
+        }
+    }
+
+    /// iOS lays mini / small out next to system `.bordered` buttons, whose
+    /// pills are ~22 / ~28pt tall; the extra vertical padding there matches
+    /// their height (macOS keeps the compact 2 / 4pt).
+    #if os(iOS)
+    private static let miniV: CGFloat = ScarfSpace.s1
+    private static let smallV: CGFloat = ScarfSpace.s2 - 1
+    #else
+    private static let miniV: CGFloat = ScarfSpace.s1 / 2
+    private static let smallV: CGFloat = ScarfSpace.s1
+    #endif
+
+    private var padding: (h: CGFloat, v: CGFloat) {
+        switch controlSize {
+        case .mini:                 return (ScarfSpace.s1 * 1.5, Self.miniV)
+        case .small:                return (ScarfSpace.s3, Self.smallV)
+        case .regular:              return (ScarfSpace.s4, ScarfSpace.s2)
+        case .large, .extraLarge:   return (ScarfSpace.s5, ScarfSpace.s3)
+        @unknown default:           return (ScarfSpace.s4, ScarfSpace.s2)
+        }
+    }
+
+    var body: some View {
+        let shape = RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
+        let pressed = configuration.isPressed && isEnabled
         configuration.label
-            .scarfStyle(.bodyEmph)
-            .foregroundStyle(ScarfColor.onAccent)
-            .padding(.horizontal, ScarfSpace.s4)
-            .padding(.vertical, ScarfSpace.s2)
+            .font(font)
+            .foregroundStyle(label)
+            .padding(.horizontal, padding.h)
+            .padding(.vertical, padding.v)
             .background(
-                RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                    .fill(configuration.isPressed ? ScarfColor.accentActive : ScarfColor.accent)
+                shape
+                    .fill(pressed ? (pressedFill ?? fill) : fill)
+                    .overlay(shape.fill(Color.black.opacity(pressed && pressedFill == nil ? 0.12 : 0)))
             )
-            .scarfShadow(.sm)
-            .opacity(configuration.isPressed ? 0.95 : 1)
+            .scarfShadow(shadow && isEnabled ? .sm : Self.noShadow)
+            .opacity(isEnabled ? (pressed ? 0.95 : 1) : Self.disabledOpacity)
+            .modifier(ScarfHitTarget(minimum: minimumHitTarget, shape: shape))
+    }
+}
+
+/// Grows the layout frame to `minimum` (centering the drawn button) and makes
+/// all of it tappable; with no minimum (macOS) the hit shape is the button's
+/// own rounded rect and layout is untouched.
+private struct ScarfHitTarget: ViewModifier {
+    let minimum: CGFloat
+    let shape: RoundedRectangle
+
+    func body(content: Content) -> some View {
+        if minimum > 0 {
+            content
+                .frame(minWidth: minimum, minHeight: minimum)
+                .contentShape(Rectangle())
+        } else {
+            content.contentShape(shape)
+        }
     }
 }
 
@@ -66,18 +206,21 @@ public struct ScarfGhostButton: ButtonStyle {
     }
 }
 
+/// The filled red button for destructive actions. White `onDanger` label on
+/// `dangerFill` (red-600 #B83C38 in both appearances, 5.61:1); pressed
+/// darkens the fill. Same controlSize sizing and disabled treatment as
+/// `ScarfPrimaryButton`. Use `ScarfColor.danger` for danger text and icons,
+/// never as this fill: white on its dark value is 3.27:1.
 public struct ScarfDestructiveButton: ButtonStyle {
     public init() {}
     public func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scarfStyle(.bodyEmph)
-            .foregroundStyle(.white)
-            .padding(.horizontal, ScarfSpace.s4)
-            .padding(.vertical, ScarfSpace.s2)
-            .background(
-                RoundedRectangle(cornerRadius: ScarfRadius.md, style: .continuous)
-                    .fill(ScarfColor.danger.opacity(configuration.isPressed ? 0.85 : 1.0))
-            )
+        ScarfFilledButtonBody(
+            configuration: configuration,
+            fill: ScarfColor.dangerFill,
+            pressedFill: nil,
+            label: ScarfColor.onDanger,
+            shadow: false
+        )
     }
 }
 

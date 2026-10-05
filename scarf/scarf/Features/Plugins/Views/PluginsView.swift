@@ -137,7 +137,7 @@ struct PluginsView: View {
             HStack {
                 Spacer()
                 Button("Done") { viewModel.installReport = nil }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
             }
         }
         .padding()
@@ -185,7 +185,7 @@ struct PluginsView: View {
                 installIdentifier = ""
                 showInstall = true
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ScarfPrimaryButton())
             .controlSize(.small)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -392,7 +392,7 @@ struct PluginsView: View {
             }
             Spacer()
             Button("Sign In") { showSpotifySignIn = true }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .controlSize(.small)
         }
         .padding(10)
@@ -441,7 +441,7 @@ struct PluginsView: View {
                     )
                     showInstall = false
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
                 .disabled(installIdentifier.trimmingCharacters(in: .whitespaces).isEmpty)
             }
         }

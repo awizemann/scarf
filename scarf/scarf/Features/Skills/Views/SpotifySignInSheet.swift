@@ -1,4 +1,5 @@
 import SwiftUI
+import ScarfDesign
 import AppKit
 import ScarfCore
 
@@ -166,7 +167,7 @@ struct SpotifySignInSheet: View {
             HStack {
                 Spacer()
                 Button("Continue", action: continueWithClientID)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ScarfPrimaryButton())
                     .disabled(!SpotifyAuthFlow.isPlausibleClientID(clientIDDraft))
             }
         }
@@ -208,7 +209,7 @@ struct SpotifySignInSheet: View {
                     var err: NSDictionary?
                     script?.executeAndReturnError(&err)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -321,7 +322,7 @@ struct SpotifySignInSheet: View {
                 Button("Try again") {
                     flow?.start(clientID: clientIDDraft.isEmpty ? nil : clientIDDraft)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ScarfPrimaryButton())
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
