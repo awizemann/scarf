@@ -126,7 +126,7 @@ Projects sit first in the sidebar because that's how you actually work. Selectin
 
 ## Multi-server: one window per server
 
-Scarf is a multi-window app — each window binds to one Hermes server. Your local `~/.hermes/` appears automatically; add remotes via **File → Open Server… → Add Server**. Remote hosts are reached over system SSH (your `~/.ssh/config`, ssh-agent, ProxyJump, ControlMaster); SQLite is served from atomic snapshots; chat tunnels as `ssh -T host -- hermes acp`. Everything works against remote identically to local.
+Scarf is a multi-window app — each window binds to one Hermes server. Your local `~/.hermes/` appears automatically; add remotes via **File → Open Server → Manage Servers… → Add**. Remote hosts are reached over system SSH (your `~/.ssh/config`, ssh-agent, ProxyJump, ControlMaster); SQLite is served from atomic snapshots; chat tunnels as `ssh -T host -- hermes acp`. Everything works against remote identically to local.
 
 **Remote host requirements:** key-based SSH (run `ssh-add` once), `sqlite3` and `pgrep` on the remote `PATH`, and `~/.hermes/` readable by the SSH user. If the Dashboard shows "Stopped" or empty values on a green connection, open **Manage Servers → 🩺 Run Diagnostics** — fourteen checks in one SSH session, each with a remediation hint. Details: [Servers & Remote](https://github.com/awizemann/scarf/wiki/Servers-and-Remote).
 

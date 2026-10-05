@@ -440,7 +440,7 @@
         <details>
           <summary>Does Scarf work without internet?</summary>
           <div>
-            <p>Yes for the local Hermes case — Scarf reads files and the SQLite database directly from <code>~/.hermes/</code> with no network involvement. Internet is only required when Hermes itself reaches out to model providers or MCP servers, when you connect to a remote Hermes host over SSH, or when checking for Sparkle updates.</p>
+            <p>Yes, for local work. With a local Hermes, Scarf reads files and the SQLite database directly from <code>~/.hermes/</code> with no network involvement, and SSH hosts on your local network keep working offline. Internet is needed when Hermes itself calls model providers or MCP servers, for SSH hosts outside your network, Sparkle update checks, the template catalog and template downloads, Nous Portal's model list, Live Voice, and dashboard widgets that load remote URLs. The Mac app's usage analytics wait on disk while you're offline and are sent once you reconnect.</p>
           </div>
         </details>
 
@@ -461,7 +461,7 @@
         <details>
           <summary>How does ScarfGo connect to my Mac?</summary>
           <div>
-            <p>ScarfGo speaks SSH directly to your Hermes host using a pure-Swift SSH stack (Citadel). On first launch it generates an Ed25519 keypair on the device — the private key lives in the iOS Keychain (with <code>kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly</code>) and is excluded from iCloud sync. Paste the public key into the host's <code>~/.ssh/authorized_keys</code>, and ScarfGo can run <code>hermes acp</code> over the SSH session for chat and read the SQLite database for everything else. There is no companion service or developer-controlled relay.</p>
+            <p>ScarfGo speaks SSH directly to your Hermes host using a pure-Swift SSH stack (Citadel). On first launch it generates an Ed25519 keypair on the device — the private key lives in the iOS Keychain, pinned to that device by default (<code>kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly</code>). Syncing it to your other devices through iCloud Keychain is off unless you turn it on in the System tab. Paste the public key into the host's <code>~/.ssh/authorized_keys</code>, and ScarfGo can run <code>hermes acp</code> over the SSH session for chat and read the SQLite database for everything else. There is no companion service or developer-controlled relay.</p>
           </div>
         </details>
 
@@ -489,7 +489,7 @@
         <details>
           <summary>Can I use Scarf with a remote or headless Hermes server?</summary>
           <div>
-            <p>Yes — that is one of the main use cases. Add the host through <strong>File → Open Server… → Add Server</strong> on Mac, or tap <strong>Add Server</strong> on the ScarfGo Servers tab. Scarf uses the system SSH config (Mac) or a device-generated key (iOS), so anything reachable through your normal terminal SSH workflow works without extra setup. The remote host needs <code>sqlite3</code> and <code>pgrep</code> on its <code>$PATH</code> and the SSH user needs read access to <code>~/.hermes/</code>.</p>
+            <p>Yes — that is one of the main use cases. Add the host through <strong>File → Open Server → Manage Servers… → Add</strong> on Mac, or tap <strong>+</strong> (Add server) on ScarfGo's Servers screen. Scarf uses the system SSH config (Mac) or a device-generated key (iOS), so anything reachable through your normal terminal SSH workflow works without extra setup. The remote host needs <code>sqlite3</code> and <code>pgrep</code> on its <code>$PATH</code> and the SSH user needs read access to <code>~/.hermes/</code>.</p>
           </div>
         </details>
 
@@ -616,7 +616,7 @@
             "name": "Do I need Hermes installed first?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. Scarf is a client for an existing Hermes installation. It expects to find Hermes's data directory at ~/.hermes/ on each host you connect to. Install Hermes first by following the Hermes installation guide."
+              "text": "Yes. Scarf is a client for an existing Hermes installation. It expects to find Hermes's data directory at ~/.hermes/ on each host you connect to (local or remote). Install Hermes first by following the Hermes installation guide."
             }
           },
           {
@@ -624,7 +624,7 @@
             "name": "Does Scarf work without internet?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes for the local Hermes case — Scarf reads files and the SQLite database directly from ~/.hermes/ with no network involvement. Internet is only required when Hermes itself reaches out to model providers or MCP servers, when connecting to a remote Hermes host over SSH, or when checking for Sparkle updates."
+              "text": "Yes, for local work. With a local Hermes, Scarf reads files and the SQLite database directly from ~/.hermes/ with no network involvement, and SSH hosts on your local network keep working offline. Internet is needed when Hermes itself calls model providers or MCP servers, for SSH hosts outside your network, Sparkle update checks, the template catalog and template downloads, Nous Portal's model list, Live Voice, and dashboard widgets that load remote URLs. The Mac app's usage analytics wait on disk while you're offline and are sent once you reconnect."
             }
           },
           {
@@ -648,7 +648,7 @@
             "name": "How does ScarfGo connect to my Mac?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "ScarfGo speaks SSH directly to your Hermes host using Citadel, a pure-Swift SSH stack. On first launch it generates an Ed25519 keypair on the device — the private key lives in the iOS Keychain and never leaves the phone. Paste the public key into the host's authorized_keys and ScarfGo can run hermes acp over the SSH session for chat and read the SQLite database for everything else. There is no companion service or relay."
+              "text": "ScarfGo speaks SSH directly to your Hermes host using a pure-Swift SSH stack (Citadel). On first launch it generates an Ed25519 keypair on the device — the private key lives in the iOS Keychain, pinned to that device by default (kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly). Syncing it to your other devices through iCloud Keychain is off unless you turn it on in the System tab. Paste the public key into the host's ~/.ssh/authorized_keys, and ScarfGo can run hermes acp over the SSH session for chat and read the SQLite database for everything else. There is no companion service or developer-controlled relay."
             }
           },
           {
@@ -680,7 +680,7 @@
             "name": "Can I use Scarf with a remote or headless Hermes server?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Yes. Add the host through File → Open Server… → Add Server on Mac, or Add Server on ScarfGo. Scarf uses the system SSH config (Mac) or a device-generated key (iOS), so anything reachable through normal terminal SSH works without extra setup. The remote host needs sqlite3 and pgrep on its PATH and the SSH user needs read access to ~/.hermes/."
+              "text": "Yes — that is one of the main use cases. Add the host through File → Open Server → Manage Servers… → Add on Mac, or tap + (Add server) on ScarfGo's Servers screen. Scarf uses the system SSH config (Mac) or a device-generated key (iOS), so anything reachable through your normal terminal SSH workflow works without extra setup. The remote host needs sqlite3 and pgrep on its $PATH and the SSH user needs read access to ~/.hermes/."
             }
           },
           {
@@ -688,7 +688,7 @@
             "name": "What's the difference between Scarf and using Hermes from the terminal?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "Scarf is strictly additive — it visualizes data Hermes already produces. The terminal CLI remains the source of truth. Scarf gives you live streaming chat with rich tool-call rendering, multi-server windows, project workspaces with custom dashboards, and a one-pane view of skills, MCP servers, cron jobs, and gateways without memorizing CLI subcommands."
+              "text": "Scarf is strictly additive — it visualizes data Hermes already produces. The terminal CLI (hermes chat, hermes cron, hermes mcp, etc.) remains the source of truth for everything. Scarf gives you live streaming chat with rich tool-call rendering, multi-server windows, project workspaces with custom dashboards, and a one-pane view of skills, MCP servers, cron jobs, and gateways without memorizing CLI subcommands."
             }
           },
           {
@@ -696,7 +696,7 @@
             "name": "Is there a Windows or Linux version?",
             "acceptedAnswer": {
               "@type": "Answer",
-              "text": "No. Scarf is built on SwiftUI and AppKit and ships only for Apple platforms. The Hermes CLI itself works on those platforms, and Scarf can connect to a remote Linux Hermes host from a Mac."
+              "text": "No. Scarf is built on SwiftUI and AppKit and ships only for Apple platforms. There are no current plans for Windows or Linux ports — the Hermes CLI itself works on those platforms, and Scarf can connect to a remote Linux Hermes host from a Mac."
             }
           }
         ]

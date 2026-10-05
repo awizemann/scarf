@@ -4,7 +4,7 @@
 # site/landing/ and (on `publish`) commits + pushes to gh-pages.
 #
 # Usage:
-#   ./scripts/site.sh check               # validate that all required files exist
+#   ./scripts/site.sh check               # validate required files exist + FAQ/JSON-LD parity
 #   ./scripts/site.sh build               # render to .gh-pages-worktree/ root (with token substitution)
 #   ./scripts/site.sh preview [PORT]      # build + serve on localhost:PORT (default 8000) + open browser
 #   ./scripts/site.sh serve   [PORT]      # serve .gh-pages-worktree/ without rebuilding (default 8000)
@@ -152,6 +152,14 @@ scan_hard_source() {
   fi
 }
 
+check_faq_parity() {
+  # The landing page states every FAQ twice — visible <details> markup and the
+  # JSON-LD FAQPage search engines read. Fails on any drift between the two,
+  # or on an ld+json block that doesn't parse. Visible text is canonical.
+  "$PY" "$REPO_ROOT/tools/check-site-faq.py" "$SRC_DIR/index.html" \
+    || die "FAQ / JSON-LD mismatch in $SRC_DIR/index.html — refusing to build."
+}
+
 scan_hard_rendered() {
   # Post-build pass: scan the gh-pages tree we're about to publish, but
   # only the files we own (so we don't false-flag on appcast.xml or
@@ -182,6 +190,7 @@ scan_hard_rendered() {
 cmd_check() {
   need_src
   scan_hard_source
+  check_faq_parity
   log "Source files OK ($(ls -1 "$SRC_DIR" | wc -l | tr -d ' ') entries; assets/: $(find "$SRC_DIR/assets" -type f | wc -l | tr -d ' ') files)"
 }
 
@@ -189,6 +198,7 @@ cmd_build() {
   need_src
   need_ghpages
   scan_hard_source
+  check_faq_parity
 
   local version lastmod template_urls
   version="$(resolve_version)"
@@ -239,6 +249,7 @@ cmd_publish() {
 
   log "Validating source"
   scan_hard_source
+  check_faq_parity
 
   log "Building"
   cmd_build

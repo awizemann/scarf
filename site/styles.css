@@ -1,6 +1,9 @@
-/* Scarf Templates — catalog site.
- * Vanilla CSS, no framework. Matches Scarf's green accent and keeps
- * decoration minimal — the live dashboard preview is the point. */
+/* Scarf Templates — catalog site (published to gh-pages /templates/).
+ * Vanilla CSS, no framework. Uses the Scarf design system's brand accent
+ * (Scarf Rust — ScarfDesign BrandRust / design/static-site/colors_and_type.css)
+ * and keeps decoration minimal — the live dashboard preview is the point.
+ * Green appears only as the semantic success color (ScarfDesign
+ * SemanticSuccess), never as the brand accent. */
 
 :root {
   --fg: #1a1a1a;
@@ -8,8 +11,14 @@
   --bg: #fafafa;
   --bg-card: #ffffff;
   --border: #e5e5e5;
-  --accent: #2aa876;        /* scarf green */
-  --accent-dark: #1f7f5a;
+  --accent: #C25A2A;        /* Scarf Rust (BrandRust) */
+  --accent-hover: #A6481E;  /* BrandRustHover */
+  --accent-active: #7A2E14; /* BrandRustActive */
+  --accent-tint: rgba(194, 90, 42, 0.10);
+  --accent-tint-strong: rgba(194, 90, 42, 0.18);
+  --success: #2AA876;       /* SemanticSuccess */
+  --success-text: #1F7F5A;  /* design-system --green-600 */
+  --success-rgb: 42, 168, 118;
   --red: #d9534f;
   --blue: #3498db;
   --orange: #f0ad4e;
@@ -26,8 +35,14 @@
     --bg: #141414;
     --bg-card: #1e1e1e;
     --border: #2a2a2a;
-    --accent: #3abf8a;
-    --accent-dark: #2aa876;
+    --accent: #E89360;
+    --accent-hover: #F0A879;
+    --accent-active: #D87844;
+    --accent-tint: rgba(232, 147, 96, 0.14);
+    --accent-tint-strong: rgba(232, 147, 96, 0.24);
+    --success: #3DBE89;      /* SemanticSuccess (dark) */
+    --success-text: #3DBE89;
+    --success-rgb: 61, 190, 137;
     --shadow: 0 1px 2px rgba(0,0,0,0.3), 0 4px 12px rgba(0,0,0,0.3);
   }
 }
@@ -61,7 +76,7 @@ code {
 }
 pre code { background: transparent; padding: 0; }
 
-a { color: var(--accent-dark); text-decoration: none; }
+a { color: var(--accent-hover); text-decoration: none; }
 a:hover { text-decoration: underline; }
 
 h1, h2, h3 { line-height: 1.25; }
@@ -150,8 +165,8 @@ h1, h2, h3 { line-height: 1.25; }
 .tag {
   display: inline-block;
   padding: 2px 8px;
-  background: rgba(42,168,118,0.15);
-  color: var(--accent-dark);
+  background: var(--accent-tint-strong);
+  color: var(--accent-hover);
   border-radius: 10px;
   font-size: 11px;
 }
@@ -202,13 +217,13 @@ h1, h2, h3 { line-height: 1.25; }
   background: var(--accent);
   color: white;
 }
-.btn-primary:hover { background: var(--accent-dark); text-decoration: none; color: white; }
+.btn-primary:hover { background: var(--accent-hover); text-decoration: none; color: white; }
 .btn-secondary {
   background: transparent;
   color: var(--fg);
   border: 1px solid var(--border);
 }
-.btn-secondary:hover { border-color: var(--accent); text-decoration: none; color: var(--accent-dark); }
+.btn-secondary:hover { border-color: var(--accent); text-decoration: none; color: var(--accent-hover); }
 
 .detail-dashboard {
   background: var(--bg-card);
@@ -307,12 +322,12 @@ h1, h2, h3 { line-height: 1.25; }
   margin-top: 20px;
   padding: 14px 16px;
   border-radius: var(--radius);
-  background: rgba(42,168,118,0.08);
-  border: 1px solid rgba(42,168,118,0.2);
+  background: var(--accent-tint);
+  border: 1px solid var(--accent-tint-strong);
 }
 .config-model-label {
   font-size: 11px;
-  color: var(--accent-dark);
+  color: var(--accent-hover);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-weight: 600;
@@ -367,7 +382,7 @@ h1, h2, h3 { line-height: 1.25; }
 .widget-stat-icon { font-size: 14px; color: var(--fg-muted); }
 .widget-stat-value { font-size: 32px; font-weight: 600; line-height: 1.1; }
 .widget-stat-subtitle { font-size: 11px; color: var(--fg-muted); }
-.widget-stat[data-color="green"] .widget-stat-icon { color: var(--accent); }
+.widget-stat[data-color="green"] .widget-stat-icon { color: var(--success); }
 .widget-stat[data-color="red"] .widget-stat-icon { color: var(--red); }
 .widget-stat[data-color="blue"] .widget-stat-icon { color: var(--blue); }
 .widget-stat[data-color="orange"] .widget-stat-icon { color: var(--orange); }
@@ -409,15 +424,15 @@ h1, h2, h3 { line-height: 1.25; }
   letter-spacing: 0.5px;
   flex-shrink: 0;
 }
-.widget-list-status[data-status="up"] { background: rgba(42,168,118,0.18); color: var(--accent-dark); }
+.widget-list-status[data-status="up"] { background: rgba(var(--success-rgb),0.18); color: var(--success-text); }
 .widget-list-status[data-status="down"] { background: rgba(217,83,79,0.18); color: var(--red); }
 /* v2.7 typed semantic statuses (mirrors ScarfDesign palette + Swift ListItemStatus enum). */
-.widget-list-status.status-success { background: rgba(42,168,118,0.18); color: var(--accent-dark); }
+.widget-list-status.status-success { background: rgba(var(--success-rgb),0.18); color: var(--success-text); }
 .widget-list-status.status-warning { background: rgba(240,173,78,0.20); color: var(--orange); }
 .widget-list-status.status-danger  { background: rgba(217,83,79,0.18);  color: var(--red); }
 .widget-list-status.status-info    { background: rgba(91,143,225,0.20); color: var(--blue); }
 .widget-list-status.status-pending { background: rgba(0,0,0,0.06); color: var(--fg-muted); }
-.widget-list-status.status-done    { background: rgba(42,168,118,0.14); color: var(--accent-dark); }
+.widget-list-status.status-done    { background: rgba(var(--success-rgb),0.14); color: var(--success-text); }
 .widget-list-status.status-neutral { background: rgba(0,0,0,0.06); color: var(--fg-muted); }
 .widget-list-status.status-unknown { background: rgba(0,0,0,0.06); color: var(--fg-muted); font-style: italic; }
 .widget-list-item-done .widget-list-text { text-decoration: line-through; color: var(--fg-muted); }
@@ -454,18 +469,18 @@ h1, h2, h3 { line-height: 1.25; }
 .widget-status-grid-cell { display: flex; flex-direction: column; gap: 2px; align-items: center; }
 .widget-status-grid-swatch { width: 100%; height: 18px; border-radius: 3px; }
 .widget-status-grid-label { font-size: 9px; color: var(--fg-muted); text-align: center; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.widget-status-grid-swatch.status-success { background: rgba(42,168,118,0.85); }
+.widget-status-grid-swatch.status-success { background: rgba(var(--success-rgb),0.85); }
 .widget-status-grid-swatch.status-warning { background: rgba(240,173,78,0.85); }
 .widget-status-grid-swatch.status-danger  { background: rgba(217,83,79,0.85); }
 .widget-status-grid-swatch.status-info    { background: rgba(91,143,225,0.85); }
 .widget-status-grid-swatch.status-pending { background: rgba(120,120,120,0.40); }
-.widget-status-grid-swatch.status-done    { background: rgba(42,168,118,0.55); }
+.widget-status-grid-swatch.status-done    { background: rgba(var(--success-rgb),0.55); }
 .widget-status-grid-swatch.status-neutral { background: rgba(120,120,120,0.30); }
 
 /* v2.7 sparkline under stat value. Inherits color from widget-stat data-color. */
 .widget-stat-sparkline { display: block; margin-top: 4px; width: 100%; }
-.widget-stat[data-color="accent"] .widget-stat-sparkline,
-.widget-stat[data-color="green"]  .widget-stat-sparkline { color: var(--accent-dark); }
+.widget-stat[data-color="accent"] .widget-stat-sparkline { color: var(--accent-hover); }
+.widget-stat[data-color="green"]  .widget-stat-sparkline { color: var(--success-text); }
 .widget-stat[data-color="red"]    .widget-stat-sparkline { color: var(--red); }
 .widget-stat[data-color="blue"]   .widget-stat-sparkline { color: var(--blue); }
 .widget-stat[data-color="orange"] .widget-stat-sparkline { color: var(--orange); }
