@@ -5,7 +5,7 @@
 <h1 align="center">Scarf</h1>
 
 <p align="center">
-  <strong>The native Mac &amp; iOS app for your <a href="https://github.com/hermes-ai/hermes-agent">Hermes AI agent</a>.</strong><br>
+  <strong>The native Mac &amp; iOS app for your <a href="https://github.com/NousResearch/hermes-agent">Hermes AI agent</a>.</strong><br>
   See every session, project, skill, memory file, and cron job — on your Mac, and from your iPhone over SSH.
 </p>
 
@@ -133,7 +133,7 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 14.6+** (Scarf) · **iOS 18+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/hermes-ai/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.5** (v2026.9.24) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/NousResearch/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.5** (v2026.9.24) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|

@@ -978,7 +978,7 @@ public struct ModelCatalogService: Sendable {
             baseURL: "https://inference-api.nousresearch.com/v1",
             authType: .oauthDeviceCode,
             subscriptionGated: true,
-            docURL: "https://hermes-agent.nousresearch.com/docs/user-guide/setup/nous-portal"
+            docURL: "https://hermes-agent.nousresearch.com/docs/integrations/nous-portal"
         ),
         "openai-codex": HermesProviderOverlay(
             displayName: "ChatGPT or Codex Subscription",

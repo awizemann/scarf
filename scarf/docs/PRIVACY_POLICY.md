@@ -4,7 +4,7 @@ _Last updated: 2026-09-19._
 
 ## Plain summary
 
-Scarf and ScarfGo are companion clients for the open-source [Hermes AI agent](https://github.com/awizemann/hermes-agent). Both apps connect from your device to a Hermes host you (or your team) operate. **Your content — chats, sessions, files, credentials — never leaves your device or your Hermes hosts.** The macOS app additionally sends **anonymous usage statistics** to the developer to guide development; this is described below and can be switched off in Settings. **ScarfGo on iOS sends nothing to the developer.** One optional feature, **Live Voice**, sends your voice and recent chat messages directly from your device to OpenAI, and only after you start a session and agree once; see "Voice features" below.
+Scarf and ScarfGo are companion clients for the open-source [Hermes AI agent](https://github.com/NousResearch/hermes-agent). Both apps connect from your device to a Hermes host you (or your team) operate. **Your content — chats, sessions, files, credentials — never leaves your device or your Hermes hosts.** The macOS app additionally sends **anonymous usage statistics** to the developer to guide development; this is described below and can be switched off in Settings. **ScarfGo on iOS sends nothing to the developer.** One optional feature, **Live Voice**, sends your voice and recent chat messages directly from your device to OpenAI, and only after you start a session and agree once; see "Voice features" below.
 
 ## Apps covered
 
