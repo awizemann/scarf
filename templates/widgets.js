@@ -6,16 +6,13 @@
 // shows a live preview of exactly what the user's project dashboard
 // will look like after install.
 //
-// Widget types mirrored from the Swift dispatcher:
-//   stat      — big number + label + icon + color
-//   progress  — label + 0..1 bar
-//   text      — markdown (tiny subset renderer)
-//   table     — plain HTML table
-//   list      — bulleted list with optional status badge
-//   chart     — SVG line/bar by series
-//   webview   — sandboxed <iframe>
+// CANONICAL VOCABULARY: tools/widget-schema.json. The catalog validator
+// (tools/build-catalog.py) and the agent-authoring SKILL.md both read
+// from there. When you add a renderer below, mirror the Swift view in
+// scarf/scarf/Features/Projects/Views/Widgets/ AND add an entry to
+// widget-schema.json.
 //
-// Vanilla JS, no build step, no external deps. ~300 lines.
+// Vanilla JS, no build step, no external deps.
 
 (function (global) {
   "use strict";
@@ -79,6 +76,12 @@
         case "list":     return renderList(widget);
         case "chart":    return renderChart(widget);
         case "webview":  return renderWebview(widget);
+        case "cron_status": return renderCronStatus(widget);
+        case "log_tail":    return renderLogTail(widget);
+        case "markdown_file": return renderMarkdownFile(widget);
+        case "image":       return renderImage(widget);
+        case "status_grid": return renderStatusGrid(widget);
+        case "kanban_summary": return renderKanbanSummary(widget);
         default:         return renderUnknown(widget);
       }
     } catch (e) {
@@ -103,7 +106,39 @@
     if (widget.subtitle) {
       card.appendChild(elt("div", "widget-stat-subtitle", widget.subtitle));
     }
+    if (Array.isArray(widget.sparkline) && widget.sparkline.length >= 2) {
+      card.appendChild(renderSparkline(widget.sparkline));
+    }
     return card;
+  }
+
+  /** v2.7 — inline trend line under a stat value. SVG, no Chart.js. */
+  function renderSparkline(values) {
+    const w = 120;
+    const h = 18;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const span = Math.max(0.0001, max - min);
+    const stepX = values.length > 1 ? w / (values.length - 1) : 0;
+    let path = "";
+    values.forEach((v, i) => {
+      const x = (i * stepX).toFixed(2);
+      const y = (h - ((v - min) / span) * h).toFixed(2);
+      path += (i === 0 ? "M" : "L") + x + "," + y + " ";
+    });
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", "widget-stat-sparkline");
+    svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+    svg.setAttribute("width", String(w));
+    svg.setAttribute("height", String(h));
+    svg.setAttribute("preserveAspectRatio", "none");
+    const p = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    p.setAttribute("d", path.trim());
+    p.setAttribute("fill", "none");
+    p.setAttribute("stroke", "currentColor");
+    p.setAttribute("stroke-width", "1.2");
+    svg.appendChild(p);
+    return svg;
   }
 
   function displayValue(v) {
@@ -263,16 +298,40 @@
   // List
   // ---------------------------------------------------------------------
 
+  // Maps a `ListItem.status` string (free-form on the wire) to a canonical
+  // semantic status. Mirrors the Swift `ListItemStatus(raw:)` lenient parse
+  // — accepts canonical names + common synonyms (`ok`/`up` → success,
+  // `down`/`error` → danger, `active` → info). Returns null for unrecognized
+  // values so the renderer can fall back to a neutral text badge.
+  const STATUS_SYNONYMS = {
+    success: "success", ok: "success", up: "success", green: "success", passing: "success",
+    warning: "warning", warn: "warning", yellow: "warning", degraded: "warning",
+    danger: "danger", down: "danger", error: "danger", failed: "danger", failure: "danger", red: "danger", critical: "danger",
+    info: "info", active: "info", blue: "info",
+    pending: "pending", queued: "pending", waiting: "pending", scheduled: "pending",
+    done: "done", complete: "done", completed: "done", finished: "done",
+    neutral: "neutral", muted: "neutral", gray: "neutral",
+  };
+  function canonicalStatus(raw) {
+    if (typeof raw !== "string") return null;
+    const key = raw.trim().toLowerCase();
+    return STATUS_SYNONYMS[key] || null;
+  }
+
   function renderList(widget) {
     const card = elt("div", "widget widget-list");
     card.appendChild(elt("div", "widget-title", widget.title || ""));
     const ul = elt("ul", "widget-list-items");
     for (const item of widget.items || []) {
       const li = elt("li", "widget-list-item");
+      const canon = canonicalStatus(item.status);
+      if (canon === "done") li.classList.add("widget-list-item-done");
       li.appendChild(elt("span", "widget-list-text", item.text || ""));
       if (item.status) {
-        const badge = elt("span", "widget-list-status", item.status);
-        badge.dataset.status = item.status;
+        const cls = canon ? `widget-list-status status-${canon}` : "widget-list-status status-unknown";
+        const badge = elt("span", cls, canon || item.status);
+        badge.dataset.status = canon || item.status;
+        if (!canon) badge.title = `unknown status: ${item.status}`;
         li.appendChild(badge);
       }
       ul.appendChild(li);
@@ -377,14 +436,176 @@
   }
 
   // ---------------------------------------------------------------------
+  // log_tail / markdown_file / image / status_grid — v2.7
+  // The first three are file-reading widgets; the catalog has no project
+  // filesystem to read from, so we render an annotated placeholder. The
+  // template-author skill (SKILL.md Widget Catalog) tells users this is
+  // expected on the catalog and that real data appears in-app.
+  // ---------------------------------------------------------------------
+
+  function renderLogTail(widget) {
+    const card = elt("div", "widget widget-log-tail");
+    const head = elt("div", "widget-cron-head");
+    head.appendChild(elt("span", "widget-cron-icon", "⌙"));
+    head.appendChild(elt("span", "widget-title", widget.title || ""));
+    card.appendChild(head);
+    if (!widget.path) {
+      card.appendChild(renderWidgetError(
+        "", "Missing required `path` field.",
+        "Set `path` to a file relative to the project root."
+      ));
+      return card;
+    }
+    const lines = Math.max(1, Math.min(200, widget.lines || 20));
+    card.appendChild(elt("div", "widget-cron-meta",
+      `Tails last ${lines} line${lines === 1 ? "" : "s"} of ${widget.path}`));
+    card.appendChild(elt("div", "widget-cron-hint",
+      "Live tail appears in Scarf after install."));
+    return card;
+  }
+
+  function renderMarkdownFile(widget) {
+    const card = elt("div", "widget widget-markdown-file");
+    const head = elt("div", "widget-cron-head");
+    head.appendChild(elt("span", "widget-cron-icon", "📄"));
+    head.appendChild(elt("span", "widget-title", widget.title || ""));
+    card.appendChild(head);
+    if (!widget.path) {
+      card.appendChild(renderWidgetError(
+        "", "Missing required `path` field.",
+        "Set `path` to a markdown file relative to the project root."
+      ));
+      return card;
+    }
+    card.appendChild(elt("div", "widget-cron-meta",
+      `Renders markdown from: ${widget.path}`));
+    card.appendChild(elt("div", "widget-cron-hint",
+      "File contents appear in Scarf after install."));
+    return card;
+  }
+
+  function renderImage(widget) {
+    const card = elt("div", "widget widget-image");
+    card.appendChild(elt("div", "widget-title", widget.title || ""));
+    if (widget.url) {
+      const img = document.createElement("img");
+      img.className = "widget-image-img";
+      img.src = widget.url;
+      img.alt = widget.title || "";
+      if (widget.height) img.style.maxHeight = `${widget.height}px`;
+      card.appendChild(img);
+    } else if (widget.path) {
+      card.appendChild(elt("div", "widget-cron-meta",
+        `Local image: ${widget.path}`));
+      card.appendChild(elt("div", "widget-cron-hint",
+        "Local files render in Scarf after install."));
+    } else {
+      card.appendChild(renderWidgetError(
+        "", "Image widget needs either `path` (local) or `url` (remote)."
+      ));
+    }
+    return card;
+  }
+
+  function renderStatusGrid(widget) {
+    const card = elt("div", "widget widget-status-grid");
+    card.appendChild(elt("div", "widget-title", widget.title || ""));
+    const cells = Array.isArray(widget.cells) ? widget.cells : [];
+    if (cells.length === 0) {
+      card.appendChild(elt("div", "widget-cron-meta", "No cells."));
+      return card;
+    }
+    let cols = widget.gridColumns;
+    if (typeof cols !== "number" || cols <= 0) {
+      if (cells.length <= 4) cols = Math.max(1, cells.length);
+      else if (cells.length <= 12) cols = 6;
+      else if (cells.length <= 24) cols = 8;
+      else cols = 12;
+    }
+    const grid = elt("div", "widget-status-grid-grid");
+    grid.style.setProperty("--cols", String(cols));
+    for (const cell of cells) {
+      const square = elt("div", "widget-status-grid-cell");
+      const canon = canonicalStatus(cell.status) || "neutral";
+      const swatch = elt("div", `widget-status-grid-swatch status-${canon}`);
+      square.title = cell.tooltip || (cell.label + (cell.status ? ` — ${cell.status}` : ""));
+      square.appendChild(swatch);
+      square.appendChild(elt("div", "widget-status-grid-label", cell.label || ""));
+      grid.appendChild(square);
+    }
+    card.appendChild(grid);
+    return card;
+  }
+
+  // ---------------------------------------------------------------------
+  // Kanban summary (catalog preview — no live kanban data)
+  // ---------------------------------------------------------------------
+
+  function renderKanbanSummary(widget) {
+    const card = elt("div", "widget widget-kanban-summary");
+    const head = elt("div", "widget-cron-head");
+    const icon = elt("span", "widget-cron-icon", "▤");
+    head.appendChild(icon);
+    head.appendChild(elt("span", "widget-title", widget.title || "Kanban"));
+    card.appendChild(head);
+    card.appendChild(elt("div", "widget-cron-meta",
+      "Live Kanban summary appears in Scarf after install."));
+    const maxRows = (widget.value && typeof widget.value === "number")
+      ? Math.max(1, Math.floor(widget.value))
+      : 3;
+    card.appendChild(elt("div", "widget-cron-hint",
+      `Shows up to ${maxRows} top in-progress / blocked / todo tasks for the project's Kanban tenant.`));
+    return card;
+  }
+
+  // ---------------------------------------------------------------------
+  // Cron status (catalog preview — no live cron data)
+  // ---------------------------------------------------------------------
+
+  function renderCronStatus(widget) {
+    const card = elt("div", "widget widget-cron-status");
+    const head = elt("div", "widget-cron-head");
+    const icon = elt("span", "widget-cron-icon", "↻");
+    head.appendChild(icon);
+    head.appendChild(elt("span", "widget-title", widget.title || ""));
+    card.appendChild(head);
+    if (!widget.jobId) {
+      card.appendChild(elt("div", "widget-cron-meta",
+        "Missing required `jobId` field."));
+    } else {
+      card.appendChild(elt("div", "widget-cron-meta",
+        `Tracks Hermes cron job: ${widget.jobId}`));
+      card.appendChild(elt("div", "widget-cron-hint",
+        "Live status (last run, next run, output tail) appears in Scarf after install."));
+    }
+    return card;
+  }
+
+  // ---------------------------------------------------------------------
   // Unknown / placeholder
   // ---------------------------------------------------------------------
 
   function renderUnknown(widget) {
-    const card = elt("div", "widget widget-unknown");
-    card.appendChild(elt("div", "widget-title", widget.title || ""));
-    card.appendChild(elt("div", "widget-unknown-body",
-      `Unknown widget type: ${widget.type}`));
+    return renderWidgetError(
+      widget.title,
+      `Unknown widget type: "${widget.type}"`,
+      "This catalog renderer doesn't know about this widget type. The Scarf app may render it correctly if it's been added in a newer release."
+    );
+  }
+
+  /**
+   * Structured error card. Mirrors `WidgetErrorCard` on the Swift side and
+   * is also used by file-reading widgets (markdown_file, log_tail, image)
+   * when their underlying data can't be loaded.
+   */
+  function renderWidgetError(title, reason, hint) {
+    const card = elt("div", "widget widget-unknown widget-error");
+    const head = elt("div", "widget-error-head");
+    head.appendChild(elt("span", "widget-error-icon", "⚠"));
+    head.appendChild(elt("span", "widget-title", title || "Widget error"));
+    card.appendChild(head);
+    card.appendChild(elt("div", "widget-error-reason", reason));
+    if (hint) card.appendChild(elt("div", "widget-error-hint", hint));
     return card;
   }
 
