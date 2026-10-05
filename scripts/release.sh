@@ -363,6 +363,18 @@ FILE_LENGTH="$(echo "$SIG_OUTPUT" | sed -nE 's/.*length="([^"]+)".*/\1/p')"
 python3 -c "import base64,sys; sig=base64.b64decode(sys.argv[1]); sys.exit(0 if len(sig)==64 else 1)" "$ED_SIGNATURE" \
   || die "EdDSA signature did not decode to 64 bytes (got: $ED_SIGNATURE) — sign_update output is malformed"
 
+# Sparkle's minimumSystemVersion comes from the shipped app, never a literal:
+# a hardcoded 14.6 outlived the 15.0 deployment-target bump for 12 releases,
+# so Sonoma users were offered updates that could not launch.
+MIN_PLIST="$(mktemp)"
+unzip -p "$UNIVERSAL_ZIP" Scarf.app/Contents/Info.plist > "$MIN_PLIST" \
+  || die "could not read Info.plist from $UNIVERSAL_ZIP"
+MIN_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$MIN_PLIST")"
+rm -f "$MIN_PLIST"
+[[ "$MIN_SYSTEM_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] \
+  || die "LSMinimumSystemVersion in the built app is not a version: '$MIN_SYSTEM_VERSION'"
+log "Appcast minimumSystemVersion: $MIN_SYSTEM_VERSION"
+
 DOWNLOAD_URL="$DOWNLOAD_URL_BASE/v${VERSION}/Scarf-v${VERSION}-Universal.zip"
 PUB_DATE="$(LC_TIME=en_US.UTF-8 date -u +"%a, %d %b %Y %H:%M:%S +0000")"
 
@@ -387,7 +399,7 @@ APPCAST_ITEM=$(cat <<EOF
       <title>Version ${VERSION}</title>
       <sparkle:version>${NEW_BUILD}</sparkle:version>
       <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>14.6</sparkle:minimumSystemVersion>
+      <sparkle:minimumSystemVersion>${MIN_SYSTEM_VERSION}</sparkle:minimumSystemVersion>
       <pubDate>${PUB_DATE}</pubDate>
       <description><![CDATA[
 ${RELEASE_NOTES_HTML}

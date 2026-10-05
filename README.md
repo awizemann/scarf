@@ -18,8 +18,8 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/macOS-14.6+-blue" alt="macOS 14.6+">
-  <img src="https://img.shields.io/badge/iOS-18+-blue" alt="iOS 18+">
+  <img src="https://img.shields.io/badge/macOS-15+-blue" alt="macOS 15+">
+  <img src="https://img.shields.io/badge/iOS-18.6+-blue" alt="iOS 18.6+">
   <img src="https://img.shields.io/badge/Swift-6-orange" alt="Swift 6">
   <img src="https://img.shields.io/badge/Hermes-v0.21-purple" alt="Hermes v0.21">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="MIT License">
@@ -132,7 +132,7 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 
 ## Requirements & compatibility
 
-- **macOS 14.6+** (Scarf) · **iOS 18+** (ScarfGo) · Xcode 16+ to build from source.
+- **macOS 15+** (Scarf) · **iOS 18.6+** (ScarfGo) · Xcode 16+ to build from source.
 - **[Hermes](https://github.com/NousResearch/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.5** (v2026.9.24) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |

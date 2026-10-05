@@ -47,8 +47,8 @@ As configured in `scarf.xcodeproj/project.pbxproj`:
 
 - **Product name**: `scarf mobile`
 - **Folder name** (on disk): `Scarf iOS`
-- **Bundle ID**: `com.scarf-mobile.app`
-- **Deployment target**: iOS 18.0, iPhone-only
+- **Bundle ID**: `com.scarfgo.app`
+- **Deployment target**: iOS 18.6, iPhone-only
 - **Team**: `3Q6X2L86C4` (shared with the Mac target)
 - **Swift language version**: Swift 5 (matches Mac + both SPM packages)
 
@@ -71,7 +71,7 @@ it stalls.
 
 1. Open `scarf/scarf.xcodeproj`.
 2. Scheme picker top-left → select **scarf mobile**.
-3. Destination → any iPhone simulator on iOS 18+.
+3. Destination → any iPhone simulator on iOS 18.6+.
 4. ⌘R. Expect onboarding → dashboard flow.
 
 Switch back to the Mac target with the scheme picker.
@@ -122,7 +122,7 @@ placeholders. Real iOS behavioural coverage lives in:
 3. **Window → Organizer → Distribute App → App Store Connect →
    Upload**.
 4. First upload creates the App Store Connect app record with
-   Bundle ID `com.scarf-mobile.app` under team `3Q6X2L86C4`.
+   Bundle ID `com.scarfgo.app` under team `3Q6X2L86C4`.
 5. Invite testers.
 
 No network-usage `Info.plist` key needed — Citadel uses SwiftNIO

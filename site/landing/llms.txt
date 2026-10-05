@@ -6,7 +6,7 @@ Both apps are free, MIT licensed, and built from a single open repository. Scarf
 
 ## Quick facts
 
-- **Platforms:** macOS 14.6+ Sonoma (Apple Silicon and Intel), iOS 18+
+- **Platforms:** macOS 15+ Sequoia (Apple Silicon and Intel), iOS 18.6+
 - **License:** MIT
 - **Repository:** https://github.com/awizemann/scarf
 - **Author:** Alan Wizemann

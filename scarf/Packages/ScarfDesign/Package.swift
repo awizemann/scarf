@@ -13,7 +13,8 @@
 // `Color(name, bundle: .module)` lookups in `ScarfTheme.swift` resolve at
 // runtime regardless of which app is hosting the bundle.
 //
-// Platform minimums match the rest of the workspace: macOS 14 + iOS 18.
+// Platform minimums are floors (macOS 14 + iOS 18); the app targets set the
+// shipped minimums (macOS 15.0, iOS 18.6 in project.pbxproj).
 
 import PackageDescription
 

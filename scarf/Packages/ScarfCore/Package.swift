@@ -6,8 +6,8 @@
 // this package and provide their own platform shells (Sparkle + SwiftTerm on
 // macOS; Citadel-based SSH transport on iOS).
 //
-// Minimums are chosen to match the Mac app (macOS 14.6) and the locked
-// v1 iOS decision (iOS 18). Raising iOS later is free; lowering is not —
+// These are floors, not the shipped minimums: the app targets set those
+// (macOS 15.0, iOS 18.6 in project.pbxproj). Raising iOS later is free; lowering is not —
 // the ViewModels on `@Observable` / `NavigationStack` are iOS 17+ features
 // and we standardize on iOS 18 for feature parity with the Mac codebase.
 
