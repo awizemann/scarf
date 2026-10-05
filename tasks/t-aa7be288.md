@@ -1,7 +1,7 @@
 ---
 id: t-aa7be288
 title: R2 [iOS]: App Store compliance — FileTimestamp manifest + export-compliance answer
-status: todo
+status: done
 added: 2026-08-20
 priority: high
 ---
@@ -16,5 +16,5 @@ priority: high
 
 ## Artifacts
 
-
+Fixed 2026-10-05 in commit 3a89bdfd: the iOS PrivacyInfo.xcprivacy declares NSPrivacyAccessedAPICategoryFileTimestamp with reason C617.1 (MetricKit reports and the TTS cache in the app container).
 

@@ -1,7 +1,7 @@
 ---
 id: t-11cc53ea
 title: ScarfGo: decide App Privacy + privacy manifest for Live Voice audio
-status: todo
+status: done
 added: 2026-09-18
 priority: high
 ---
@@ -23,5 +23,5 @@ Because the audio leaves the device straight to a third party (not the user's ow
 
 ## Artifacts
 
-2026-09-19 recommendation for Alan: documents/appstore-review/2026-09-19-scarfgo-app-privacy-live-voice.md — option (b): declare Audio Data + Other User Content (App Functionality, not linked, not tracked) in App Store Connect and PrivacyInfo.xcprivacy; xcprivacy XML and App Review notes are in the brief. Also found: File Timestamp Required Reason (C617.1) is missing (MetricKitSubscriber + HermesTTSCache read contentModificationDate) = t-aa7be288. Waiting on Alan's decision.
+Decided by Alan 2026-10-05: keep "Data Not Collected". ScarfGo sends nothing by default, and Live Voice is a user-started, consent-gated feature using the user's own OpenAI key on their Hermes host; the developer receives nothing. The App Review notes text is in releases/v3.6.0/APP_STORE_METADATA.md (commit 69e9e2b2).
 
