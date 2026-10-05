@@ -14,17 +14,22 @@
 /* ---------- 1. Tokens ---------- */
 
 :root {
-  /* Colors — light mode (BrandRust / BrandRustHover / BrandRustActive in ScarfBrand.xcassets; matches design/static-site/colors_and_type.css) */
-  --accent: #C25A2A;
-  --accent-hover: #A6481E;
-  --accent-active: #7A2E14;
-  --accent-tint: rgba(194, 90, 42, 0.10);
+  /* Colors — light mode. --accent* / --on-accent mirror ScarfBrand.xcassets Accent/* +
+   * Foreground/OnAccent and design/static-site/colors_and_type.css (the UI accent sits one
+   * step darker than the BrandRust brand color so white text clears WCAG AA); --bg /
+   * --bg-card mirror Surface/BackgroundPrimary/Secondary. tools/check-design-tokens.py
+   * fails site.sh on drift or a contrast regression. */
+  --accent: #A6481E;
+  --accent-hover: #7A2E14;
+  --accent-active: #5C220F;
+  --accent-tint: rgba(166, 72, 30, 0.10);
+  --on-accent: #FFFFFF;
 
   --fg: #1A1818;
   --fg-muted: #5C5552;
   --fg-faint: #8B8480;
 
-  --bg: #FAF7F2;
+  --bg: #FBF9F6;
   --bg-card: #FFFFFF;
   --bg-tertiary: #F2EDE5;
 
@@ -77,14 +82,15 @@
     --accent: #E89360;
     --accent-hover: #F0A879;
     --accent-active: #D87844;
-    --accent-tint: rgba(232, 147, 96, 0.14);
+    --accent-tint: rgba(232, 147, 96, 0.10);
+    --on-accent: #3B1608;
 
     --fg: #EDEBEB;
     --fg-muted: #ADA8A4;
     --fg-faint: #807A75;
 
-    --bg: #141211;
-    --bg-card: #1F1C1A;
+    --bg: #15130F;
+    --bg-card: #1F1C18;
     --bg-tertiary: #2A2622;
 
     --border: #2F2A26;
@@ -105,14 +111,15 @@
 /* Manual theme override (set by app.js — wins over media query) */
 :root[data-theme="light"] {
   color-scheme: light;
-  --accent: #C25A2A;
-  --accent-hover: #A6481E;
-  --accent-active: #7A2E14;
-  --accent-tint: rgba(194, 90, 42, 0.10);
+  --accent: #A6481E;
+  --accent-hover: #7A2E14;
+  --accent-active: #5C220F;
+  --accent-tint: rgba(166, 72, 30, 0.10);
+  --on-accent: #FFFFFF;
   --fg: #1A1818;
   --fg-muted: #5C5552;
   --fg-faint: #8B8480;
-  --bg: #FAF7F2;
+  --bg: #FBF9F6;
   --bg-card: #FFFFFF;
   --bg-tertiary: #F2EDE5;
   --border: #E5DED2;
@@ -132,12 +139,13 @@
   --accent: #E89360;
   --accent-hover: #F0A879;
   --accent-active: #D87844;
-  --accent-tint: rgba(232, 147, 96, 0.14);
+  --accent-tint: rgba(232, 147, 96, 0.10);
+  --on-accent: #3B1608;
   --fg: #EDEBEB;
   --fg-muted: #ADA8A4;
   --fg-faint: #807A75;
-  --bg: #141211;
-  --bg-card: #1F1C1A;
+  --bg: #15130F;
+  --bg-card: #1F1C18;
   --bg-tertiary: #2A2622;
   --border: #2F2A26;
   --border-strong: #4A413A;
@@ -560,6 +568,10 @@ section {
   border-bottom: 1px solid var(--border);
   padding-block: var(--s10);
 }
+/* On the tertiary surface the light tint under accent text drops it to 4.39:1;
+ * the hover step keeps tinted accent text (eyebrow, inline code) at AA. */
+.ios .eyebrow,
+.ios code { color: var(--accent-hover); }
 .ios > * { max-width: var(--max-w); margin-inline: auto; }
 .ios {
   display: grid;
@@ -858,9 +870,9 @@ section {
 
 .btn-primary {
   background: var(--accent);
-  color: #FFFFFF;
+  color: var(--on-accent);
 }
-.btn-primary:hover { background: var(--accent-hover); color: #FFFFFF; }
+.btn-primary:hover { background: var(--accent-hover); color: var(--on-accent); }
 .btn-primary:active { background: var(--accent-active); }
 
 .btn-secondary {

@@ -70,18 +70,28 @@ scan_hard_ghpages() {
 }
 
 # ---------- commands ----------
+check_design_tokens() {
+  # site/styles.css (the catalog's stylesheet) mirrors ScarfDesign's accent /
+  # on-accent / background colorsets; fail on drift or a contrast regression.
+  "$PY" "$REPO_ROOT/tools/check-design-tokens.py" --repo "$REPO_ROOT" \
+    || die "design tokens drifted from ScarfBrand.xcassets or fail contrast — refusing to continue."
+}
+
 cmd_check() {
   need_builder
   "$PY" "$BUILDER" --check --repo "$REPO_ROOT"
+  check_design_tokens
 }
 
 cmd_build() {
   need_builder
+  check_design_tokens
   "$PY" "$BUILDER" --build --repo "$REPO_ROOT"
 }
 
 cmd_preview() {
   need_builder
+  check_design_tokens
   local dir="${1:-/tmp/scarf-catalog-preview}"
   rm -rf "$dir"
   mkdir -p "$dir"
@@ -102,6 +112,7 @@ cmd_publish() {
   need_ghpages
   log "Validating"
   "$PY" "$BUILDER" --check --repo "$REPO_ROOT"
+  check_design_tokens
   log "Building"
   "$PY" "$BUILDER" --build --repo "$REPO_ROOT"
 

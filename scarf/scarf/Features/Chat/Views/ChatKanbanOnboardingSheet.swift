@@ -142,7 +142,7 @@ struct ChatKanbanOnboardingSheet: View {
                 if isEnabling {
                     ProgressView()
                         .controlSize(.small)
-                        .tint(.white)
+                        .tint(ScarfColor.onAccent)
                 } else {
                     Text("Enable kanban tools")
                 }

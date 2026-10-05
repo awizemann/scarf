@@ -318,7 +318,7 @@ struct ChatSessionRow: View {
                 if session.unread > 0 {
                     Text("\(session.unread)")
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(ScarfColor.onAccent)
                         .padding(.horizontal, 5).padding(.vertical, 1)
                         .background(Capsule().fill(ScarfColor.accent))
                 }
@@ -783,7 +783,7 @@ struct ChatComposer: View {
                     .foregroundStyle(ScarfColor.foregroundFaint)
                 Button {} label: {
                     Image(systemName: "arrow.up")
-                        .foregroundStyle(.white)
+                        .foregroundStyle(ScarfColor.onAccent)
                         .font(.system(size: 12, weight: .bold))
                         .frame(width: 28, height: 28)
                         .background(

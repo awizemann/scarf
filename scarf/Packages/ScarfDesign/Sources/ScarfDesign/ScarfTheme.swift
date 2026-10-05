@@ -25,22 +25,32 @@ public enum ScarfColor {
         Color(name, bundle: .module)
     }
 
-    // Brand
+    // Brand — the identity color (logo, brand mark, gradients, decorative
+    // fills). Not for buttons, links, selection or text: light-mode
+    // BrandRust (#C25A2A) is only 4.4:1 against white, below WCAG AA.
     public static let brandRust         = asset("Brand/BrandRust")
     public static let brandRustHover    = asset("Brand/BrandRustHover")
     public static let brandRustActive   = asset("Brand/BrandRustActive")
     public static let brandAmber        = asset("Brand/BrandAmber")
     public static let brandRustDeep     = asset("Brand/BrandRustDeep")
 
-    /// Semantic alias: the "primary" accent. Use this in component code,
-    /// not `brandRust` directly — it lets you re-skin without a refactor.
-    public static var accent: Color        { brandRust }
-    public static var accentHover: Color   { brandRustHover }
-    public static var accentActive: Color  { brandRustActive }
+    /// Semantic UI accent: buttons, links, tints, selection, accent text.
+    /// Use this in component code, not `brandRust`. Light mode sits one
+    /// step darker on the brand scale than the brand color (brand-600
+    /// #A6481E / 700 / 800) so white labels and accent text clear AA;
+    /// dark mode matches the brand's dark values (#E89360 / #F0A879 /
+    /// #D87844) and pairs with a dark `onAccent` (brand-900 #3B1608).
+    /// Mirrored in design/static-site/colors_and_type.css and the site
+    /// stylesheets; tools/check-design-tokens.py fails on drift.
+    public static let accent       = asset("Accent/Accent")
+    public static let accentHover  = asset("Accent/AccentHover")
+    public static let accentActive = asset("Accent/AccentActive")
 
-    /// Tinted accent for hover halos, selection backgrounds.
-    public static var accentTint: Color { brandRust.opacity(0.10) }
-    public static var accentTintStrong: Color { brandRust.opacity(0.18) }
+    /// Tinted accent for hover halos, selection backgrounds — the semantic
+    /// accent's RGB at 0.10 / 0.18 alpha (light) and 0.10 / 0.24 (dark),
+    /// matching --accent-tint / --accent-tint-strong in the CSS.
+    public static let accentTint       = asset("Accent/AccentTint")
+    public static let accentTintStrong = asset("Accent/AccentTintStrong")
 
     // Surfaces
     public static let backgroundPrimary   = asset("Surface/BackgroundPrimary")

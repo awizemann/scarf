@@ -1,21 +1,25 @@
 /* Scarf Templates — catalog site (published to gh-pages /templates/).
- * Vanilla CSS, no framework. Uses the Scarf design system's brand accent
- * (Scarf Rust — ScarfDesign BrandRust / design/static-site/colors_and_type.css)
- * and keeps decoration minimal — the live dashboard preview is the point.
+ * Vanilla CSS, no framework. Uses the Scarf design system's UI accent
+ * (ScarfDesign Accent/* + Foreground/OnAccent, design/static-site/colors_and_type.css —
+ * one step darker than the BrandRust brand color in light mode so white text clears
+ * WCAG AA) and keeps decoration minimal — the live dashboard preview is the point.
+ * --accent* / --on-accent / --bg / --bg-card are checked against the xcassets by
+ * tools/check-design-tokens.py.
  * Green appears only as the semantic success color (ScarfDesign
  * SemanticSuccess), never as the brand accent. */
 
 :root {
   --fg: #1a1a1a;
   --fg-muted: #666;
-  --bg: #fafafa;
-  --bg-card: #ffffff;
+  --bg: #FBF9F6;            /* Surface/BackgroundPrimary */
+  --bg-card: #FFFFFF;       /* Surface/BackgroundSecondary */
   --border: #e5e5e5;
-  --accent: #C25A2A;        /* Scarf Rust (BrandRust) */
-  --accent-hover: #A6481E;  /* BrandRustHover */
-  --accent-active: #7A2E14; /* BrandRustActive */
-  --accent-tint: rgba(194, 90, 42, 0.10);
-  --accent-tint-strong: rgba(194, 90, 42, 0.18);
+  --accent: #A6481E;        /* Accent/Accent (brand-600) */
+  --accent-hover: #7A2E14;  /* Accent/AccentHover (brand-700) */
+  --accent-active: #5C220F; /* Accent/AccentActive (brand-800) */
+  --accent-tint: rgba(166, 72, 30, 0.10);
+  --accent-tint-strong: rgba(166, 72, 30, 0.18);
+  --on-accent: #FFFFFF;     /* Foreground/OnAccent */
   --success: #2AA876;       /* SemanticSuccess */
   --success-text: #1F7F5A;  /* design-system --green-600 */
   --success-rgb: 42, 168, 118;
@@ -32,14 +36,15 @@
   :root {
     --fg: #e5e5e5;
     --fg-muted: #9a9a9a;
-    --bg: #141414;
-    --bg-card: #1e1e1e;
+    --bg: #15130F;
+    --bg-card: #1F1C18;
     --border: #2a2a2a;
     --accent: #E89360;
     --accent-hover: #F0A879;
     --accent-active: #D87844;
-    --accent-tint: rgba(232, 147, 96, 0.14);
+    --accent-tint: rgba(232, 147, 96, 0.10);
     --accent-tint-strong: rgba(232, 147, 96, 0.24);
+    --on-accent: #3B1608;    /* Foreground/OnAccent (dark, brand-900) */
     --success: #3DBE89;      /* SemanticSuccess (dark) */
     --success-text: #3DBE89;
     --success-rgb: 61, 190, 137;
@@ -215,9 +220,9 @@ h1, h2, h3 { line-height: 1.25; }
 }
 .btn-primary {
   background: var(--accent);
-  color: white;
+  color: var(--on-accent);
 }
-.btn-primary:hover { background: var(--accent-hover); text-decoration: none; color: white; }
+.btn-primary:hover { background: var(--accent-hover); text-decoration: none; color: var(--on-accent); }
 .btn-secondary {
   background: transparent;
   color: var(--fg);

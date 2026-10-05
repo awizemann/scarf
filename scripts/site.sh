@@ -4,7 +4,7 @@
 # site/landing/ and (on `publish`) commits + pushes to gh-pages.
 #
 # Usage:
-#   ./scripts/site.sh check               # validate required files exist + FAQ/JSON-LD parity
+#   ./scripts/site.sh check               # validate required files exist + FAQ/JSON-LD parity + design tokens
 #   ./scripts/site.sh build               # render to .gh-pages-worktree/ root (with token substitution)
 #   ./scripts/site.sh preview [PORT]      # build + serve on localhost:PORT (default 8000) + open browser
 #   ./scripts/site.sh serve   [PORT]      # serve .gh-pages-worktree/ without rebuilding (default 8000)
@@ -160,6 +160,14 @@ check_faq_parity() {
     || die "FAQ / JSON-LD mismatch in $SRC_DIR/index.html — refusing to build."
 }
 
+check_design_tokens() {
+  # The landing + catalog stylesheets mirror ScarfDesign's accent / on-accent /
+  # background colorsets. Fails on any drift from the xcassets, on text over an
+  # accent fill that isn't var(--on-accent), or on a contrast pair below AA.
+  "$PY" "$REPO_ROOT/tools/check-design-tokens.py" --repo "$REPO_ROOT" \
+    || die "design tokens drifted from ScarfBrand.xcassets or fail contrast — refusing to build."
+}
+
 scan_hard_rendered() {
   # Post-build pass: scan the gh-pages tree we're about to publish, but
   # only the files we own (so we don't false-flag on appcast.xml or
@@ -191,6 +199,7 @@ cmd_check() {
   need_src
   scan_hard_source
   check_faq_parity
+  check_design_tokens
   log "Source files OK ($(ls -1 "$SRC_DIR" | wc -l | tr -d ' ') entries; assets/: $(find "$SRC_DIR/assets" -type f | wc -l | tr -d ' ') files)"
 }
 
@@ -199,6 +208,7 @@ cmd_build() {
   need_ghpages
   scan_hard_source
   check_faq_parity
+  check_design_tokens
 
   local version lastmod template_urls
   version="$(resolve_version)"
@@ -250,6 +260,7 @@ cmd_publish() {
   log "Validating source"
   scan_hard_source
   check_faq_parity
+  check_design_tokens
 
   log "Building"
   cmd_build
