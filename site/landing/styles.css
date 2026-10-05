@@ -14,11 +14,11 @@
 /* ---------- 1. Tokens ---------- */
 
 :root {
-  /* Colors — light mode (mirrors ScarfBrand.xcassets light variants) */
-  --accent: #C2563D;
-  --accent-hover: #A8482F;
-  --accent-active: #8E3B26;
-  --accent-tint: rgba(194, 86, 61, 0.12);
+  /* Colors — light mode (BrandRust / BrandRustHover / BrandRustActive in ScarfBrand.xcassets; matches design/static-site/colors_and_type.css) */
+  --accent: #C25A2A;
+  --accent-hover: #A6481E;
+  --accent-active: #7A2E14;
+  --accent-tint: rgba(194, 90, 42, 0.10);
 
   --fg: #1A1818;
   --fg-muted: #5C5552;
@@ -74,10 +74,10 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --accent: #E89580;
-    --accent-hover: #ECA593;
-    --accent-active: #F0B5A6;
-    --accent-tint: rgba(232, 149, 128, 0.16);
+    --accent: #E89360;
+    --accent-hover: #F0A879;
+    --accent-active: #D87844;
+    --accent-tint: rgba(232, 147, 96, 0.14);
 
     --fg: #EDEBEB;
     --fg-muted: #ADA8A4;
@@ -105,10 +105,10 @@
 /* Manual theme override (set by app.js — wins over media query) */
 :root[data-theme="light"] {
   color-scheme: light;
-  --accent: #C2563D;
-  --accent-hover: #A8482F;
-  --accent-active: #8E3B26;
-  --accent-tint: rgba(194, 86, 61, 0.12);
+  --accent: #C25A2A;
+  --accent-hover: #A6481E;
+  --accent-active: #7A2E14;
+  --accent-tint: rgba(194, 90, 42, 0.10);
   --fg: #1A1818;
   --fg-muted: #5C5552;
   --fg-faint: #8B8480;
@@ -129,10 +129,10 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --accent: #E89580;
-  --accent-hover: #ECA593;
-  --accent-active: #F0B5A6;
-  --accent-tint: rgba(232, 149, 128, 0.16);
+  --accent: #E89360;
+  --accent-hover: #F0A879;
+  --accent-active: #D87844;
+  --accent-tint: rgba(232, 147, 96, 0.14);
   --fg: #EDEBEB;
   --fg-muted: #ADA8A4;
   --fg-faint: #807A75;
