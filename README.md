@@ -69,17 +69,15 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 ## Privacy
 
-Scarf for macOS collects **anonymous usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted without identifying you. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context, and both apps ask before the first session.
+Scarf for macOS collects **usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted and followed over time without knowing who you are. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context and Hermes's replies so the voice can speak them, and both apps ask before the first session.
 
-## What's New in 3.5.0
+## What's New in 3.6.0
 
-- **Audited end to end** — three full audits against Hermes v0.21.5 (the last one covering all 664 source files) and more than 140 fixes: Scarf no longer reports success when Hermes refused, writes settings Hermes ignores, or behaves differently on a remote server.
-- **Your files are safe** — editing SOUL.md can no longer wipe it; project chats no longer hide a project's own `CLAUDE.md` / `.cursorrules` behind a new `AGENTS.md`; long compacted chats show their full history again; MCP blocklists, backups and iPhone memory edits no longer lose data.
-- **Stop button** — next to Send (⌘. on the Mac) in chat and Bot Chat, on Mac and iPhone.
-- **Only providers Hermes can use** — the model picker lists what your Hermes version can route (measured per release from v0.6), and warns if your config names one it can't.
-- **Messaging platforms that listen** — forms show the value Hermes actually uses when `.env` overrides config; gateway restarts wait for the current reply; Spotify sign-in works locally and explains the remote step.
-- **Project context without touching your files** (Hermes 0.16+) — Scarf hands the agent a short project summary directly on the chat process instead of writing it into `AGENTS.md`; older hosts are unaffected. Idea and research credit: [@counterposition](https://github.com/counterposition) ([#142](https://github.com/awizemann/scarf/issues/142)).
-- Full notes: [releases/v3.5.0/RELEASE_NOTES.md](releases/v3.5.0/RELEASE_NOTES.md).
+- **ScarfGo checks your server's identity** — it remembers each server's SSH host key on first connect and refuses a server that shows a different one, with both fingerprints and a **Trust New Key** step in System. Before this, ScarfGo accepted any host key. The Mac app always checked.
+- **Easier to read in light and dark mode** — a deeper orange for buttons and links in light mode, dark text on orange buttons in dark mode, darker status text that passes WCAG AA, and brick-red destructive actions, across both apps.
+- **Privacy, described accurately** — the privacy policy and in-app text now match the code. Live Voice asks for consent once more because the screen now says that Hermes's replies and status lines also go to OpenAI. The Mac setting is now called "usage statistics" instead of "anonymous."
+- **On macOS 14 Sonoma?** Scarf has required macOS 15 since v2.20.0. The update feed now says so, so Sonoma Macs are no longer offered updates that can't open.
+- Full notes: [releases/v3.6.0/RELEASE_NOTES.md](releases/v3.6.0/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
