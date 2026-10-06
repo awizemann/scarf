@@ -31,7 +31,7 @@ nonisolated enum UsageEvent {
 
     /// A detached launch bootstrap task threw.
     case bootstrapTaskFailed(task: BootstrapTask)
-    /// A `scarf://` URL (or the XCUITest bypass for one) was routed.
+    /// A `scarf://` URL was routed.
     case deepLinkOpened(kind: DeepLinkKind)
     /// First launch this install has ever completed.
     case firstRun(platform: Platform)
@@ -70,7 +70,6 @@ nonisolated enum UsageEvent {
     case chatSessionStarted(mode: ChatSessionMode, origin: ChatSessionOrigin)
     case messageSent(hasAttachment: Bool, inputMode: ChatViewModel.ChatInputMode)
     case modelPreflightResult(outcome: ModelPreflightOutcome)
-    case sessionResumeFallback(kind: SessionResumeFallbackKind)
     case permissionPromptResponded(decision: PermissionDecision)
     case voiceUsed(kind: VoiceKind)
 
@@ -126,7 +125,6 @@ nonisolated enum UsageEvent {
         case .chatSessionStarted:       return "chat_session_started"
         case .messageSent:              return "message_sent"
         case .modelPreflightResult:     return "model_preflight_result"
-        case .sessionResumeFallback:    return "session_resume_fallback"
         case .permissionPromptResponded: return "permission_prompt_responded"
         case .voiceUsed:                return "voice_used"
         case .projectCreated:           return "project_created"
@@ -211,8 +209,6 @@ nonisolated enum UsageEvent {
             ]
         case .modelPreflightResult(let outcome):
             return ["outcome": .string(outcome.rawValue)]
-        case .sessionResumeFallback(let kind):
-            return ["kind": .string(kind.rawValue)]
         case .permissionPromptResponded(let decision):
             return ["decision": .string(decision.rawValue)]
         case .voiceUsed(let kind):
@@ -278,7 +274,7 @@ nonisolated enum UsageEvent {
     /// it. Associated values are arbitrary — only ``name`` is read.
     private var nextForCoverage: UsageEvent? {
         switch self {
-        case .bootstrapTaskFailed:      return .deepLinkOpened(kind: .test)
+        case .bootstrapTaskFailed:      return .deepLinkOpened(kind: .installTemplate)
         case .deepLinkOpened:           return .firstRun(platform: .macos)
         case .firstRun:                 return .launchCompleted(durationBucket: .init(seconds: 0),
                                                                 serverCountBucket: .init(count: 0),
@@ -304,8 +300,7 @@ nonisolated enum UsageEvent {
         case .sectionViewed:            return .chatSessionStarted(mode: .new, origin: .chat)
         case .chatSessionStarted:       return .messageSent(hasAttachment: false, inputMode: .typed)
         case .messageSent:              return .modelPreflightResult(outcome: .passed)
-        case .modelPreflightResult:     return .sessionResumeFallback(kind: .newSessionFallback)
-        case .sessionResumeFallback:    return .permissionPromptResponded(decision: .approve)
+        case .modelPreflightResult:     return .permissionPromptResponded(decision: .approve)
         case .permissionPromptResponded: return .voiceUsed(kind: .tts)
         case .voiceUsed:                return .projectCreated(template: .custom, method: .scaffold)
         case .projectCreated:           return .templateInstalled(source: .hub)
@@ -336,8 +331,6 @@ nonisolated extension UsageEvent {
     }
 
     enum DeepLinkKind: String, CaseIterable, Sendable {
-        /// XCUITest's `--scarf-test-install-url` bypass, never a real open.
-        case test
         case installTemplate = "install_template"
     }
 
@@ -388,9 +381,22 @@ nonisolated extension UsageEvent {
 
     enum ReconnectTrigger: String, CaseIterable, Sendable {
         case wake
-        /// Emitted by `ScarfCore` through the string seam, listed here so the
-        /// vocabulary is complete in one place.
+        /// Emitted by `ScarfCore` through the string seam; kept so
+        /// `packageEmittedTokensMatchVocabulary` can pin that literal.
         case manual
+    }
+
+    /// `session_resume_fallback`'s `kind`. The event itself is emitted only by
+    /// `ScarfCore` through the string seam (`SessionResume.analyticsKind(for:)`
+    /// and `RichChatViewModel`), so there is no `UsageEvent` case; this
+    /// vocabulary exists so `packageEmittedTokensMatchVocabulary` can pin the
+    /// seam's literals.
+    enum SessionResumeFallbackKind: String, CaseIterable, Sendable {
+        case newSessionFallback = "new_session_fallback"
+        case nonACPSource = "non_acp_source"
+        case slashCommandFallback = "slash_command_fallback"
+        case historyFallback = "history_fallback"
+        case sparseTranscript = "sparse_transcript"
     }
 
     enum UpdateCheckResult: String, CaseIterable, Sendable {
@@ -419,18 +425,6 @@ nonisolated extension UsageEvent {
         /// Repaired-or-failed is the shape three banner fixes share.
         static func repairedOrFailed(_ ok: Bool) -> Self { ok ? .repaired : .failed }
         static func confirmedOrFailed(_ ok: Bool) -> Self { ok ? .confirmed : .failed }
-    }
-
-    enum SessionResumeFallbackKind: String, CaseIterable, Sendable {
-        case newSessionFallback = "new_session_fallback"
-        // The ones below — and, since #146, `new_session_fallback` too — are
-        // emitted by `ScarfCore` through the string seam
-        // (`SessionResume.analyticsKind(for:)`); present for vocabulary
-        // completeness.
-        case nonACPSource = "non_acp_source"
-        case slashCommandFallback = "slash_command_fallback"
-        case historyFallback = "history_fallback"
-        case sparseTranscript = "sparse_transcript"
     }
 
     enum PermissionDecision: String, CaseIterable, Sendable {

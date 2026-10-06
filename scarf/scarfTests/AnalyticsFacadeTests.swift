@@ -76,7 +76,8 @@ struct AnalyticsFacadeTests {
         #expect(configuration.consent == .all)
         #expect(configuration.consent.contains(.identity))
         #expect(Analytics.consent == [.usage, .diagnostics, .identity])
-        #expect(configuration.autoEvents == [.appOpen, .appBackground, .sessions])
+        // No `.appBackground` since 3.6 — see `makeConfiguration`.
+        #expect(configuration.autoEvents == [.appOpen, .sessions])
         #expect(configuration.isPreRelease == true)
     }
 
@@ -215,8 +216,6 @@ struct UsageEventWireFormatTests {
             name: "bootstrap_task_failed", props: ["task": "slash_commands"]),
         Row(event: .bootstrapTaskFailed(task: .envMirror),
             name: "bootstrap_task_failed", props: ["task": "env_mirror"]),
-        Row(event: .deepLinkOpened(kind: .test),
-            name: "deep_link_opened", props: ["kind": "test"]),
         Row(event: .deepLinkOpened(kind: .installTemplate),
             name: "deep_link_opened", props: ["kind": "install_template"]),
         Row(event: .firstRun(platform: .macos),
@@ -309,8 +308,6 @@ struct UsageEventWireFormatTests {
             name: "model_preflight_result", props: ["outcome": "confirmed"]),
         Row(event: .modelPreflightResult(outcome: .cancelled),
             name: "model_preflight_result", props: ["outcome": "cancelled"]),
-        Row(event: .sessionResumeFallback(kind: .newSessionFallback),
-            name: "session_resume_fallback", props: ["kind": "new_session_fallback"]),
         Row(event: .permissionPromptResponded(decision: .approve),
             name: "permission_prompt_responded", props: ["decision": "approve"]),
         Row(event: .permissionPromptResponded(decision: .deny),

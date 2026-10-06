@@ -177,7 +177,10 @@ nonisolated enum Analytics {
             // version, locale, screen, color scheme), `.identity` keeps the
             // install id stable across launches.
             consent: consent,
-            autoEvents: [.appOpen, .appBackground, .sessions],
+            // No `.appBackground` (since 3.6): on a Mac it fired on every
+            // Cmd-Tab, one event and one send each, for no product question.
+            // Series break: `app_background` stops at this version.
+            autoEvents: [.appOpen, .sessions],
             storageDirectory: storageDirectory,
             isPreRelease: isPreRelease,
             clock: clock
@@ -259,12 +262,10 @@ nonisolated enum Analytics {
         _tracker = tracker ?? StatsUsageTracker.shared
     }
 
-    /// The production tracker's client, for Settings (consent toggles,
-    /// enable/disable UI). Deliberately **not** routed through ``tracker``:
-    /// the master switch and its persisted state belong to the real client,
-    /// and a test double has no client to toggle. `nil` when analytics failed
-    /// to configure.
-    static var client: StatsClient? { StatsUsageTracker.shared.client }
+    /// Whether this process has a real analytics client — `false` without a
+    /// write key, under tests, and in UI-test launches. Settings uses it to
+    /// say so instead of offering a toggle that does nothing.
+    static var isAvailable: Bool { StatsUsageTracker.shared.client != nil }
 
     // MARK: - Recording
 
@@ -364,32 +365,47 @@ nonisolated enum Analytics {
     /// only handle through which the string `record` could be reached; the
     /// seam itself is left as-is rather than duplicated.
     private struct CoreBridge: ScarfAnalyticsRecording {
-        /// `ScarfCore` events emitted by background polling. Not included:
-        /// `hermes_version_detected` / `hermes_probe_failed`, which fire once
-        /// per process from launch and foreground probes — gating them would
-        /// spend their once-only latch on a dropped event.
-        static let unattendedCapable: Set<String> = [
+        /// Emitted by background polling; dropped while nobody is present
+        /// (same rule as ``Analytics/recordIfPresent(_:presence:)``).
+        static let dropWhenAbsent: Set<String> = [
             "connection_degraded",      // ConnectionStatusViewModel heartbeat
             "circuit_breaker_opened",   // SSHConnectionGate, hit by the pollers
-            "circuit_breaker_closed",
+        ]
+        /// Real usage that can finish while the person is away — a long agent
+        /// turn completing, or the connection dropping under it. Held and
+        /// recorded when they return (``Analytics/recordWhenPresent(_:presence:deferred:)``).
+        static let deferWhenAbsent: Set<String> = [
+            "agent_turn_completed",
+            "agent_turn_failed",
         ]
 
+        let presence: Presence
+        let deferred: DeferredEvents
+
         func record(_ name: String, _ props: [String: String]) {
-            // The heartbeat and the SSH pollers keep running while nobody is
-            // at the Mac; these are the events they can emit on their own.
-            // Same gate as `recordIfPresent`.
-            if Self.unattendedCapable.contains(name), !Presence.shared.isPresent { return }
+            if Self.dropWhenAbsent.contains(name), !presence.isPresent { return }
             // Through the installed tracker, not straight to the production
             // client: that way a test that installs a capture sees the events
             // `ScarfCore` emits as well as the app's own.
-            Analytics.tracker.record(rawName: name, props: props)
+            let send = { Analytics.tracker.record(rawName: name, props: props) }
+            if Self.deferWhenAbsent.contains(name), !presence.isPresent {
+                deferred.hold(send)
+                return
+            }
+            send()
         }
+    }
+
+    /// The bridge with its presence policy, for tests. `ScarfAnalytics.record`
+    /// is public in `ScarfCore` anyway, so this exposes no new raw path.
+    static func coreBridge(presence: Presence, deferred: DeferredEvents) -> any ScarfAnalyticsRecording {
+        CoreBridge(presence: presence, deferred: deferred)
     }
 
     /// Called once from the app's launch path. Idempotent — installing the
     /// same stateless forwarder twice is harmless.
     nonisolated static func installCoreBridge() {
-        ScarfAnalytics.install(CoreBridge())
+        ScarfAnalytics.install(CoreBridge(presence: .shared, deferred: deferred))
     }
 
 
@@ -400,48 +416,97 @@ nonisolated enum Analytics {
     /// the auto-events), so it bypasses the injectable tracker.
     nonisolated static func applicationDidBecomeActive() {
         Presence.shared.becameActive()
+        releaseHeldEventsIfPresent()
         StatsUsageTracker.shared.applicationDidBecomeActive()
     }
 
-    /// Fire-and-forget passthrough for `NSApplication.didResignActive`.
-    ///
-    /// AppKit has no true "did enter background" — a macOS app that loses focus
-    /// keeps running — so resigning active is the closest analogue, and is what
-    /// the package's session-gap logic expects: it starts the inactivity timer
-    /// rather than ending anything, and `didBecomeActive` resumes the same
-    /// session if the user comes back inside the 30-minute macOS gap. The SDK
-    /// flushes here too, which covers the guide's "flush on resign-active".
-    nonisolated static func applicationDidEnterBackground() {
+    /// `NSApplication.didResignActive`: flush (setup guide §4, macOS). Not
+    /// the SDK's `applicationDidEnterBackground` — a Mac app that loses focus
+    /// keeps running, `.appBackground` is off, and the inactivity gap is
+    /// evaluated at the next activity, so a flush is all resigning means.
+    nonisolated static func applicationDidResignActive() {
         Presence.shared.resignedActive()
-        StatsUsageTracker.shared.applicationDidEnterBackground()
+        StatsUsageTracker.shared.resignedActive()
     }
 
-    /// Best-effort flush for `NSApplication.willTerminate` (setup guide §4).
+    /// `NSApplication.willTerminate`: get buffered events onto disk (bounded),
+    /// so they send on the next launch. See ``StatsUsageTracker/flushBeforeExit(timeout:)``.
     nonisolated static func applicationWillTerminate() {
-        StatsUsageTracker.shared.flush()
+        StatsUsageTracker.shared.flushBeforeExit()
     }
 
     /// The person used the menu-bar menu. Opening it does not activate the
     /// app, so without this a menu-only visit has no `app_open`, no session,
-    /// and — via ``recordIfPresent(_:)`` — would drop a "Check for Updates…"
-    /// result as unattended. Safe to repeat: the SDK starts a session and
-    /// emits `app_open` at most once per session.
+    /// and — via ``recordIfPresent(_:presence:)`` — would drop a "Check for
+    /// Updates…" result as unattended. Safe to repeat: the SDK starts a
+    /// session and emits `app_open` at most once per session.
     nonisolated static func menuBarInteraction() {
         Presence.shared.touched()
+        releaseHeldEventsIfPresent()
         StatsUsageTracker.shared.applicationDidBecomeActive()
     }
 
-    /// Records `event` only while a person is plausibly at the Mac.
-    ///
-    /// For events that can fire with nobody present — Sparkle's scheduled
-    /// update checks, slow-operation reports from background polling, the
-    /// reconnect outcome after a wake. `record()` starts an SDK session by
-    /// itself, so emitting those unattended would make an idle Mac look in
-    /// use (setup guide §4, "Unattended work"). User-driven events never
-    /// need this.
+    /// Records `event` only while a person is plausibly at the Mac; dropped
+    /// otherwise. For background noise — Sparkle's scheduled update checks,
+    /// slow-operation reports from polling. `record()` starts an SDK session
+    /// by itself, so emitting those unattended would make an idle Mac look in
+    /// use (setup guide §4, "Unattended work").
     nonisolated static func recordIfPresent(_ event: UsageEvent, presence: Presence = .shared) {
         guard presence.isPresent else { return }
         record(event)
+    }
+
+    /// Records `event` now if a person is present, else holds it until they
+    /// return. For real outcomes that can land while nobody is looking — a
+    /// reconnect after an overnight sleep (dropping those kept only the
+    /// short sleeps in the series). Lost if the app quits first.
+    nonisolated static func recordWhenPresent(
+        _ event: UsageEvent,
+        presence: Presence = .shared,
+        deferred: DeferredEvents = Analytics.deferred
+    ) {
+        guard !presence.isPresent else { return record(event) }
+        deferred.hold { record(event) }
+    }
+
+    /// Events waiting for the person to come back. Bounded: a Mac left for a
+    /// week can't grow it without limit.
+    static let deferred = DeferredEvents(capacity: 64)
+
+    /// Called after every presence signal: the launch hold opens on the first
+    /// presence, and deferred events go out on each return.
+    private static func releaseHeldEventsIfPresent() {
+        guard Presence.shared.isPresent else { return }
+        StatsUsageTracker.shared.releaseLaunchHold()
+        deferred.drain()
+    }
+
+    /// A bounded FIFO of event replays. Replays run outside the lock.
+    nonisolated final class DeferredEvents: @unchecked Sendable {
+        private let lock = NSLock()
+        private var items: [() -> Void] = []
+        private let capacity: Int
+
+        init(capacity: Int) { self.capacity = capacity }
+
+        /// Keeps the first `capacity`; later ones are dropped.
+        func hold(_ replay: @escaping () -> Void) {
+            lock.lock(); defer { lock.unlock() }
+            if items.count < capacity { items.append(replay) }
+        }
+
+        func drain() {
+            lock.lock()
+            let pending = items
+            items = []
+            lock.unlock()
+            pending.forEach { $0() }
+        }
+
+        var count: Int {
+            lock.lock(); defer { lock.unlock() }
+            return items.count
+        }
     }
 
     /// The screens slept, the screen locked, or the user switched away
@@ -453,7 +518,14 @@ nonisolated enum Analytics {
 
     nonisolated static func personCameBack(_ reason: Presence.AwayReason) {
         Presence.shared.cameBack(reason)
+        releaseHeldEventsIfPresent()
     }
+
+    /// Increments each time the person returns after an absence long enough
+    /// to end an SDK session. `section_viewed` dedupes per epoch, so it means
+    /// "viewed in this session" rather than "ever, in this process" — Scarf
+    /// runs for weeks.
+    nonisolated static var presenceEpoch: Int { Presence.shared.epoch }
 
     /// Whether a person is plausibly at the Mac: Scarf is frontmost with the
     /// screen awake and unlocked, or was (or its menu-bar menu was used)
@@ -472,9 +544,17 @@ nonisolated enum Analytics {
             var isActive = false
             var away: Set<AwayReason> = []
             var lastSeen: ContinuousClock.Instant?
+            var everPresent = false
+            var epoch = 0
 
             /// Frontmost and nothing says the person left.
             var isAttended: Bool { isActive && away.isEmpty }
+
+            func isPresent(at instant: ContinuousClock.Instant, window: Duration) -> Bool {
+                if isAttended { return true }
+                guard let lastSeen else { return false }
+                return instant - lastSeen < window
+            }
         }
 
         private let state = OSAllocatedUnfairLock(initialState: State())
@@ -492,8 +572,25 @@ nonisolated enum Analytics {
         }
 
         func becameActive() {
-            state.withLock { $0.isActive = true }
+            arrive { $0.isActive = true }
         }
+
+        /// Applies a "person is here" signal; a return from absence after
+        /// having been present before starts a new epoch.
+        private func arrive(_ change: (inout State) -> Void) {
+            let instant = now()
+            let window = window
+            // Unchecked: `change` is a local, synchronous mutation.
+            state.withLockUnchecked { state in
+                let wasPresent = state.isPresent(at: instant, window: window)
+                change(&state)
+                guard !wasPresent, state.isPresent(at: instant, window: window) else { return }
+                if state.everPresent { state.epoch += 1 }
+                state.everPresent = true
+            }
+        }
+
+        var epoch: Int { state.withLock { $0.epoch } }
 
         func resignedActive() {
             let instant = now()
@@ -506,7 +603,7 @@ nonisolated enum Analytics {
         /// A direct interaction (the menu-bar menu): the person is here now.
         func touched() {
             let instant = now()
-            state.withLock { $0.lastSeen = instant }
+            arrive { $0.lastSeen = instant }
         }
 
         func wentAway(_ reason: AwayReason) {
@@ -518,16 +615,13 @@ nonisolated enum Analytics {
         }
 
         func cameBack(_ reason: AwayReason) {
-            state.withLock { _ = $0.away.remove(reason) }
+            arrive { _ = $0.away.remove(reason) }
         }
 
         var isPresent: Bool {
             let instant = now()
-            return state.withLock { state in
-                if state.isAttended { return true }
-                guard let lastSeen = state.lastSeen else { return false }
-                return instant - lastSeen < window
-            }
+            let window = window
+            return state.withLock { $0.isPresent(at: instant, window: window) }
         }
     }
 

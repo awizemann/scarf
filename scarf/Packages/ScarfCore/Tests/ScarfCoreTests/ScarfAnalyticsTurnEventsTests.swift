@@ -372,6 +372,38 @@ struct ScarfAnalyticsTurnEventsTests {
         }
     }
 
+    // MARK: - connection_degraded dedupe
+
+    /// One view model per window, rebuilt on every server/profile switch:
+    /// the same degraded host must report once, not once per window.
+    @Test @MainActor func degradedIsReportedOncePerHostAcrossWindows() {
+        withCapture { capture in
+            ConnectionStatusViewModel.degradedLatch.reset()
+            defer { ConnectionStatusViewModel.degradedLatch.reset() }
+            let ctx = ServerContext(id: UUID(), displayName: "r",
+                                    kind: .ssh(SSHConfig(host: "nonexistent.invalid")))
+            let degraded = ConnectionStatusViewModel.Status.degraded(
+                reason: "r", hint: "h", cause: .homeMissing)
+
+            let firstWindow = ConnectionStatusViewModel(context: ctx)
+            let secondWindow = ConnectionStatusViewModel(context: ctx)
+            firstWindow.recordStatusTransition(from: .idle, to: degraded, manualToken: nil)
+            secondWindow.recordStatusTransition(from: .idle, to: degraded, manualToken: nil)
+            #expect(capture.named("connection_degraded") == [["cause": "home_missing"]])
+
+            // A different host is its own fact.
+            let otherHost = ConnectionStatusViewModel(context: ServerContext(
+                id: UUID(), displayName: "o", kind: .ssh(SSHConfig(host: "other.invalid"))))
+            otherHost.recordStatusTransition(from: .idle, to: degraded, manualToken: nil)
+            #expect(capture.named("connection_degraded").count == 2)
+
+            // Healthy again, then a relapse: that is a new report.
+            firstWindow.recordStatusTransition(from: degraded, to: .connected, manualToken: nil)
+            firstWindow.recordStatusTransition(from: .connected, to: degraded, manualToken: nil)
+            #expect(capture.named("connection_degraded").count == 3)
+        }
+    }
+
     @Test @MainActor func tappingAHealthyPillIsNotAReconnect() {
         withCapture { capture in
             // Local contexts start `.connected`; the pill still routes a tap

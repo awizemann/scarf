@@ -1,7 +1,6 @@
 import SwiftUI
 import ScarfCore
 import ScarfDesign
-import Stats
 
 /// Display tab — streaming, reasoning, cost, skin, compact mode, inline diffs, bell, etc.
 struct DisplayTab: View {

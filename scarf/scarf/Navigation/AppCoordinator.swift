@@ -205,7 +205,10 @@ final class AppCoordinator {
     /// singleton made it mean all along.
     func recordSectionViewed(_ section: SidebarSection) {
         let token = section.analyticsToken
-        let key = "section_viewed:\(token)"
+        // Once per presence epoch ≈ once per analytics session, not once per
+        // process: Scarf runs for weeks, so per-process read as "ever opened".
+        // Series break (3.6): earlier builds sent one per section per process.
+        let key = "section_viewed:\(Analytics.presenceEpoch):\(token)"
         if let usageTracker {
             _ = usageTracker.recordOnce(.sectionViewed(section: section), key: key)
         } else {

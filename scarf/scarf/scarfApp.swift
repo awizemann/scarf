@@ -1,6 +1,5 @@
 import SwiftUI
 import ScarfCore
-import Stats
 import os
 
 @main
@@ -188,10 +187,6 @@ struct ScarfApp: App {
            idx + 1 < CommandLine.arguments.count,
            let url = Self.testInstallURL(from: CommandLine.arguments[idx + 1]) {
             TemplateURLRouter.shared.handle(url)
-            // XCUITest's bypass for the deep-link install flow, not a real
-            // `scarf://` open — never the same `kind` the real onOpenURL
-            // handler below reports.
-            Analytics.record(.deepLinkOpened(kind: .test))
         }
 
         // MARK: - first_run / launch_completed
@@ -850,7 +845,7 @@ final class ServerLiveStatusRegistry {
         // the closest analogue and is what starts swift-stats' session-gap
         // timer. Both calls are nonisolated and non-suspending.
         _ = nc.addObserver(forName: NSApplication.didResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            Analytics.applicationDidEnterBackground()
+            Analytics.applicationDidResignActive()
             MainActor.assumeIsolated { self?.setLowPowerMode(true) }
         }
         _ = nc.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
@@ -940,10 +935,12 @@ final class ServerLiveStatusRegistry {
                     outcomes.append(verify == .noMaster ? .recovered : .recoveryFailed)
                 }
             }
-            // Gated: a wake is not proof anyone is there (scheduled and
-            // maintenance wakes), and an event would open a session.
+            // Deferred, not dropped: a wake is not proof anyone is there
+            // (scheduled and maintenance wakes) and an event would open a
+            // session, but dropping kept only short sleeps in the series.
+            // The outcome is recorded when the person is back.
             for event in WakeReconnectMetrics.events(for: outcomes, recoverySeconds: recoverySeconds) {
-                Analytics.recordIfPresent(event)
+                Analytics.recordWhenPresent(event)
             }
         }
     }

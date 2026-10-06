@@ -33,6 +33,15 @@ struct AdvancedTab: View {
     /// re-triggering as if the user flipped the toggle — that write must
     /// not turn around and call `Analytics.setEnabled` again.
     @State private var hasLoadedAnalyticsEnabled = false
+    /// The user flipped the toggle before the initial read landed — that
+    /// read is stale and must not overwrite their choice.
+    @State private var analyticsToggleTouched = false
+    /// Serializes `setEnabled` calls so rapid flips reach the SDK in order
+    /// and the saved state ends where the UI does.
+    @State private var analyticsToggleTask: Task<Void, Never>?
+    /// `false` in a build with no analytics client (no write key, or a test
+    /// launch): the toggle would do nothing, so it says so instead.
+    @State private var analyticsAvailable = true
 
     var body: some View {
         // P39 (round-4 review): the read-only lock for a managed host stops
@@ -402,17 +411,25 @@ struct AdvancedTab: View {
         SettingsSection(title: "Usage Analytics", icon: "chart.bar.xaxis") {
             ToggleRow(
                 label: "Share usage statistics",
-                isOn: analyticsEnabled
+                isOn: analyticsEnabled && analyticsAvailable
             ) { newValue in
+                analyticsToggleTouched = true
                 analyticsEnabled = newValue
-                Task { await Analytics.setEnabled(newValue) }
+                let previous = analyticsToggleTask
+                analyticsToggleTask = Task {
+                    await previous?.value
+                    await Analytics.setEnabled(newValue)
+                }
             }
+            .disabled(!analyticsAvailable)
         }
         HStack {
             Text("")
                 .font(.caption)
                 .frame(width: 160, alignment: .trailing)
-            Text("Usage events plus your Scarf version, macOS version, Mac model, and language and region settings — never message content, hostnames, file paths, your name, or your location. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so the developer can count active installs and see how an install's use changes over time without knowing who you are.")
+            Text(analyticsAvailable
+                 ? "Usage events plus your Scarf version, macOS version, Mac model, and language and region settings — never message content, hostnames, file paths, your name, or your location. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so the developer can count active installs and see how an install's use changes over time without knowing who you are."
+                 : "Usage analytics aren't part of this build, so nothing is collected or sent.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()
@@ -421,8 +438,9 @@ struct AdvancedTab: View {
         .padding(.vertical, 4)
         .task {
             guard !hasLoadedAnalyticsEnabled else { return }
+            analyticsAvailable = Analytics.isAvailable
             let enabled = await Analytics.isEnabled
-            analyticsEnabled = enabled
+            if !analyticsToggleTouched { analyticsEnabled = enabled }
             hasLoadedAnalyticsEnabled = true
         }
     }

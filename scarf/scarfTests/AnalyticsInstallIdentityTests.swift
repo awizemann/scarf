@@ -1,4 +1,5 @@
 import Foundation
+import ScarfCore
 import Stats
 import StatsTesting
 import Testing
@@ -142,6 +143,126 @@ struct AnalyticsPresenceTests {
         #expect(!presence.isPresent, "still locked")
         presence.cameBack(.screenLocked)
         #expect(presence.isPresent)
+    }
+
+    // MARK: - Epochs (section_viewed dedupe)
+
+    @Test("the first arrival is epoch 0; a return after the gap starts a new one")
+    func epochAdvancesOnlyAfterAnAbsence() {
+        let (presence, clock) = makePresence()
+        presence.becameActive()
+        #expect(presence.epoch == 0)
+
+        // Cmd-Tab away and back inside the gap: same session, same epoch.
+        presence.resignedActive()
+        clock.advance(.seconds(5 * 60))
+        presence.becameActive()
+        #expect(presence.epoch == 0)
+
+        // Away past the gap, then back: a new session.
+        presence.resignedActive()
+        clock.advance(.seconds(31 * 60))
+        presence.becameActive()
+        #expect(presence.epoch == 1)
+
+        // Screens asleep overnight while frontmost, then awake.
+        presence.wentAway(.screensAsleep)
+        clock.advance(.seconds(8 * 3600))
+        presence.cameBack(.screensAsleep)
+        #expect(presence.epoch == 2)
+    }
+
+    // MARK: - Hold / defer
+
+    @Test("recordWhenPresent holds while away and replays on return, in order")
+    func recordWhenPresentDefers() {
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
+
+        let (presence, _) = makePresence()
+        let deferred = Analytics.DeferredEvents(capacity: 8)
+        Analytics.recordWhenPresent(.reconnectAttempted(trigger: .wake), presence: presence, deferred: deferred)
+        Analytics.recordWhenPresent(.reconnectSucceeded(trigger: .wake, durationBucket: .init(seconds: 2)),
+                                    presence: presence, deferred: deferred)
+        #expect(tracker.captured.isEmpty)
+        #expect(deferred.count == 2)
+
+        presence.becameActive()
+        deferred.drain()
+        #expect(tracker.names == ["reconnect_attempted", "reconnect_succeeded"])
+        #expect(deferred.count == 0)
+
+        // Present: straight through.
+        Analytics.recordWhenPresent(.reconnectAttempted(trigger: .wake), presence: presence, deferred: deferred)
+        #expect(tracker.names.count == 3)
+    }
+
+    @Test("the deferred queue is bounded and keeps the earliest events")
+    func deferredQueueIsBounded() {
+        let deferred = Analytics.DeferredEvents(capacity: 2)
+        var ran: [Int] = []
+        for i in 0..<5 { deferred.hold { ran.append(i) } }
+        #expect(deferred.count == 2)
+        deferred.drain()
+        #expect(ran == [0, 1])
+    }
+
+    /// The ScarfCore bridge's two policies: poller noise is dropped while
+    /// away; an agent turn that finishes while away is kept for the return.
+    @Test("the core bridge drops poller events and defers agent turns while away")
+    func coreBridgePolicies() {
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
+
+        let (presence, _) = makePresence()
+        let deferred = Analytics.DeferredEvents(capacity: 8)
+        let bridge = Analytics.coreBridge(presence: presence, deferred: deferred)
+
+        bridge.record("connection_degraded", ["cause": "home_missing"])
+        bridge.record("circuit_breaker_opened", ["backoff_bucket": "lt_1s"])
+        bridge.record("agent_turn_completed", ["duration_bucket": "gt_60s"])
+        bridge.record("reconnect_attempted", ["trigger": "manual"])   // ungated
+        #expect(tracker.names == ["reconnect_attempted"])
+        #expect(deferred.count == 1)
+
+        presence.becameActive()
+        deferred.drain()
+        #expect(tracker.names == ["reconnect_attempted", "agent_turn_completed"])
+
+        bridge.record("connection_degraded", ["cause": "home_missing"])
+        #expect(tracker.names.last == "connection_degraded")
+    }
+
+    /// Launch-path events wait for the first presence, so a launch nobody sees
+    /// opens no session. Real client, in-memory sink, the tests' own app id.
+    @Test("the production tracker holds every event until first released")
+    func launchHold() async throws {
+        let sink = InMemorySink()
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-launch-hold-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let client = StatsClient(configuration: Analytics.makeConfiguration(
+            sink: sink, isPreRelease: true, appId: AnalyticsTestIDs.appId,
+            storageDirectory: directory, clock: ManualClock()))
+        let tracker = StatsUsageTracker(client: client)
+        await tracker.setEnabled(true)
+
+        tracker.record(.firstRun(platform: .macos))
+        tracker.record(rawName: "hermes_probe_failed", props: ["fallback": "empty"])
+        #expect(tracker.heldEventCount == 2)
+        await client.flush()
+        #expect(await sink.sentEventNames.isEmpty)
+
+        tracker.releaseLaunchHold()
+        #expect(tracker.heldEventCount == 0)
+        tracker.record(.notificationToggled(enabled: true))   // passes straight through now
+        await client.flush()
+        await client.shutdown()
+        let names = await sink.sentEventNames
+        #expect(names.filter { !$0.hasPrefix("session_") }
+                == ["first_run", "hermes_probe_failed", "notification_toggled"])
     }
 
     /// Resigning while already away must not restart the gap — that would

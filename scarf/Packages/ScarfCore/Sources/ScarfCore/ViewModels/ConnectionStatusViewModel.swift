@@ -154,10 +154,17 @@ public final class ConnectionStatusViewModel {
         if case .degraded(_, _, let cause) = next {
             let wasSameCause: Bool
             if case .degraded(_, _, let old) = previous { wasSameCause = old == cause } else { wasSameCause = false }
-            if !wasSameCause {
+            // The per-instance edge isn't enough: there is one view model per
+            // window, rebuilt on every server/profile switch, so two windows
+            // on one degraded host — or a switch away and back — re-reported
+            // the same fact. The process-wide latch keys on host + cause.
+            if !wasSameCause,
+               Self.degradedLatch.claim(host: context.id, cause: Self.analyticsCause(cause)) {
                 ScarfAnalytics.record("connection_degraded", ["cause": Self.analyticsCause(cause)])
             }
         }
+        // A healthy probe re-arms the host, so a later relapse reports again.
+        if case .connected = next { Self.degradedLatch.clear(host: context.id) }
         // A degraded outcome still proves SSH itself came back, so it counts
         // as a successful reconnect just like `.connected` does.
         if let pending = pendingManualReconnect, pending.token == manualToken {
@@ -173,6 +180,32 @@ public final class ConnectionStatusViewModel {
             case .idle:
                 break  // still retrying — the attempt isn't resolved yet
             }
+        }
+    }
+
+    /// Process-wide "already reported" set for `connection_degraded`, keyed
+    /// by host + cause. `internal` so tests can reset it.
+    static let degradedLatch = DegradedLatch()
+
+    final class DegradedLatch: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reported: Set<String> = []
+
+        /// `true` the first time this host reports this cause since it was
+        /// last healthy.
+        func claim(host: ServerID, cause: String) -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            return reported.insert("\(host)|\(cause)").inserted
+        }
+
+        func clear(host: ServerID) {
+            lock.lock(); defer { lock.unlock() }
+            reported = reported.filter { !$0.hasPrefix("\(host)|") }
+        }
+
+        func reset() {
+            lock.lock(); defer { lock.unlock() }
+            reported.removeAll()
         }
     }
 

@@ -105,9 +105,58 @@ nonisolated final class StatsUsageTracker: UsageTracking {
     /// configuration — change it only via a real `setConsent`); every other
     /// install has nothing stored and gets the configured `.all`. No install
     /// ever stored a set without `.identity`, so no migration is needed.
-    init(client: StatsClient? = StatsUsageTracker.makeSharedClient()) {
+    ///
+    /// `holdUntilPresent`: every event waits until a person is first present
+    /// (``releaseLaunchHold()``). Launch-path events — `first_run`,
+    /// `launch_completed`, the version probe, a restored window's
+    /// `section_viewed` — are recorded before the app ever activates, and a
+    /// login-item relaunch may never activate it; each would otherwise open a
+    /// session with nobody there (setup guide §4).
+    init(client: StatsClient? = StatsUsageTracker.makeSharedClient(), holdUntilPresent: Bool = true) {
         self.client = client
+        self.launchHold = LaunchHold(holding: holdUntilPresent)
     }
+
+    private let launchHold: LaunchHold
+
+    /// Holds sends until released, then passes them straight through.
+    /// Replays run under the lock, so nothing submitted during the release
+    /// can overtake a held event.
+    private final class LaunchHold: @unchecked Sendable {
+        private let lock = NSLock()
+        private var holding: Bool
+        private var held: [() -> Void] = []
+        /// Generous: a launch records a handful, plus one `section_viewed`
+        /// per restored window.
+        private let capacity = 128
+
+        init(holding: Bool) { self.holding = holding }
+
+        func submit(_ send: @escaping () -> Void) {
+            lock.lock(); defer { lock.unlock() }
+            guard holding else { return send() }
+            if held.count < capacity { held.append(send) }
+        }
+
+        func release() {
+            lock.lock(); defer { lock.unlock() }
+            guard holding else { return }
+            holding = false
+            held.forEach { $0() }
+            held = []
+        }
+
+        var heldCount: Int {
+            lock.lock(); defer { lock.unlock() }
+            return held.count
+        }
+    }
+
+    /// Opens the launch hold. Idempotent.
+    func releaseLaunchHold() { launchHold.release() }
+
+    /// For tests: events waiting on the launch hold.
+    var heldEventCount: Int { launchHold.heldCount }
 
     /// Builds the shipping client, or `nil` on any degrade path.
     static func makeSharedClient() -> StatsClient? {
@@ -137,11 +186,15 @@ nonisolated final class StatsUsageTracker: UsageTracking {
     }
 
     func record(_ event: UsageEvent) {
-        client?.record(event.name, props: event.props)
+        guard let client else { return }
+        let name = event.name, props = event.props
+        launchHold.submit { client.record(name, props: props) }
     }
 
     func record(rawName name: String, props: [String: String]) {
-        client?.record(name, props: props.mapValues { StatsValue.string($0) })
+        guard let client else { return }
+        let values = props.mapValues { StatsValue.string($0) }
+        launchHold.submit { client.record(name, props: values) }
     }
 
     @discardableResult
@@ -159,24 +212,27 @@ nonisolated final class StatsUsageTracker: UsageTracking {
         Task { await client.applicationDidBecomeActive() }
     }
 
-    /// Fire-and-forget passthrough for `NSApplication.didResignActive`.
-    ///
-    /// AppKit has no true "did enter background" — a macOS app that loses focus
-    /// keeps running — so resigning active is the closest analogue, and is what
-    /// the package's session-gap logic expects: it starts the inactivity timer
-    /// rather than ending anything, and `didBecomeActive` resumes the same
-    /// session if the user comes back inside the 30-minute macOS gap.
-    func applicationDidEnterBackground() {
-        guard let client else { return }
-        Task { await client.applicationDidEnterBackground() }
-    }
-
-    /// Fire-and-forget flush for `NSApplication.willTerminate`. Best effort:
-    /// the process may exit before the send finishes, and whatever is
-    /// already on disk goes out on the next launch (setup guide §4).
-    func flush() {
+    /// Fire-and-forget flush for `NSApplication.didResignActive`.
+    func resignedActive() {
         guard let client else { return }
         Task { await client.flush() }
+    }
+
+    /// For `NSApplication.willTerminate`: wait — at most `timeout`, on the
+    /// main thread at quit — for buffered `record()` calls to reach the queue
+    /// file, so they send on the next launch. The network send itself is
+    /// started but not awaited; the process rarely lives long enough for it,
+    /// and it isn't needed once the events are on disk. Safe to block: the
+    /// client is its own actor, never the main one.
+    func flushBeforeExit(timeout: TimeInterval = 1) {
+        guard let client else { return }
+        let onDisk = DispatchSemaphore(value: 0)
+        Task.detached {
+            await client.drainRecorded()
+            onDisk.signal()
+            await client.flush()
+        }
+        _ = onDisk.wait(timeout: .now() + timeout)
     }
 
     /// Master switch. `false` stops collection and clears the queue.
