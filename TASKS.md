@@ -116,6 +116,9 @@
 
 ## Done
 
+- [x] Analytics P3: new events + doc/policy updates (id: t-b1016f2a) (added: 2026-10-06)
+- [x] Analytics P2: tighten emissions (gating, dedupe, lifecycle, toggle) (id: t-27a18eaa) (added: 2026-10-06)
+- [x] Analytics P1: isolate dev/test/agent traffic from production identity (id: t-6984f5d5) (added: 2026-10-06)
 - [x] R2 [iOS]: App Store compliance — FileTimestamp manifest + export-compliance answer (id: t-aa7be288) (added: 2026-08-20) (priority: high)
 - [x] ScarfGo: decide App Privacy + privacy manifest for Live Voice audio (id: t-11cc53ea) (added: 2026-09-18) (priority: high)
 - [x] Semantic badges/status pills: text-on-tint contrast + guard (id: t-1989583c) (added: 2026-10-05)
