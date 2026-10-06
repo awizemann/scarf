@@ -28,6 +28,7 @@ We reviewed the privacy policy against the code and found places where it said l
 
 - **Live Voice will ask for your consent again, once.** Live Voice (Hermes's GPT-Live mode) streams your voice to OpenAI. The old consent screen didn't mention that **Hermes's replies and short status lines, such as which tool Hermes is using, also go to OpenAI** so the voice can speak them, or that your Hermes host passes the recent chat messages on. The screen now says so, and because the facts changed, Scarf and ScarfGo ask everyone again the next time you start Live Voice. Nothing else about Live Voice has changed. The consent screen also says it will ask again if what's shared ever changes.
 - **"Anonymous" is now "usage statistics."** The Mac app's opt-out usage statistics include a hashed random ID for your install. That is not your name or anything about you, but calling it "anonymous" overstated it. The setting (Settings › Advanced) is now labelled **Share usage statistics** and explains what the ID is used for. ScarfGo still sends no statistics at all.
+- **Usage statistics only while you're at your Mac.** Scarf keeps running in the background, but it no longer records usage statistics while nobody is using it. Background work such as update checks, slow-operation reports and connection monitoring isn't recorded then, and results that arrive while you're away, like an agent turn finishing, are recorded when you come back. The Settings screen now lists exactly what each batch of statistics contains. Builds you run from source, and other local copies, no longer report as the production app.
 - The policy now covers device details, slow-operation reports, server backups, local model checks, sign-in pages and template links; states the 90-day retention for usage statistics; and describes ScarfGo's optional iCloud Keychain sync for its SSH key. The Mac app's privacy manifest now declares what the usage statistics include, and the iPhone microphone and speech permission prompts mention voice conversations.
 - The Scarf website now describes the Mac app's usage statistics. It used to say there was "no telemetry."
 
@@ -43,6 +44,7 @@ Scarf has required **macOS 15 Sequoia** since v2.20.0. Our update feed wrongly t
 
 ## Under the hood
 
+- The analytics library (swift-stats) is updated to 0.3.0. A few noisy events were dropped (for example, one fired on every Cmd-Tab), and new events record whether setup and configuration steps succeed, using only fixed labels, never your values.
 - A new design check (`tools/check-design-tokens.py`) runs with the website and catalog builds. It fails if any colour drifts from the app's design tokens or falls below its contrast target, or if the system's prominent buttons come back.
 - A website check (`tools/check-site-faq.py`) fails when a FAQ answer and its search-engine copy disagree.
 - `release.sh` now reads the minimum macOS version for the update feed from the built app, rather than from a fixed number in the script that went out of date.
