@@ -5,10 +5,10 @@ permalink: scarf/operations/agents-break-projects-because-there-is-no-structured
 tags: [projects, stability, skills, registry, investigation]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/scarf/Core/Services/ProjectsMCPRegistrar.swift, scarf/scarf/Resources/BuiltinSkills.bundle/scarf-template-author/SKILL.md]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
 created: 2026-09-03
 updated: 2026-09-03
-reviewed: 2026-09-29
+reviewed: 2026-10-05
 reviewed_by: audit:claude-code (background)
 ---
 

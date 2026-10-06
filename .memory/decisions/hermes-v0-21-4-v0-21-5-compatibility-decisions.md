@@ -4,10 +4,10 @@ type: note
 permalink: scarf/decisions/hermes-v0-21-4-v0-21-5-compatibility-decisions
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/scarf/Features/Platforms/Views/PlatformSetup/WhatsAppSetupView.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
 created: 2026-09-26
 updated: 2026-09-27
-reviewed: 2026-09-27
+reviewed: 2026-10-05
 reviewed_by: audit:claude-code (background)
 ---
 Scarf's v0.21.4 (v2026.9.21) + v0.21.5 (v2026.9.24) parity cycle, branch `feat/hermes-v0215-parity` (2026-09-26), shipping as Scarf 3.4.0. Plan + audit: `documents/plans/2026-09-26-hermes-v0-21-5-release-plan.md`, `documents/plans/2026-09-26-p6-surface-audit-findings-and-fix-plan.md`. Verdict: state.db columns Scarf reads unchanged; one new ACP event (approval closes); the big themes were multiplex-by-default gateways, CLI output/exit-code changes, and the FTS redesign.

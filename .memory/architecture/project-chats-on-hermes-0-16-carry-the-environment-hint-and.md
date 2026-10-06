@@ -5,9 +5,11 @@ permalink: scarf/architecture/project-chats-on-hermes-0-16-carry-the-environment
 tags: [gh142, environment-hint, capabilities, chat]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectEnvironmentHint.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectCronTenantCheck.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, scarf/scarf/Features/Projects/ViewModels/ProjectCockpitViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
 created: 2026-09-29
 updated: 2026-09-29
+reviewed: 2026-10-05
+reviewed_by: audit:claude-code (background)
 ---
 
 Wiring for #142 P3 (Mac, ScarfGo, installer, upgrade, scaffolder, cockpit). The gate is ProjectEnvironmentHint.delivery(for:), which returns the block path for .empty capabilities.

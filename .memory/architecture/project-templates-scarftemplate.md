@@ -5,10 +5,10 @@ permalink: scarf/architecture/project-templates-scarftemplate
 tags: [templates, projects, install]
 source_paths: [scarf/scarf/Core/Services/ProjectTemplateService.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift, scarf/scarf/Core/Services/ProjectTemplateExporter.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/TemplateURLRouter.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectCronAttribution.swift]
 source_paths_inferred: false
-source_sha: 8b3e25c8c07a7e7f66cee4afc434992c4934b415
+source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
 created: 2026-05-29
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-05
 reviewed_by: audit:claude-code (background)
 ---
 

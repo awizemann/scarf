@@ -5,10 +5,10 @@ permalink: scarf/decisions/chat-title-is-client-side-rename-retry-and-undo-are
 tags: [slash-commands, chat, gh147]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Features/Chat/Views/ChatInspectorPane.swift]
 source_paths_inferred: false
-source_sha: 4beace9d6d71c2aae455ed7eae5b600642f0f3b0
+source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-09-29
+reviewed: 2026-10-05
 reviewed_by: audit:claude-code (background)
 ---
 

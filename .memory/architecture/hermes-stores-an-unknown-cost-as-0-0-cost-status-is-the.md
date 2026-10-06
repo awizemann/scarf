@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-stores-an-unknown-cost-as-0-0-cost-status-i
 tags: [hermes, state-db, cost, tokens, acp, display-fidelity]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesSession.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift, scarf/scarf/Features/Chat/Views/SessionInfoBar.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
 created: 2026-09-21
 updated: 2026-09-22
-reviewed: 2026-09-26
+reviewed: 2026-10-05
 reviewed_by: audit:claude-code (background)
 ---
 Found validating t-b10d9fa6 against Hermes tag v2026.9.21 (v0.21.4) and the live `~/.hermes/state.db`; FIXED in t-fc311bef on branch `fix/unknown-session-cost` (2026-09-21), and CORRECTED in t-ba08805b on branch `fix/nil-cost-status` (2026-09-21) — the first pass got the `'unknown'` status right but mis-read a NULL `cost_status` as proof of an old host. Read the `[invariant]` on the column-vs-value discriminator before touching this rule.
