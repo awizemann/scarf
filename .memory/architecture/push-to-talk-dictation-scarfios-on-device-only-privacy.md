@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/push-to-talk-dictation-scarfios-on-device-only-privacy
 source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/Speech/PushToTalkController.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/Speech/OnDeviceDictation.swift, scarf/Scarf iOS/PrivacyInfo.xcprivacy]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: de591fd835df73564ed03f3c30a877253ab905e1
 created: 2026-09-18
 updated: 2026-09-18
-reviewed: 2026-09-26
+reviewed: 2026-10-06
 reviewed_by: audit:claude-code (background)
 ---
 
