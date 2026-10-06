@@ -34,6 +34,7 @@ struct AnalyticsConnectionEventsTests {
         let client = StatsClient(configuration: Analytics.makeConfiguration(
             sink: sink,
             isPreRelease: true,
+            appId: AnalyticsTestIDs.appId,
             storageDirectory: directory,
             clock: ManualClock()
         ))

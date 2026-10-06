@@ -16,7 +16,7 @@ import ScarfCore
 /// re-asserts the default (enabled) rather than trusting whatever a previous
 /// run left behind.
 /// Nested in the serialized connection-events tree: since swift-stats 0.3.0
-/// a second live `StatsClient` for `com.scarf.app` FORWARDS to the first, so
+/// a second live `StatsClient` for one app id FORWARDS to the first, so
 /// this suite running beside the other `makeConfiguration` suites would send
 /// its events into their sinks (and its opt-out would switch theirs off).
 extension AnalyticsConnectionEventsTests {
@@ -34,12 +34,35 @@ struct AnalyticsFacadeTests {
         let configuration = Analytics.makeConfiguration(
             sink: sink,
             isPreRelease: true,
+            appId: AnalyticsTestIDs.appId,
             storageDirectory: directory,
             clock: clock
         )
         let client = StatsClient(configuration: configuration)
         await client.setEnabled(true)
         return (client, sink, clock, directory)
+    }
+
+    /// Only a build `release.sh` stamped is production; anything else — an
+    /// unexpanded or empty build setting included — reports as dev.
+    @Test("only an exact `release` stamp is the production channel")
+    func releaseChannelStamp() {
+        #expect(Analytics.isReleaseChannel("release"))
+        #expect(Analytics.isReleaseChannel(" release\n"))
+        #expect(!Analytics.isReleaseChannel(nil))
+        #expect(!Analytics.isReleaseChannel(""))
+        #expect(!Analytics.isReleaseChannel("$(SCARF_ANALYTICS_CHANNEL)"))
+        #expect(!Analytics.isReleaseChannel("Release"))
+        #expect(Analytics.productionAppId != Analytics.devAppId)
+    }
+
+    /// The test host is a DEBUG build: it must resolve to the dev identity,
+    /// flagged pre-release — never the production app id.
+    @Test("a DEBUG build reports under the dev app id, flagged pre-release")
+    func debugBuildIsDevChannel() {
+        #expect(!Analytics.isReleaseChannel)
+        #expect(Analytics.appId == Analytics.devAppId)
+        #expect(Analytics.isPreRelease)
     }
 
     @Test("the shipping configuration is the one the taxonomy specifies")

@@ -259,6 +259,7 @@ build_variant() {
     -destination "generic/platform=macOS" \
     ONLY_ACTIVE_ARCH=NO \
     ARCHS="$archs" \
+    SCARF_ANALYTICS_CHANNEL=release \
     archive
 
   log "[$label] Export signed .app"
@@ -276,6 +277,17 @@ build_variant() {
     mv "$export_dir/scarf.app" "$app_path"
   fi
   [[ -d "$app_path" ]] || die "[$label] exported app not found at $app_path"
+
+  # Only this script stamps the production analytics channel; every other
+  # build reports to the dev identity (Analytics.isReleaseChannel). Check the
+  # BUILT bundle, not the inputs: a release without the stamp would send to
+  # the dev app id, and one without a key would send nothing. The key's value
+  # is never printed.
+  local built_plist="$app_path/Contents/Info.plist"
+  [[ "$(/usr/libexec/PlistBuddy -c 'Print :ScarfAnalyticsChannel' "$built_plist" 2>/dev/null)" == "release" ]] \
+    || die "[$label] built app is not stamped ScarfAnalyticsChannel=release"
+  [[ -n "$(/usr/libexec/PlistBuddy -c 'Print :SwiftStatsWriteKey' "$built_plist" 2>/dev/null)" ]] \
+    || die "[$label] built app has an empty SwiftStatsWriteKey — analytics would ship disabled"
 
   # Strip xattrs that get added by iCloud Drive (com.apple.fileprovider.fpfs#*)
   # and Finder (com.apple.FinderInfo) as soon as the bundle materializes under

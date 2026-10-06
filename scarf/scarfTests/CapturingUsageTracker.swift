@@ -73,3 +73,16 @@ final class CapturingUsageTracker: UsageTracking, @unchecked Sendable {
         props.mapValues(\.usageEventToken)
     }
 }
+
+/// The app id every test harness that builds a REAL `StatsClient` uses.
+///
+/// Never the production (`com.scarf.app`) or dev id: the SDK keeps the
+/// opt-out, consent and install id in `com.wizemann.stats.<appId>`, so a
+/// harness on a real id flipped the developer's own analytics switch. One
+/// fixed id (not one per test) because removing a defaults domain leaves an
+/// empty plist behind in `~/Library/Preferences`; the harnesses share it
+/// safely because they all run in the one serialized
+/// `AnalyticsConnectionEventsTests` tree.
+enum AnalyticsTestIDs {
+    static let appId = "com.scarf.app.tests"
+}

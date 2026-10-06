@@ -96,18 +96,40 @@ nonisolated enum Analytics {
 
     static let endpointString = "https://api.swiftstats.co"
 
-    /// Debug builds and the decoupled dev copy installed by
-    /// `scripts/build-detached.sh` (a Release build at
-    /// `/Applications/scarf-dev.app`) are pre-release traffic and must not
-    /// pollute production metrics. Only the bundle's own last path component is
-    /// inspected, and only to produce a `Bool` — no path ever reaches a prop.
-    static var isPreRelease: Bool {
+    /// Info.plist key `scripts/release.sh` stamps `release` into (build
+    /// setting `SCARF_ANALYTICS_CHANNEL`, passed only to the release archive).
+    static let channelInfoPlistKey = "ScarfAnalyticsChannel"
+
+    /// Production analytics is opt-IN: only a build `release.sh` stamped, and
+    /// never a DEBUG build. Everything else — Xcode runs, the
+    /// `build-detached.sh` dev copy, agents' `/tmp` copies, `test-build.sh`,
+    /// a contributor's `local-build.sh` — is dev traffic. An allow-list of one
+    /// can't miss a new kind of local build the way a path check did.
+    static let isReleaseChannel: Bool = {
         #if DEBUG
-        return true
+        return false
         #else
-        return Bundle.main.bundleURL.lastPathComponent == "scarf-dev.app"
+        return isReleaseChannel(Bundle.main.object(forInfoDictionaryKey: channelInfoPlistKey) as? String)
         #endif
+    }()
+
+    /// Pure check on the raw Info.plist value, for tests.
+    static func isReleaseChannel(_ raw: String?) -> Bool {
+        raw?.trimmingCharacters(in: .whitespacesAndNewlines) == "release"
     }
+
+    /// Dev builds report under their own app id so they never share the
+    /// production install id, queue file or `seq` counter: two copies on one
+    /// Mac sharing them sent duplicate `(installId, seq)` pairs, which the
+    /// backend dedupes away (schema §6), and dev use counted as a real install.
+    static let productionAppId = "com.scarf.app"
+    static let devAppId = "com.scarf.app.dev"
+
+    static var appId: String { isReleaseChannel ? productionAppId : devAppId }
+
+    /// Dev traffic is always flagged pre-release (`isTestFlight` on the wire)
+    /// as well as being under its own app id.
+    static var isPreRelease: Bool { !isReleaseChannel }
 
     /// The one place the app's stats configuration is defined. Exposed
     /// `internal` (not `private`) purely so tests can build the *same*
@@ -131,14 +153,20 @@ nonisolated enum Analytics {
     /// the main thread) or racing a background-thread AppKit read (undefined
     /// behavior). Neither is worth it for two optional context fields, so
     /// defaults stay — this is an accepted, documented gap, not an oversight.
+    ///
+    /// `appId` defaults to the production id so tests assert the shipping
+    /// shape; harnesses that build real clients pass a throwaway id so they
+    /// never touch the developer's own `com.wizemann.stats.<appId>` suite
+    /// (where the opt-out lives).
     static func makeConfiguration(
         sink: any StatsSink,
         isPreRelease: Bool,
+        appId: String = productionAppId,
         storageDirectory: URL? = nil,
         clock: any StatsClock = SystemStatsClock()
     ) -> StatsConfiguration {
         StatsConfiguration(
-            appId: "com.scarf.app",
+            appId: appId,
             projectId: "scarf",
             installIdSalt: installIdSalt,
             sink: sink,
@@ -165,6 +193,17 @@ nonisolated enum Analytics {
         return environment["XCTestConfigurationFilePath"] != nil
             || environment["XCTestBundlePath"] != nil
             || environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
+    }
+
+    /// Analytics-only superset of ``isSyntheticHost``: also the app XCUITest
+    /// launches, which carries `--scarf-test-mode` but none of the XCTest
+    /// environment of the runner, so it used to send real events under the
+    /// developer's install id. Kept separate because `isSyntheticHost` also
+    /// skips the launch bootstrap, which UI tests rely on.
+    static var isAnalyticsInert: Bool {
+        isSyntheticHost
+            || ProcessInfo.processInfo.environment["XCTestSessionIdentifier"] != nil
+            || TestModeFlags.shared.isTestMode
     }
 
     // MARK: - The installed tracker

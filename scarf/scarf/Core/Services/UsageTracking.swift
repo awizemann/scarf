@@ -111,7 +111,7 @@ nonisolated final class StatsUsageTracker: UsageTracking {
 
     /// Builds the shipping client, or `nil` on any degrade path.
     static func makeSharedClient() -> StatsClient? {
-        guard !Analytics.isSyntheticHost else { return nil }
+        guard !Analytics.isAnalyticsInert else { return nil }
         // Same degrade-to-no-op path as a malformed endpoint below. The key's
         // value is never logged — only the fact that it was unusable.
         guard let writeKey = Analytics.writeKey else {
@@ -125,7 +125,8 @@ nonisolated final class StatsUsageTracker: UsageTracking {
             )
             return StatsClient(configuration: Analytics.makeConfiguration(
                 sink: sink,
-                isPreRelease: Analytics.isPreRelease
+                isPreRelease: Analytics.isPreRelease,
+                appId: Analytics.appId
             ))
         } catch {
             // Deliberately not fatal, and deliberately not logging `error`'s

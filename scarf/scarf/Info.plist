@@ -32,6 +32,8 @@
 	<string>Scarf uses the microphone for the voice features you start: Hermes voice chat, and Live Voice sessions, which stream your voice directly from this Mac to OpenAI.</string>
 	<key>SwiftStatsWriteKey</key>
 	<string>$(SWIFT_STATS_WRITE_KEY)</string>
+	<key>ScarfAnalyticsChannel</key>
+	<string>$(SCARF_ANALYTICS_CHANNEL)</string>
 	<key>SUFeedURL</key>
 	<string>https://awizemann.github.io/scarf/appcast.xml</string>
 	<key>SUPublicEDKey</key>
