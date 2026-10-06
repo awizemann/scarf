@@ -2,13 +2,13 @@
 title: Local model providers — what exists below the UI and what filters them out
 type: note
 permalink: scarf/architecture/local-model-providers-what-exists-below-the-ui-and-what
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesRoutableProviders.swift]
 source_paths_inferred: false
-source_sha: 40e8ab1f137314b4c9199b2bf8ce8addbef95980
+source_sha: 3b042718fac93b0021f7dccf7f75ed4530b394ef
 created: 2026-07-13
 updated: 2026-09-27
-reviewed: 2026-09-11
-reviewed_by: claude-opus-5
+reviewed: 2026-10-06
+reviewed_by: audit:claude-code (background)
 ---
 
 Investigation 2026-07-13 (pre-design for the local/remote model toggle). Source-verified against main @ v2.16.2. Updated 2026-09-01 and re-grounded 2026-09-10 to correct line number drift and expand scope. **Updated 2026-09-26** to reflect capability-gated provider visibility (v0.21.4+). **Updated 2026-09-29** to add routable provider filtering layer (ccaa817b+).

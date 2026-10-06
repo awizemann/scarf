@@ -23,7 +23,7 @@ reviewed_by: audit:claude-code (background)
 - [fix] Landed on main as d1285b0 (2026-07-03) with tests in ModelPreflightTests. #fixed
 
 ## Relations
-- extends [[Hermes Version Management]]
+- extends [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.15 Capability Gating Decisions]]
 
 
