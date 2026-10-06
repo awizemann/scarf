@@ -6,6 +6,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class EmailSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .email
     let context: ServerContext
 
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.

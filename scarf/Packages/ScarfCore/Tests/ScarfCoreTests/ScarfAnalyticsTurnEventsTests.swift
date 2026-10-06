@@ -404,6 +404,37 @@ struct ScarfAnalyticsTurnEventsTests {
         }
     }
 
+    // MARK: - connect_* {source: window}
+
+    /// A window's first resolved connection is reported once — later probes,
+    /// healthy or not, are the heartbeat, not a connect.
+    @Test @MainActor func aWindowReportsItsFirstConnectOnce() {
+        withCapture { capture in
+            let vm = ConnectionStatusViewModel(context: ServerContext(
+                id: UUID(), displayName: "r", kind: .ssh(SSHConfig(host: "nonexistent.invalid"))))
+            vm.recordFirstConnect(failure: nil)
+            vm.recordFirstConnect(failure: nil)
+            vm.recordFirstConnect(failure: .timeout(seconds: 10, partialStdout: Data()))
+            let events = capture.named("connect_succeeded")
+            #expect(events.count == 1)
+            #expect(events.first?["source"] == "window")
+            #expect(events.first?["transport"] == "ssh")
+            #expect(events.first?["duration_bucket"] != nil)
+            #expect(capture.named("connect_failed").isEmpty)
+        }
+    }
+
+    @Test @MainActor func aWindowWhoseFirstConnectFailsReportsTheKind() {
+        withCapture { capture in
+            let vm = ConnectionStatusViewModel(context: ServerContext(
+                id: UUID(), displayName: "r", kind: .ssh(SSHConfig(host: "nonexistent.invalid"))))
+            let error = TransportError.timeout(seconds: 10, partialStdout: Data())
+            vm.recordFirstConnect(failure: error)
+            #expect(capture.named("connect_failed")
+                    == [["transport": "ssh", "source": "window", "error_kind": error.analyticsErrorKind]])
+        }
+    }
+
     @Test @MainActor func tappingAHealthyPillIsNotAReconnect() {
         withCapture { capture in
             // Local contexts start `.connected`; the pill still routes a tap

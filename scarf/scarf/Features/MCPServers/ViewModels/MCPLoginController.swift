@@ -583,6 +583,8 @@ final class MCPLoginController {
         runningServer = nil
         let outcome = Self.loginOutcome(exitCode: exitCode, output: output)
         succeeded = outcome.succeeded
+        // Not reached by `stop()` (the user cancelling), only a finished run.
+        MCPServersViewModel.recordServerChange(.signedIn, .init(outcome.confidence))
         // A paste-validation message from mid-run is replaced by the
         // verdict: it described a paste, not the login's outcome.
         if outcome.succeeded {

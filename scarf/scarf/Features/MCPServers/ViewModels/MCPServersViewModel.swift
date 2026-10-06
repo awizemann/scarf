@@ -173,6 +173,7 @@ final class MCPServersViewModel {
             let outcome = fileService.removeMCPServer(name: name)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Self.recordServerChange(.deleted, .init(outcome.confidence))
                 if outcome.succeeded {
                     self.flashStatus("Removed \(name)")
                     if self.selectedServerName == name {
@@ -195,6 +196,13 @@ final class MCPServersViewModel {
     /// exit-0 run that printed something the verdict does not recognise had
     /// its unrelated tail line rendered as the remove's refusal: a sentence
     /// Hermes never said, presented as its reason.
+    /// `config_item_changed {area: mcp_server}`. The three add paths each
+    /// report `created`; the shared OAuth tail (`finishOAuthAdd`) reports
+    /// nothing, so an OAuth add is not counted twice.
+    static func recordServerChange(_ action: UsageEvent.ConfigAction, _ outcome: UsageEvent.Outcome) {
+        Analytics.record(.configItemChanged(area: .mcpServer, action: action, outcome: outcome))
+    }
+
     static func removeFailureSummary(outcome: HermesCLIOutcome) -> String {
         if outcome.confidence == .unconfirmed {
             let verb = "hermes mcp remove"
@@ -215,6 +223,7 @@ final class MCPServersViewModel {
             let ok = fileService.toggleMCPServerEnabled(name: name, enabled: newValue)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Self.recordServerChange(newValue ? .enabled : .disabled, .init(succeeded: ok))
                 if ok {
                     self.flashStatus(newValue ? "Enabled \(name)" : "Disabled \(name)")
                     self.load(force: true)
@@ -367,6 +376,7 @@ final class MCPServersViewModel {
             }
             guard addResult.exitCode == 0 else {
                 await MainActor.run { [weak self] in
+                    Self.recordServerChange(.created, .failed)
                     self?.activeError = "Add failed: \(addResult.output)"
                 }
                 return
@@ -378,6 +388,7 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Self.recordServerChange(.created, .succeeded)
                 self.showPresetPicker = false
                 if isOAuthDirect {
                     self.finishOAuthAdd(name: name)
@@ -545,6 +556,7 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Self.recordServerChange(.created, .init(succeeded: result.exitCode == 0))
                 if result.exitCode == 0, isOAuthDirect {
                     self.showAddCustom = false
                     self.finishOAuthAdd(name: name)
@@ -618,6 +630,7 @@ final class MCPServersViewModel {
             }
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                Self.recordServerChange(.created, .init(succeeded: result.exitCode == 0))
                 if result.exitCode == 0, isOAuthDirect {
                     self.showAddCustom = false
                     self.finishOAuthAdd(name: name)

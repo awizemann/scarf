@@ -9,6 +9,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class WhatsAppSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .whatsapp
     let context: ServerContext
 
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.

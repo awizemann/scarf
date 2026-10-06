@@ -90,6 +90,8 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
         )
         isSaving = true
         let ctx = context
+        // Read before the write lands: an existing name is an update.
+        let action: UsageEvent.ConfigAction = commands.contains { $0.name == name } ? .updated : .created
         Task { [weak self] in
             // TWO `hermes config set` process spawns — two SSH exec channels
             // on a remote host — were running inline on the MainActor.
@@ -106,9 +108,11 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             }
             guard let self else { return }
             self.isSaving = false
-            self.applyAddOrUpdateResult(
+            let saved = self.applyAddOrUpdateResult(
                 sanitizedName: sanitizedName, typeResult: typeResult, cmdResult: cmdResult
             )
+            Analytics.record(.configItemChanged(
+                area: .quickCommand, action: action, outcome: .init(succeeded: saved)))
         }
     }
 
@@ -120,11 +124,13 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
     /// the same seam `SettingsViewModel.saveFailureMessage` uses. Which of the
     /// two writes failed is a verdict question (P39), and getting it wrong
     /// names the wrong key in the banner.
+    /// - Returns: whether both writes were proven.
+    @discardableResult
     func applyAddOrUpdateResult(
         sanitizedName: String,
         typeResult: (output: String, exitCode: Int32),
         cmdResult: (output: String, exitCode: Int32)
-    ) {
+    ) -> Bool {
         // P39: output-judged. `set_config_value`'s managed-install arm exits
         // 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7), so both spawns
         // "succeeded" and the sheet toasted a command that was never saved.
@@ -143,6 +149,7 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
             let saved = sanitizedName.replacingOccurrences(of: "\\.", with: ".")
             showSuccess(String(localized: "Saved /\(saved)"))
             load(force: true)
+            return true
         } else {
             logger.warning("Failed to save quick command: type=\(typeResult.output) cmd=\(cmdResult.output)")
             // Surface the CLI's own reason, the way Settings and
@@ -167,6 +174,7 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
                 reason: HermesConfigSet.judge(
                     output: failing.output, exitCode: failing.exitCode).detail
             ))
+            return false
         }
     }
 

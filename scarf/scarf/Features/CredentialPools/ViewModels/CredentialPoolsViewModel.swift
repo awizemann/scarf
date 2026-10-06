@@ -394,6 +394,7 @@ final class CredentialPoolsViewModel {
         }
         runMutation(args, clearAfter: 3) { [weak self] output, exitCode in
             guard let self else { return }
+            Self.recordCredentialChange(.created, .init(succeeded: exitCode == 0))
             if exitCode == 0 {
                 self.message = "Credential added"
                 self.load()
@@ -414,6 +415,8 @@ final class CredentialPoolsViewModel {
 
         oauthFlow.onExit = { [weak self] _ in
             guard let self else { return }
+            // Not called on Cancel: `stop()` detaches the handler first.
+            Self.recordCredentialChange(.signedIn, .init(succeeded: self.oauthFlow.succeeded))
             self.message = self.oauthFlow.succeeded
                 ? "OAuth login succeeded"
                 : (self.oauthFlow.errorMessage ?? "OAuth login failed or cancelled")
@@ -445,6 +448,7 @@ final class CredentialPoolsViewModel {
         // index is not unambiguous.
         runMutation(Self.removeArgv(provider: provider, index: index, internalID: internalID)) { [weak self] output, exitCode in
             guard let self else { return }
+            Self.recordCredentialChange(.deleted, .init(succeeded: exitCode == 0))
             if exitCode == 0 {
                 self.message = "Credential removed"
                 self.load()
@@ -457,6 +461,12 @@ final class CredentialPoolsViewModel {
                 self.message = "Remove failed: \(detail)"
             }
         }
+    }
+
+    /// `config_item_changed {area: credential}`. Never the provider name: it
+    /// is a Hermes-side string, not a closed vocabulary.
+    private static func recordCredentialChange(_ action: UsageEvent.ConfigAction, _ outcome: UsageEvent.Outcome) {
+        Analytics.record(.configItemChanged(area: .credential, action: action, outcome: outcome))
     }
 
     /// Remove an OAuth provider from `auth.json`. Maps to
@@ -479,6 +489,7 @@ final class CredentialPoolsViewModel {
         runMutation(HermesAuthLogoutVerdict.argv(provider: provider), clearAfter: 3) { [weak self] output, exitCode in
             guard let self else { return }
             let outcome = HermesAuthLogoutVerdict.judge(output: output, exitCode: exitCode)
+            Self.recordCredentialChange(.deleted, .init(outcome.confidence))
             if outcome.succeeded {
                 self.message = outcome.warning ?? "Removed OAuth provider \(provider)"
                 self.load()

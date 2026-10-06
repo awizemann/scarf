@@ -462,6 +462,8 @@ protocol PlatformSetupForm: OutcomeMessageHosting {
     /// and read by ``commitSave(envPairs:configKV:)``, which refuses while
     /// it is set. See the type's doc comment.
     var loadRefusal: String? { get set }
+    /// `platform_configured`'s token for this form.
+    var analyticsPlatform: UsageEvent.MessagingPlatform { get }
 }
 
 extension PlatformSetupForm {
@@ -582,6 +584,9 @@ extension PlatformSetupForm {
             guard let self else { return }
             self.isSaving = false
             self.applySaveOutcome(outcome)
+            // Only saves that reached the host: the refusals above never ran.
+            Analytics.record(.platformConfigured(
+                platform: self.analyticsPlatform, outcome: .init(outcome.kind)))
         }
     }
 }

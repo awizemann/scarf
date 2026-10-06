@@ -126,6 +126,7 @@ final class TemplateInstallerViewModel {
                 }
             } catch {
                 await MainActor.run { [weak self] in
+                    Analytics.record(.templateInstallFailed(source: source, stage: .validate))
                     self?.stage = .failed(error.localizedDescription)
                 }
             }
@@ -191,6 +192,7 @@ final class TemplateInstallerViewModel {
                 }
             } catch {
                 await MainActor.run { [weak self] in
+                    Analytics.record(.templateInstallFailed(source: source, stage: .fetch))
                     self?.stage = .failed("Couldn't fetch template: \(error.localizedDescription)")
                 }
             }
@@ -230,6 +232,8 @@ final class TemplateInstallerViewModel {
                 }
             } catch {
                 await MainActor.run { [weak self] in
+                    Analytics.record(.templateInstallFailed(
+                        source: self?.pendingInstall?.source ?? .url, stage: .plan))
                     self?.stage = .failed(error.localizedDescription)
                 }
             }
@@ -313,6 +317,7 @@ final class TemplateInstallerViewModel {
                 }
             } catch {
                 await MainActor.run { [weak self] in
+                    Analytics.record(.templateInstallFailed(source: source, stage: .install))
                     self?.stage = .failed(error.localizedDescription)
                 }
             }

@@ -373,6 +373,12 @@ final class KanbanBoardViewModel {
         // representative status per column.
         optimisticOverrides[taskId] = optimisticStatus(for: destination)
 
+        // `config_item_changed {area: kanban_task}` for the two moves that
+        // mean something — finishing a task and handing it to an agent.
+        // Other column moves are bookkeeping and stay unreported.
+        let analyticsAction: UsageEvent.ConfigAction? =
+            plan.steps.contains(.dispatch) ? .dispatched
+            : destination == .done ? .completed : nil
         let svc = service
         Task {
             do {
@@ -390,20 +396,26 @@ final class KanbanBoardViewModel {
                 // show it running either (another dispatcher may have started
                 // it), say why and drop the Running override — otherwise the
                 // poll (ready/todo ≠ Running) never clears it.
+                var outcome: UsageEvent.Outcome = .succeeded
                 if let dispatchSummary,
                    let why = dispatchSummary.notStartedReason(for: taskId),
                    let row = tasks.first(where: { $0.id == taskId }),
                    columnFromStatus(row.status) != .running {
                     clearStatusOverride(for: taskId)
                     transientNotice = Self.notStartedMessage(why)
+                    // Dispatched, but Hermes didn't start it.
+                    outcome = .unconfirmed
                 }
+                Self.recordTaskChange(analyticsAction, outcome)
             } catch let err as KanbanError {
                 clearStatusOverride(for: taskId)
                 lastError = err.errorDescription
                 logger.warning("kanban move failed: \(err.errorDescription ?? "", privacy: .public)")
+                Self.recordTaskChange(analyticsAction, .failed)
             } catch {
                 clearStatusOverride(for: taskId)
                 lastError = error.localizedDescription
+                Self.recordTaskChange(analyticsAction, .failed)
             }
         }
     }
@@ -453,13 +465,21 @@ final class KanbanBoardViewModel {
         Task {
             do {
                 try await service.archive(taskIds: [taskId])
+                Self.recordTaskChange(.archived, .succeeded)
                 await refresh()
             } catch let err as KanbanError {
                 lastError = err.errorDescription
+                Self.recordTaskChange(.archived, .failed)
             } catch {
                 lastError = error.localizedDescription
+                Self.recordTaskChange(.archived, .failed)
             }
         }
+    }
+
+    private static func recordTaskChange(_ action: UsageEvent.ConfigAction?, _ outcome: UsageEvent.Outcome) {
+        guard let action else { return }
+        Analytics.record(.configItemChanged(area: .kanbanTask, action: action, outcome: outcome))
     }
 
     // MARK: - v0.15 lifecycle actions (context menu)
@@ -509,11 +529,14 @@ final class KanbanBoardViewModel {
         Task {
             do {
                 try await service.purge(taskIds: [taskId])
+                Self.recordTaskChange(.deleted, .succeeded)
                 await refresh()
             } catch let err as KanbanError {
                 lastError = err.errorDescription
+                Self.recordTaskChange(.deleted, .failed)
             } catch {
                 lastError = error.localizedDescription
+                Self.recordTaskChange(.deleted, .failed)
             }
         }
     }
@@ -562,7 +585,14 @@ final class KanbanBoardViewModel {
     /// promptly without waiting for whatever cadence the gateway's
     /// internal dispatcher loop runs at.
     func createTask(_ request: KanbanCreateRequest) async throws -> HermesKanbanTask {
-        let task = try await service.create(request)
+        let task: HermesKanbanTask
+        do {
+            task = try await service.create(request)
+        } catch {
+            Self.recordTaskChange(.created, .failed)
+            throw error
+        }
+        Self.recordTaskChange(.created, .succeeded)
         if let assignee = task.assignee, !assignee.isEmpty {
             // Best-effort: failure here is non-fatal — the task still
             // exists, the user just won't see it transition to running

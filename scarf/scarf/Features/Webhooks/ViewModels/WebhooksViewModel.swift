@@ -242,6 +242,8 @@ final class WebhooksViewModel {
             // on every failure path it prints nothing of the sort. (F9)
             let created = Self.parseCreatedSecret(result.output, name: storedName)
             await MainActor.run {
+                Analytics.record(.configItemChanged(
+                    area: .webhook, action: .created, outcome: .init(succeeded: created != nil)))
                 if let created {
                     self.message = "Subscribed /\(storedName)"
                     self.messageIsError = false
@@ -418,6 +420,9 @@ final class WebhooksViewModel {
             }
             let outcome = judge(result.output, result.exitCode)
             await MainActor.run {
+                // `remove` is this helper's only caller.
+                Analytics.record(.configItemChanged(
+                    area: .webhook, action: .deleted, outcome: .init(outcome.confidence)))
                 self.message = Self.mutationSummary(outcome: outcome, success: success, verb: verb)
                 self.applyConfidence(outcome.confidence)
                 self.load(force: true)

@@ -83,14 +83,12 @@ public final class SSHConnectionGate: @unchecked Sendable {
     /// The connection worked (the remote actually executed something —
     /// remote exit code is irrelevant). Fully closes the gate.
     public func recordSuccess(_ key: String) {
-        var wasOpen = false
         lock.lock()
-        wasOpen = states[key]?.isOpen ?? false
         states[key] = nil
         lock.unlock()
-        // Emitted outside the lock, and only on the open → closed edge, so a
-        // healthy host's every successful call doesn't produce an event.
-        if wasOpen { ScarfAnalytics.record("circuit_breaker_closed") }
+        // No analytics on recovery: `circuit_breaker_closed` was removed in
+        // 3.6 — it was background-only and `reconnect_succeeded` already
+        // answers "did the host come back".
     }
 
     /// A connection-level failure (ssh exit 255 / dial timeout).
@@ -133,9 +131,7 @@ public final class SSHConnectionGate: @unchecked Sendable {
     /// retries (Test Connection, manual reconnect) — user intent overrides
     /// the backoff — and when a server is removed.
     ///
-    /// Intentionally silent for analytics: `circuit_breaker_closed` means
-    /// "the host recovered", and a forced clear proves nothing about the
-    /// host. The user-facing facts here are already covered by
+    /// Silent for analytics: the user-facing facts are already covered by
     /// `connect_attempted` / `reconnect_attempted` at the call sites.
     public func reset(_ key: String) {
         lock.lock(); defer { lock.unlock() }

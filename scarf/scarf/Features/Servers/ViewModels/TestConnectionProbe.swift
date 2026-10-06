@@ -32,7 +32,7 @@ struct TestConnectionProbe {
         // outnumber real attempts by orders of magnitude, and the facts they
         // carry are covered by circuit_breaker_* and connection_degraded.
         let attemptStart = Date()
-        Analytics.record(.connectAttempted(transport: .ssh))
+        Analytics.record(.connectAttempted(transport: .ssh, source: .testProbe))
         // The user explicitly asked to try this host — their intent
         // overrides any open circuit breaker (gh#138), and background
         // traffic should resume immediately if the connection is back.
@@ -193,7 +193,8 @@ struct TestConnectionProbe {
             // transport one — so it is not reported as a connect failure.
             Analytics.record(.connectSucceeded(
                 transport: .ssh,
-                durationBucket: .init(since: attemptStart)
+                durationBucket: .init(since: attemptStart),
+                source: .testProbe
             ))
             let lines = stdout.split(separator: "\n").map(String.init)
             let hermesPath = lines.first(where: { $0.hasPrefix("HERMES:") })?
@@ -213,7 +214,8 @@ struct TestConnectionProbe {
 
         Analytics.record(.connectFailed(
             transport: .ssh,
-            errorKind: Self.analyticsErrorKind(host: host, exitCode: exitCode, stderr: stderr)
+            errorKind: Self.analyticsErrorKind(host: host, exitCode: exitCode, stderr: stderr),
+            source: .testProbe
         ))
 
         // Classify common failures by scanning the stderr trace.

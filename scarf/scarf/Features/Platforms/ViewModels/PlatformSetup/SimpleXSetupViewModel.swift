@@ -9,6 +9,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class SimpleXSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .simplex
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

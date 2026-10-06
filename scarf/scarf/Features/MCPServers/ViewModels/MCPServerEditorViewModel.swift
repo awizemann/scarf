@@ -553,6 +553,7 @@ final class MCPServerEditorViewModel {
             }()
             await MainActor.run {
                 self.isSaving = false
+                MCPServersViewModel.recordServerChange(.updated, .init(succeeded: success))
                 if !success {
                     self.saveError = "One or more fields could not be written. Check \(self.context.paths.configYAML)."
                 }

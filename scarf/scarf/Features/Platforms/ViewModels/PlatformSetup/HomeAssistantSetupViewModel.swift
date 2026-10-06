@@ -16,6 +16,7 @@ import AppKit
 @Observable
 @MainActor
 final class HomeAssistantSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .homeassistant
     let context: ServerContext
 
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.

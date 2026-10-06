@@ -16,6 +16,7 @@ import os
 @Observable
 @MainActor
 final class NtfySetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .ntfy
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

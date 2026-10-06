@@ -7,6 +7,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class IMessageSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .imessage
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

@@ -6,6 +6,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class MatrixSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .matrix
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

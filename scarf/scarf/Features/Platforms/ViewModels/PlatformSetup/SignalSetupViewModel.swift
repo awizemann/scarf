@@ -10,6 +10,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class SignalSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .signal
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

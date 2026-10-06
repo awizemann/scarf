@@ -104,7 +104,7 @@ struct ScarfAnalyticsSeamTests {
         #expect(capture.events.filter { $0.name == "circuit_breaker_opened" }.count == 1)
     }
 
-    @Test("success closes the breaker once, and only when it was open")
+    @Test("recovery is silent; only the open edge is reported")
     func breakerClosesOnce() {
         let capture = Capture()
         ScarfAnalytics.install(capture)
@@ -122,7 +122,9 @@ struct ScarfAnalyticsSeamTests {
         gate.recordFailure(key)
         gate.recordSuccess(key)
         gate.recordSuccess(key)
-        #expect(capture.events.filter { $0.name == "circuit_breaker_closed" }.count == 1)
+        // Recovery is silent since 3.6 (`circuit_breaker_closed` removed);
+        // only the one open edge was reported.
+        #expect(capture.events.map(\.name) == ["circuit_breaker_opened"])
     }
 
     @Test("an explicit reset is not reported as a recovery")

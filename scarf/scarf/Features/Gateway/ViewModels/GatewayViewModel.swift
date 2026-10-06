@@ -628,6 +628,14 @@ final class MessagingGatewayViewModel {
             }.value
             guard let self else { return }
             self.isBusy = false
+            // Recorded before the supersede guard: the command ran either
+            // way. A restart Scarf declined to send counts as failed, the
+            // same as the menu bar's.
+            if let action = UsageEvent.ControlAction(rawValue: verb.rawValue) {
+                Analytics.record(.hermesControlAction(
+                    action: action, source: .gatewayPanel,
+                    outcome: refused ? .failed : .init(outcome.confidence)))
+            }
             // A newer action superseded this one while the CLI ran — its
             // message and its reload own the UI now.
             guard self.actionGeneration == generation else { return }

@@ -27,6 +27,10 @@ final class CronViewModel {
 
 
     var jobs: [HermesCronJob] = []
+    /// `config_item_changed {area: cron}`. Off for the Bots section's per-bot
+    /// Routines, which drive this same view model and report
+    /// `bot_routine_action` instead — so a routine is never counted twice.
+    var reportsAnalytics = true
     var selectedJob: HermesCronJob?
     var jobOutput: String?
     var availableSkills: [String] = []
@@ -489,7 +493,7 @@ final class CronViewModel {
     // MARK: - CLI wrappers
 
     func pauseJob(_ job: HermesCronJob) {
-        runAndReload(["cron", "pause", job.id], success: "Paused", job: job)
+        runAndReload(["cron", "pause", job.id], success: "Paused", job: job, analytics: .paused)
     }
 
     /// Set by `CronView` from the capability store (`hasCronResumeRunNow`
@@ -582,7 +586,7 @@ final class CronViewModel {
             post(Self.resumeRefusalMessage(job, offer: offer), outcome: .failure)
             return
         }
-        runAndReload(["cron", "resume", job.id], success: "Resumed", job: job)
+        runAndReload(["cron", "resume", job.id], success: "Resumed", job: job, analytics: .resumed)
     }
 
     /// `hermes cron resume <id> --run-now` (v0.20.6+) — the documented
@@ -603,7 +607,7 @@ final class CronViewModel {
     func resumeAndRunNow(_ job: HermesCronJob) {
         runAndReload(["cron", "resume", job.id, "--run-now"],
                      success: "Re-armed — will run at the next scheduler tick",
-                     job: job)
+                     job: job, analytics: .resumed)
     }
 
     /// Only reachable on a v0.20.6+ host — the generation that has the
@@ -949,6 +953,10 @@ final class CronViewModel {
                     exitCode: runResult.exitCode, output: runResult.output, timeout: timeout, offer: offer)
                 guard let self else { return verdict }
                 self.runningNowJobIDs.remove(jobID)
+                if self.reportsAnalytics {
+                    Analytics.record(.configItemChanged(
+                        area: .cron, action: .run, outcome: Self.analyticsOutcome(verdict)))
+                }
                 let message = Self.runNowMessage(verdict, timeout: timeout)
                 self.post(message.text, outcome: message.outcome)
                 if case .failed = verdict {
@@ -983,7 +991,8 @@ final class CronViewModel {
     }
 
     func deleteJob(_ job: HermesCronJob, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
-        runAndReload(["cron", "remove", job.id], success: "Removed", job: job, onOutcome: onOutcome)
+        runAndReload(["cron", "remove", job.id], success: "Removed", job: job,
+                     analytics: .deleted, onOutcome: onOutcome)
         if selectedJob?.id == job.id {
             selectedJob = nil
             jobOutput = nil
@@ -1085,8 +1094,19 @@ final class CronViewModel {
                 pinModel: pinModel
             ),
             success: "Job created",
+            analytics: .created,
             onOutcome: onOutcome
         )
+    }
+
+    /// `run`'s outcome: started or ran is a success; a still-running or
+    /// already-running job proves neither way.
+    static func analyticsOutcome(_ verdict: RunNowVerdict) -> UsageEvent.Outcome {
+        switch verdict {
+        case .ran, .started: return .succeeded
+        case .alreadyRunning, .stillRunning: return .unconfirmed
+        case .refused, .failed: return .failed
+        }
     }
 
     /// The exact argv `createJob` runs. Split out (not duplicated) so callers
@@ -1288,7 +1308,7 @@ final class CronViewModel {
         // The record `cron edit` addresses, when it is still on screen —
         // so a refusal on a RECURRING job does not name a re-arm
         // `_REARM_RECURRING_ERROR` would refuse.
-        runAndReload(args, success: "Updated", job: jobs.first { $0.id == id })
+        runAndReload(args, success: "Updated", job: jobs.first { $0.id == id }, analytics: .updated)
     }
 
     // MARK: - Private
@@ -1333,6 +1353,7 @@ final class CronViewModel {
         _ arguments: [String],
         success: String,
         job: HermesCronJob? = nil,
+        analytics: UsageEvent.ConfigAction? = nil,
         onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         let offer = job.map { recoveryOffer(for: $0) }
@@ -1347,6 +1368,10 @@ final class CronViewModel {
             let succeeded = result.exitCode == 0 && exitZeroRefusal == nil
             await MainActor.run {
                 onOutcome?(succeeded)
+                if let analytics, self.reportsAnalytics {
+                    Analytics.record(.configItemChanged(
+                        area: .cron, action: analytics, outcome: .init(succeeded: succeeded)))
+                }
                 if succeeded {
                     self.post(success, outcome: .success)
                     // Armed only when `--pin` was actually sent, which only a

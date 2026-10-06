@@ -356,12 +356,24 @@ final class VoiceLiveController {
         guard let recipient = pendingConsent else { return }
         pendingConsent = nil
         consent.recordConsent(to: recipient)
+        Analytics.record(.voiceLiveConsent(decision: .accepted))
     }
 
     /// Cancel on the consent sheet: nothing starts, nothing is billed, and
     /// the next start asks again.
     func declineConsent() {
+        // Called from both the sheet's Cancel and its dismissal binding, and
+        // after an accept: only a sheet that was still asking is a decline.
+        guard pendingConsent != nil else { return }
         pendingConsent = nil
+        Analytics.record(.voiceLiveConsent(decision: .declined))
+    }
+
+    /// `voice_used {kind: live}` — the session actually went live: the first
+    /// step out of `.connecting` into a live phase. A start that fails, or is
+    /// cancelled while connecting, is not a use.
+    nonisolated static func wentLive(from old: VoiceConversationPhase, to new: VoiceConversationPhase) -> Bool {
+        old == .connecting && new.isLive
     }
 
     /// End gracefully: GPT-Live closes the vendor session and waits for its

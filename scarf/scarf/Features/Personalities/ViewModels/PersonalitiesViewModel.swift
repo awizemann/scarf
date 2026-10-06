@@ -149,7 +149,10 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
             self.isSaving = false
             // P39: output-judged — `set_config_value`'s managed-install arm
             // exits 0 (`hermes_cli/config.py:3450-3452` @ v2026.9.7).
-            if HermesConfigSet.judge(output: result.output, exitCode: result.exitCode).succeeded {
+            let verdict = HermesConfigSet.judge(output: result.output, exitCode: result.exitCode)
+            Analytics.record(.configItemChanged(
+                area: .personality, action: .activated, outcome: .init(verdict.confidence)))
+            if verdict.succeeded {
                 self.activeName = name
                 // Say where it applies: the ACP adapter Scarf chats through
                 // never applies `display.personality` (S03-F2).
@@ -201,6 +204,9 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
         Task { [weak self] in
             // UNGUARDED-WRITE(O): whole-file SOUL.md replace from the editor buffer; the destination is not read into it.
             let ok = await Task.detached { ctx.unguardedWriteText(soulPath, content: content) }.value
+            // The Personalities SOUL.md; a bot's SOUL reports `bot_updated`.
+            Analytics.record(.configItemChanged(
+                area: .personality, action: .updated, outcome: .init(succeeded: ok)))
             guard let self else { return }
             self.isSaving = false
             if ok {

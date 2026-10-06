@@ -36,6 +36,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class WhatsAppCloudSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .whatsappCloud
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

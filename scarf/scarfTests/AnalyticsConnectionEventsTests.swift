@@ -59,14 +59,14 @@ struct AnalyticsConnectionEventsTests {
         let key = SSHConnectionGate.key(host: "example.test", port: 2222)
         gate.recordFailure(key)
         gate.recordFailure(key)   // opens
-        gate.recordSuccess(key)   // closes
+        gate.recordSuccess(key)   // closes (silently)
 
         await client.flush()
         await client.shutdown()
 
         let names = await sink.sentEventNames
         #expect(names.contains("circuit_breaker_opened"))
-        #expect(names.contains("circuit_breaker_closed"))
+        #expect(!names.contains("circuit_breaker_closed"), "removed in 3.6")
 
         let opened = try #require(await sink.sentEvents.first { $0.name == "circuit_breaker_opened" })
         #expect(opened.props["failure_count"] == .string("2"))

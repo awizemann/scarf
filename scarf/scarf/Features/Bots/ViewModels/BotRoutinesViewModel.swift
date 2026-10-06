@@ -43,6 +43,9 @@ final class BotRoutinesViewModel {
         self.storeProfile = HermesProfileScope.profileName(forHome: context.paths.home)
             ?? HermesProfileScope.defaultProfileName
         self.cron = cron ?? CronViewModel(context: context)
+        // Routines report `bot_routine_action`; the shared cron VM must not
+        // also report `config_item_changed {area: cron}`.
+        self.cron.reportsAnalytics = false
     }
 
     /// Mirrored from the environment capability store by the view, same

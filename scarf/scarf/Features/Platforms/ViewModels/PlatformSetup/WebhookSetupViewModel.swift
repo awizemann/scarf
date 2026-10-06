@@ -19,6 +19,7 @@ import ScarfCore
 @Observable
 @MainActor
 final class WebhookSetupViewModel: PlatformSetupForm {
+    let analyticsPlatform: UsageEvent.MessagingPlatform = .webhook
     let context: ServerContext
     /// C10 test seam — nil in production. See ``PlatformSetupForm``.
     let cliRunner: HermesCLIRunner?

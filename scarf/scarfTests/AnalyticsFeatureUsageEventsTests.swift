@@ -155,36 +155,6 @@ struct AnalyticsFeatureUsageEventsTests {
 
     // MARK: - Buckets
 
-    /// `skills_bootstrapped` replaced a per-skill `skill_installed
-    /// {source:"bundled"}` that fired from the unattended launch bootstrap
-    /// and drowned the user-driven installs on that same event name.
-    @Test("skills_bootstrapped count_bucket covers the taxonomy's three buckets")
-    func bootstrapCountBuckets() {
-        #expect(SkillBootstrapService.bootstrapCountBucket(1) == "1")
-        #expect(SkillBootstrapService.bootstrapCountBucket(2) == "2_5")
-        #expect(SkillBootstrapService.bootstrapCountBucket(5) == "2_5")
-        #expect(SkillBootstrapService.bootstrapCountBucket(6) == "gt_5")
-        #expect(SkillBootstrapService.bootstrapCountBucket(999) == "gt_5")
-        // Never called with these, but no input may produce a fourth token.
-        #expect(SkillBootstrapService.bootstrapCountBucket(0) == "1")
-        #expect(SkillBootstrapService.bootstrapCountBucket(-3) == "1")
-    }
-
-    /// The nothing-written case — the steady state on every launch after
-    /// the first. A silent run is the whole point of the change, so the
-    /// decision is a pure function the test can read directly (
-    /// `Analytics.record` is a no-op under XCTest, so a sink can't be).
-    @Test("a bootstrap run that wrote nothing emits no event")
-    func bootstrapWithNothingWrittenIsSilent() {
-        func props(_ written: Int) -> [String: String]? {
-            SkillBootstrapService.bootstrapEvent(written: written)?.props.mapValues(\.usageEventToken)
-        }
-        #expect(SkillBootstrapService.bootstrapEvent(written: 0) == nil)
-        #expect(props(1) == ["count_bucket": "1"])
-        #expect(props(4) == ["count_bucket": "2_5"])
-        #expect(props(9) == ["count_bucket": "gt_5"])
-        #expect(SkillBootstrapService.bootstrapEvent(written: 1)?.name == "skills_bootstrapped")
-    }
 
     // MARK: - template_installed / skill_installed source attribution
 

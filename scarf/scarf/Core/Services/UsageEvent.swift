@@ -37,8 +37,6 @@ nonisolated enum UsageEvent {
     case firstRun(platform: Platform)
     /// Every launch, once the window scene is built.
     case launchCompleted(durationBucket: DurationBucket, serverCountBucket: ServerCountBucket, warm: Bool)
-    /// A bootstrap run that actually wrote skills into `~/.hermes`.
-    case skillsBootstrapped(countBucket: SkillCountBucket)
 
     // MARK: - Hermes control
 
@@ -49,9 +47,14 @@ nonisolated enum UsageEvent {
 
     case serverAdded(transport: Transport)
     case serverRemoved(transport: Transport)
-    case connectAttempted(transport: Transport)
-    case connectSucceeded(transport: Transport, durationBucket: DurationBucket)
-    case connectFailed(transport: Transport, errorKind: TransportErrorKind)
+    /// `source` (added 3.6): `test_probe` is the add-server sheet's Test
+    /// Connection — the only source these app-side cases produce. A window's
+    /// real first connection is `source: window`, emitted by `ScarfCore`
+    /// (`ConnectionStatusViewModel`). Rows before 3.6 have no `source`; read
+    /// them as `test_probe`.
+    case connectAttempted(transport: Transport, source: ConnectSource)
+    case connectSucceeded(transport: Transport, durationBucket: DurationBucket, source: ConnectSource)
+    case connectFailed(transport: Transport, errorKind: TransportErrorKind, source: ConnectSource)
     case reconnectAttempted(trigger: ReconnectTrigger)
     case reconnectSucceeded(trigger: ReconnectTrigger, durationBucket: DurationBucket)
 
@@ -72,12 +75,26 @@ nonisolated enum UsageEvent {
     case modelPreflightResult(outcome: ModelPreflightOutcome)
     case permissionPromptResponded(decision: PermissionDecision)
     case voiceUsed(kind: VoiceKind)
+    /// The Live Voice consent sheet resolved (Live Voice sends audio to
+    /// OpenAI, so the decline rate matters).
+    case voiceLiveConsent(decision: ConsentDecision)
 
     // MARK: - Projects / templates
 
     case projectCreated(template: ProjectTemplateKind, method: ProjectCreationMethod)
     case templateInstalled(source: InstallSource)
     case skillInstalled(source: InstallSource)
+    /// A template install that stopped with an error, and at which step.
+    /// Separate from `template_installed`, which stays success-only.
+    case templateInstallFailed(source: InstallSource, stage: TemplateInstallStage)
+
+    // MARK: - Setup / configuration
+
+    /// A messaging-platform setup form was saved.
+    case platformConfigured(platform: MessagingPlatform, outcome: Outcome)
+    /// A user change to a configured item in a Manage/Configure section —
+    /// one event with an `area` instead of one name per section.
+    case configItemChanged(area: ConfigArea, action: ConfigAction, outcome: Outcome)
 
     // MARK: - Bots
 
@@ -109,7 +126,6 @@ nonisolated enum UsageEvent {
         case .deepLinkOpened:           return "deep_link_opened"
         case .firstRun:                 return "first_run"
         case .launchCompleted:          return "launch_completed"
-        case .skillsBootstrapped:       return "skills_bootstrapped"
         case .hermesControlAction:      return "hermes_control_action"
         case .serverAdded:              return "server_added"
         case .serverRemoved:            return "server_removed"
@@ -127,9 +143,13 @@ nonisolated enum UsageEvent {
         case .modelPreflightResult:     return "model_preflight_result"
         case .permissionPromptResponded: return "permission_prompt_responded"
         case .voiceUsed:                return "voice_used"
+        case .voiceLiveConsent:         return "voice_live_consent"
         case .projectCreated:           return "project_created"
         case .templateInstalled:        return "template_installed"
         case .skillInstalled:           return "skill_installed"
+        case .templateInstallFailed:    return "template_install_failed"
+        case .platformConfigured:       return "platform_configured"
+        case .configItemChanged:        return "config_item_changed"
         case .botCreated:               return "bot_created"
         case .botUpdated:               return "bot_updated"
         case .botRemoved:               return "bot_removed"
@@ -155,26 +175,30 @@ nonisolated enum UsageEvent {
                 "server_count_bucket": .string(servers.token),
                 "warm": .bool(warm),
             ]
-        case .skillsBootstrapped(let count):
-            return ["count_bucket": .string(count.token)]
         case .hermesControlAction(let action, let source, let outcome):
             return [
                 "action": .string(action.rawValue),
                 "source": .string(source.rawValue),
                 "outcome": .string(outcome.rawValue),
             ]
-        case .serverAdded(let transport), .serverRemoved(let transport),
-             .connectAttempted(let transport):
+        case .serverAdded(let transport), .serverRemoved(let transport):
             return ["transport": .string(transport.rawValue)]
-        case .connectSucceeded(let transport, let duration):
+        case .connectAttempted(let transport, let source):
+            return [
+                "transport": .string(transport.rawValue),
+                "source": .string(source.rawValue),
+            ]
+        case .connectSucceeded(let transport, let duration, let source):
             return [
                 "transport": .string(transport.rawValue),
                 "duration_bucket": .string(duration.token),
+                "source": .string(source.rawValue),
             ]
-        case .connectFailed(let transport, let errorKind):
+        case .connectFailed(let transport, let errorKind, let source):
             return [
                 "transport": .string(transport.rawValue),
                 "error_kind": .string(errorKind.rawValue),
+                "source": .string(source.rawValue),
             ]
         case .reconnectAttempted(let trigger):
             return ["trigger": .string(trigger.rawValue)]
@@ -213,6 +237,8 @@ nonisolated enum UsageEvent {
             return ["decision": .string(decision.rawValue)]
         case .voiceUsed(let kind):
             return ["kind": .string(kind.rawValue)]
+        case .voiceLiveConsent(let decision):
+            return ["decision": .string(decision.rawValue)]
         case .projectCreated(let template, let method):
             return [
                 "template": .string(template.rawValue),
@@ -220,6 +246,22 @@ nonisolated enum UsageEvent {
             ]
         case .templateInstalled(let source), .skillInstalled(let source):
             return ["source": .string(source.rawValue)]
+        case .templateInstallFailed(let source, let stage):
+            return [
+                "source": .string(source.rawValue),
+                "stage": .string(stage.rawValue),
+            ]
+        case .platformConfigured(let platform, let outcome):
+            return [
+                "platform": .string(platform.rawValue),
+                "outcome": .string(outcome.rawValue),
+            ]
+        case .configItemChanged(let area, let action, let outcome):
+            return [
+                "area": .string(area.rawValue),
+                "action": .string(action.rawValue),
+                "outcome": .string(outcome.rawValue),
+            ]
         case .botCreated(let method, let outcome):
             return [
                 "method": .string(method.rawValue),
@@ -279,16 +321,17 @@ nonisolated enum UsageEvent {
         case .firstRun:                 return .launchCompleted(durationBucket: .init(seconds: 0),
                                                                 serverCountBucket: .init(count: 0),
                                                                 warm: false)
-        case .launchCompleted:          return .skillsBootstrapped(countBucket: .init(count: 1))
-        case .skillsBootstrapped:       return .hermesControlAction(action: .start,
+        case .launchCompleted:          return .hermesControlAction(action: .start,
                                                                     source: .menuBar,
                                                                     outcome: .succeeded)
         case .hermesControlAction:      return .serverAdded(transport: .local)
         case .serverAdded:              return .serverRemoved(transport: .local)
-        case .serverRemoved:            return .connectAttempted(transport: .local)
+        case .serverRemoved:            return .connectAttempted(transport: .local, source: .testProbe)
         case .connectAttempted:         return .connectSucceeded(transport: .local,
-                                                                 durationBucket: .init(seconds: 0))
-        case .connectSucceeded:         return .connectFailed(transport: .local, errorKind: .other)
+                                                                 durationBucket: .init(seconds: 0),
+                                                                 source: .testProbe)
+        case .connectSucceeded:         return .connectFailed(transport: .local, errorKind: .other,
+                                                              source: .testProbe)
         case .connectFailed:            return .reconnectAttempted(trigger: .wake)
         case .reconnectAttempted:       return .reconnectSucceeded(trigger: .wake,
                                                                    durationBucket: .init(seconds: 0))
@@ -302,10 +345,15 @@ nonisolated enum UsageEvent {
         case .messageSent:              return .modelPreflightResult(outcome: .passed)
         case .modelPreflightResult:     return .permissionPromptResponded(decision: .approve)
         case .permissionPromptResponded: return .voiceUsed(kind: .tts)
-        case .voiceUsed:                return .projectCreated(template: .custom, method: .scaffold)
+        case .voiceUsed:                return .voiceLiveConsent(decision: .accepted)
+        case .voiceLiveConsent:         return .projectCreated(template: .custom, method: .scaffold)
         case .projectCreated:           return .templateInstalled(source: .hub)
         case .templateInstalled:        return .skillInstalled(source: .hub)
-        case .skillInstalled:           return .botCreated(method: .created, outcome: .succeeded)
+        case .skillInstalled:           return .templateInstallFailed(source: .hub, stage: .fetch)
+        case .templateInstallFailed:    return .platformConfigured(platform: .telegram, outcome: .succeeded)
+        case .platformConfigured:       return .configItemChanged(area: .cron, action: .created,
+                                                                  outcome: .succeeded)
+        case .configItemChanged:        return .botCreated(method: .created, outcome: .succeeded)
         case .botCreated:               return .botUpdated(aspect: .identity, outcome: .succeeded)
         case .botUpdated:               return .botRemoved(kind: .deleted)
         case .botRemoved:               return .botRoutineAction(action: .created, outcome: .succeeded)
@@ -345,6 +393,53 @@ nonisolated extension UsageEvent {
     enum ControlSource: String, CaseIterable, Sendable {
         case menuBar = "menu_bar"
         case healthPanel = "health_panel"
+        /// The Gateway section's Start / Stop / Restart (3.6).
+        case gatewayPanel = "gateway_panel"
+    }
+
+    /// Where a `connect_*` attempt came from. Only `test_probe` is produced
+    /// app-side; `window` is the `ScarfCore` string-seam literal, kept here so
+    /// the vocabulary test can pin it.
+    enum ConnectSource: String, CaseIterable, Sendable {
+        case testProbe = "test_probe"
+        case window
+    }
+
+    enum ConsentDecision: String, CaseIterable, Sendable {
+        case accepted, declined
+    }
+
+    /// `template_install_failed`'s `stage`: download, open/validate the
+    /// bundle, plan against the chosen folder, or write the files.
+    enum TemplateInstallStage: String, CaseIterable, Sendable {
+        case fetch, validate, plan, install
+    }
+
+    /// `platform_configured`'s `platform` — one token per Scarf setup form,
+    /// never Hermes's own (open-ended) platform name.
+    enum MessagingPlatform: String, CaseIterable, Sendable {
+        case telegram, discord, slack, matrix, mattermost, email, whatsapp
+        case whatsappCloud = "whatsapp_cloud"
+        case imessage, feishu, signal, webhook, simplex, ntfy, homeassistant
+    }
+
+    enum ConfigArea: String, CaseIterable, Sendable {
+        case cron
+        case kanbanTask = "kanban_task"
+        case mcpServer = "mcp_server"
+        case credential, webhook
+        case quickCommand = "quick_command"
+        case personality
+    }
+
+    /// `config_item_changed`'s `action`. Not every area uses every verb.
+    enum ConfigAction: String, CaseIterable, Sendable {
+        case created, updated, deleted
+        case run, paused, resumed
+        case enabled, disabled
+        case completed, dispatched, archived
+        case signedIn = "signed_in"
+        case activated
     }
 
     /// The taxonomy's shared succeeded/failed outcome vocabulary.
@@ -362,6 +457,15 @@ nonisolated extension UsageEvent {
 
         /// The one place a `Bool` becomes an outcome token.
         init(succeeded: Bool) { self = succeeded ? .succeeded : .failed }
+
+        /// From the shared save bar's three-state kind.
+        init(_ kind: OutcomeMessage.Kind) {
+            switch kind {
+            case .success: self = .succeeded
+            case .unconfirmed: self = .unconfirmed
+            case .failure: self = .failed
+            }
+        }
 
         /// The three-state form, for the verdicts that judge Hermes's own
         /// printed output. Recording "could not confirm" as `failed` made the
@@ -434,6 +538,8 @@ nonisolated extension UsageEvent {
     enum VoiceKind: String, CaseIterable, Sendable {
         case tts
         case pushToTalk = "push_to_talk"
+        /// A Live Voice session that actually went live (3.6).
+        case live
     }
 
     /// `project_created`'s `template` prop. Only `custom` is producible on
@@ -543,12 +649,6 @@ nonisolated extension UsageEvent {
     struct ServerCountBucket: Equatable, Sendable {
         let token: String
         init(count: Int) { token = Analytics.serverCountBucket(count) }
-    }
-
-    /// Coarse count bucket for `skills_bootstrapped`.
-    struct SkillCountBucket: Equatable, Sendable {
-        let token: String
-        init(count: Int) { token = SkillBootstrapService.bootstrapCountBucket(count) }
     }
 
     /// `setting_changed`'s `key`. The only initializer runs the

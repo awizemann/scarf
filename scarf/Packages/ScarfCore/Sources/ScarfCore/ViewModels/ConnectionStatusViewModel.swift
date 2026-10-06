@@ -75,6 +75,13 @@ public final class ConnectionStatusViewModel {
     public let context: ServerContext
     private var probeTask: Task<Void, Never>?
 
+    /// `connect_succeeded/failed {source: window}` — this window's first
+    /// resolved connection, reported once per view model (a window, or a
+    /// server/profile switch). Remote only: a local context never probes.
+    /// The add-server sheet's Test Connection reports `source: test_probe`.
+    private var monitoringStartedAt: Date?
+    private var reportedFirstConnect = false
+
     public init(context: ServerContext) {
         self.context = context
         if !context.isRemote {
@@ -89,6 +96,7 @@ public final class ConnectionStatusViewModel {
     /// subsequent calls cancel the prior task and restart.
     public func startMonitoring() {
         guard context.isRemote else { return }
+        if monitoringStartedAt == nil { monitoringStartedAt = Date() }
         probeTask?.cancel()
         probeTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -328,10 +336,13 @@ public final class ConnectionStatusViewModel {
             status = .connected
             lastSuccess = Date()
             consecutiveFailures = 0
+            recordFirstConnect(failure: nil)
         case .degraded(let reason, let hint, let cause):
             status = .degraded(reason: reason, hint: hint, cause: cause)
             lastSuccess = Date()   // SSH itself is fine, reset failure count
             consecutiveFailures = 0
+            // SSH worked; a degraded Hermes home is `connection_degraded`.
+            recordFirstConnect(failure: nil)
         case .failure(let err):
             consecutiveFailures += 1
             // First failure → silent yellow "Reconnecting…" while we try
@@ -355,7 +366,30 @@ public final class ConnectionStatusViewModel {
                     message: err.errorDescription ?? "Unreachable",
                     stderr: err.diagnosticStderr
                 )
+                // Only once the pill turns red: the first silent retry is
+                // not yet a failure.
+                recordFirstConnect(failure: err)
             }
+        }
+    }
+
+    /// `internal` for tests.
+    func recordFirstConnect(failure: TransportError?) {
+        guard !reportedFirstConnect else { return }
+        reportedFirstConnect = true
+        if let failure {
+            ScarfAnalytics.record("connect_failed", [
+                "transport": "ssh",
+                "source": "window",
+                "error_kind": failure.analyticsErrorKind,
+            ])
+        } else {
+            ScarfAnalytics.record("connect_succeeded", [
+                "transport": "ssh",
+                "source": "window",
+                "duration_bucket": ScarfAnalytics.durationBucket(
+                    Date().timeIntervalSince(monitoringStartedAt ?? Date())),
+            ])
         }
     }
 
