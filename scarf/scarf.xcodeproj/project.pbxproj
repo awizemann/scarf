@@ -1142,8 +1142,8 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/awizemann/swift-stats.git";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 0.2.0;
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.3.0;
 			};
 		};
 		53SWIFTTERM0002 /* XCRemoteSwiftPackageReference "SwiftTerm" */ = {

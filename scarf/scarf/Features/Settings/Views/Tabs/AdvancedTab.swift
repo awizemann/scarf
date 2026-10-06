@@ -412,7 +412,7 @@ struct AdvancedTab: View {
             Text("")
                 .font(.caption)
                 .frame(width: 160, alignment: .trailing)
-            Text("Usage statistics only — never message content, hostnames, or file paths. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so the developer can count active installs and see how an install's use changes over time without knowing who you are.")
+            Text("Usage events plus your Scarf version, macOS version, Mac model, and language and region settings — never message content, hostnames, file paths, your name, or your location. Sent to the app developer to improve Scarf. A random identifier for this install is stored on this Mac and sent only as a hash, so the developer can count active installs and see how an install's use changes over time without knowing who you are.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Spacer()

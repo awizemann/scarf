@@ -15,6 +15,12 @@ import ScarfCore
 /// running concurrently would fight over that one switch. Each harness also
 /// re-asserts the default (enabled) rather than trusting whatever a previous
 /// run left behind.
+/// Nested in the serialized connection-events tree: since swift-stats 0.3.0
+/// a second live `StatsClient` for `com.scarf.app` FORWARDS to the first, so
+/// this suite running beside the other `makeConfiguration` suites would send
+/// its events into their sinks (and its opt-out would switch theirs off).
+extension AnalyticsConnectionEventsTests {
+
 @Suite("Analytics facade", .serialized)
 struct AnalyticsFacadeTests {
 
@@ -109,13 +115,14 @@ struct AnalyticsFacadeTests {
         await client.applicationDidBecomeActive()
         client.record("section_viewed", props: ["section": .string("chat")])
         await client.flush()
-        await client.shutdown()
 
         #expect(await sink.sentEventNames.isEmpty)
 
         // Leave the shared, persisted switch back at its default so this test
-        // cannot disable the next one that runs.
+        // cannot disable the next one that runs — before `shutdown()`, which
+        // since swift-stats 0.3.0 makes every later call a no-op.
         await client.setEnabled(true)
+        await client.shutdown()
     }
 
     @Test("re-enabling after opt-out resumes collection on the same client")
@@ -139,11 +146,9 @@ struct AnalyticsFacadeTests {
 
         let names = await sink.sentEventNames
         #expect(names.contains("section_viewed"))
-
-        // Leave the shared, persisted switch back at its default so this test
-        // cannot disable the next one that runs.
-        await client.setEnabled(true)
     }
+}
+
 }
 
 // MARK: - UsageEvent wire-format parity

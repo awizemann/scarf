@@ -51,11 +51,10 @@ nonisolated enum Analytics {
     /// by `identify()`, which Scarf never calls. Nothing else in the payload
     /// changes.
     ///
-    /// Applied twice on purpose: here at construction, and again by
-    /// `StatsUsageTracker` via `setConsent` before anything else reaches the
-    /// client, because the SDK persists consent in its suite and that stored
-    /// value outranks `StatsConfiguration.consent` — an install that first
-    /// ran under the older grant would otherwise keep it forever.
+    /// Applied only through `makeConfiguration` — never by a per-launch
+    /// `setConsent` (see `StatsUsageTracker.init`). Since swift-stats 0.3.0
+    /// `.all` is also the SDK default; it stays spelled out so the choice is
+    /// visible here.
     static let consent: StatsConsent = .all
 
     /// Info.plist key carrying the swift-stats write key.
@@ -326,7 +325,21 @@ nonisolated enum Analytics {
     /// only handle through which the string `record` could be reached; the
     /// seam itself is left as-is rather than duplicated.
     private struct CoreBridge: ScarfAnalyticsRecording {
+        /// `ScarfCore` events emitted by background polling. Not included:
+        /// `hermes_version_detected` / `hermes_probe_failed`, which fire once
+        /// per process from launch and foreground probes — gating them would
+        /// spend their once-only latch on a dropped event.
+        static let unattendedCapable: Set<String> = [
+            "connection_degraded",      // ConnectionStatusViewModel heartbeat
+            "circuit_breaker_opened",   // SSHConnectionGate, hit by the pollers
+            "circuit_breaker_closed",
+        ]
+
         func record(_ name: String, _ props: [String: String]) {
+            // The heartbeat and the SSH pollers keep running while nobody is
+            // at the Mac; these are the events they can emit on their own.
+            // Same gate as `recordIfPresent`.
+            if Self.unattendedCapable.contains(name), !Presence.shared.isPresent { return }
             // Through the installed tracker, not straight to the production
             // client: that way a test that installs a capture sees the events
             // `ScarfCore` emits as well as the app's own.
@@ -347,6 +360,7 @@ nonisolated enum Analytics {
     /// Lifecycle belongs to the real client (it drives session bookkeeping and
     /// the auto-events), so it bypasses the injectable tracker.
     nonisolated static func applicationDidBecomeActive() {
+        Presence.shared.becameActive()
         StatsUsageTracker.shared.applicationDidBecomeActive()
     }
 
@@ -356,9 +370,126 @@ nonisolated enum Analytics {
     /// keeps running — so resigning active is the closest analogue, and is what
     /// the package's session-gap logic expects: it starts the inactivity timer
     /// rather than ending anything, and `didBecomeActive` resumes the same
-    /// session if the user comes back inside the 30-minute macOS gap.
+    /// session if the user comes back inside the 30-minute macOS gap. The SDK
+    /// flushes here too, which covers the guide's "flush on resign-active".
     nonisolated static func applicationDidEnterBackground() {
+        Presence.shared.resignedActive()
         StatsUsageTracker.shared.applicationDidEnterBackground()
+    }
+
+    /// Best-effort flush for `NSApplication.willTerminate` (setup guide §4).
+    nonisolated static func applicationWillTerminate() {
+        StatsUsageTracker.shared.flush()
+    }
+
+    /// The person used the menu-bar menu. Opening it does not activate the
+    /// app, so without this a menu-only visit has no `app_open`, no session,
+    /// and — via ``recordIfPresent(_:)`` — would drop a "Check for Updates…"
+    /// result as unattended. Safe to repeat: the SDK starts a session and
+    /// emits `app_open` at most once per session.
+    nonisolated static func menuBarInteraction() {
+        Presence.shared.touched()
+        StatsUsageTracker.shared.applicationDidBecomeActive()
+    }
+
+    /// Records `event` only while a person is plausibly at the Mac.
+    ///
+    /// For events that can fire with nobody present — Sparkle's scheduled
+    /// update checks, slow-operation reports from background polling, the
+    /// reconnect outcome after a wake. `record()` starts an SDK session by
+    /// itself, so emitting those unattended would make an idle Mac look in
+    /// use (setup guide §4, "Unattended work"). User-driven events never
+    /// need this.
+    nonisolated static func recordIfPresent(_ event: UsageEvent, presence: Presence = .shared) {
+        guard presence.isPresent else { return }
+        record(event)
+    }
+
+    /// The screens slept, the screen locked, or the user switched away
+    /// (setup guide §4, "Unattended work"). Scarf can stay frontmost through
+    /// all three, so frontmost alone does not mean a person is there.
+    nonisolated static func personWentAway(_ reason: Presence.AwayReason) {
+        Presence.shared.wentAway(reason)
+    }
+
+    nonisolated static func personCameBack(_ reason: Presence.AwayReason) {
+        Presence.shared.cameBack(reason)
+    }
+
+    /// Whether a person is plausibly at the Mac: Scarf is frontmost with the
+    /// screen awake and unlocked, or was (or its menu-bar menu was used)
+    /// within the SDK's macOS session gap. The swift-stats session itself is
+    /// not readable, and it would be the wrong clock anyway — every recorded
+    /// event extends it, so a steady trickle of background events would keep
+    /// it open forever. This clock moves only on real user signals.
+    nonisolated final class Presence: Sendable {
+        static let shared = Presence()
+
+        enum AwayReason: Sendable {
+            case screensAsleep, screenLocked, sessionInactive
+        }
+
+        private struct State {
+            var isActive = false
+            var away: Set<AwayReason> = []
+            var lastSeen: ContinuousClock.Instant?
+
+            /// Frontmost and nothing says the person left.
+            var isAttended: Bool { isActive && away.isEmpty }
+        }
+
+        private let state = OSAllocatedUnfairLock(initialState: State())
+        private let window: Duration
+        private let now: @Sendable () -> ContinuousClock.Instant
+
+        /// `ContinuousClock` keeps counting while the Mac sleeps, so a
+        /// night asleep is a gap, not a pause.
+        init(
+            window: Duration = StatsConfiguration.defaultSessionGap,
+            now: @escaping @Sendable () -> ContinuousClock.Instant = { ContinuousClock.now }
+        ) {
+            self.window = window
+            self.now = now
+        }
+
+        func becameActive() {
+            state.withLock { $0.isActive = true }
+        }
+
+        func resignedActive() {
+            let instant = now()
+            state.withLock { state in
+                if state.isAttended { state.lastSeen = instant }
+                state.isActive = false
+            }
+        }
+
+        /// A direct interaction (the menu-bar menu): the person is here now.
+        func touched() {
+            let instant = now()
+            state.withLock { $0.lastSeen = instant }
+        }
+
+        func wentAway(_ reason: AwayReason) {
+            let instant = now()
+            state.withLock { state in
+                if state.isAttended { state.lastSeen = instant }
+                state.away.insert(reason)
+            }
+        }
+
+        func cameBack(_ reason: AwayReason) {
+            state.withLock { _ = $0.away.remove(reason) }
+        }
+
+        var isPresent: Bool {
+            let instant = now()
+            return state.withLock { state in
+                if state.isAttended { return true }
+                guard let lastSeen = state.lastSeen else { return false }
+                return instant - lastSeen < window
+            }
+        }
     }
 
     // MARK: - first_run / launch_completed warm flag

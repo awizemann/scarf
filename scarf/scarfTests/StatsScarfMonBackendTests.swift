@@ -146,7 +146,7 @@ struct StatsScarfMonBackendEmissionTests {
         Analytics.install(tracker)
         defer { Analytics.install(nil) }
 
-        let backend = StatsScarfMonBackend()
+        let backend = StatsScarfMonBackend(presence: present())
         backend.record(sample(category: .chatRender, durationNanos: 10_000_000))   // under 100ms
         #expect(tracker.captured.isEmpty)
 
@@ -165,7 +165,7 @@ struct StatsScarfMonBackendEmissionTests {
         Analytics.install(tracker)
         defer { Analytics.install(nil) }
 
-        let backend = StatsScarfMonBackend()
+        let backend = StatsScarfMonBackend(presence: present())
         let slow = sample(category: .sqlite, durationNanos: 500_000_000)
         for _ in 0..<(StatsScarfMonBackend.perCategoryCap + 10) { backend.record(slow) }
         #expect(tracker.captured.count == StatsScarfMonBackend.perCategoryCap)
@@ -173,6 +173,26 @@ struct StatsScarfMonBackendEmissionTests {
         // A different category has its own untouched budget.
         backend.record(sample(category: .transport, durationNanos: 6_000_000_000))
         #expect(tracker.captured.count == StatsScarfMonBackend.perCategoryCap + 1)
+    }
+
+    /// Background polling keeps measuring while nobody is at the Mac; an
+    /// over-budget sample then must not reach analytics (it would open a
+    /// session on an idle Mac — swift-stats setup guide §4).
+    @Test("with nobody present an over-budget sample emits nothing")
+    func dropsWhenNobodyIsPresent() {
+        let tracker = CapturingUsageTracker()
+        Analytics.install(tracker)
+        defer { Analytics.install(nil) }
+
+        let backend = StatsScarfMonBackend(presence: Analytics.Presence())
+        backend.record(sample(category: .transport, durationNanos: 6_000_000_000))
+        #expect(tracker.captured.isEmpty)
+    }
+
+    private func present() -> Analytics.Presence {
+        let presence = Analytics.Presence()
+        presence.becameActive()
+        return presence
     }
 }
 

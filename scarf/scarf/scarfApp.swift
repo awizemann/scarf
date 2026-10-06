@@ -857,6 +857,34 @@ final class ServerLiveStatusRegistry {
             Analytics.applicationDidBecomeActive()
             MainActor.assumeIsolated { self?.setLowPowerMode(false) }
         }
+        _ = nc.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { _ in
+            Analytics.applicationWillTerminate()
+        }
+        // Scarf can stay frontmost while nobody is there; these tell the
+        // analytics presence gate the person left and came back. Screen
+        // wake (not system wake) marks a return: a dark or maintenance wake
+        // lights no screen.
+        let ws = NSWorkspace.shared.notificationCenter
+        for (name, reason, away) in [
+            (NSWorkspace.screensDidSleepNotification, Analytics.Presence.AwayReason.screensAsleep, true),
+            (NSWorkspace.willSleepNotification, .screensAsleep, true),
+            (NSWorkspace.screensDidWakeNotification, .screensAsleep, false),
+            (NSWorkspace.sessionDidResignActiveNotification, .sessionInactive, true),
+            (NSWorkspace.sessionDidBecomeActiveNotification, .sessionInactive, false),
+        ] {
+            _ = ws.addObserver(forName: name, object: nil, queue: .main) { _ in
+                away ? Analytics.personWentAway(reason) : Analytics.personCameBack(reason)
+            }
+        }
+        // Screen lock has no public NSWorkspace notification; these
+        // distributed ones are what loginwindow posts.
+        let dnc = DistributedNotificationCenter.default()
+        _ = dnc.addObserver(forName: .init("com.apple.screenIsLocked"), object: nil, queue: .main) { _ in
+            Analytics.personWentAway(.screenLocked)
+        }
+        _ = dnc.addObserver(forName: .init("com.apple.screenIsUnlocked"), object: nil, queue: .main) { _ in
+            Analytics.personCameBack(.screenLocked)
+        }
         // gh#123: system sleep usually kills the TCP session behind each
         // remote's ControlMaster while the master lingers holding its
         // socket — every ssh after wake (chat connect, these pollers,
@@ -912,8 +940,10 @@ final class ServerLiveStatusRegistry {
                     outcomes.append(verify == .noMaster ? .recovered : .recoveryFailed)
                 }
             }
+            // Gated: a wake is not proof anyone is there (scheduled and
+            // maintenance wakes), and an event would open a session.
             for event in WakeReconnectMetrics.events(for: outcomes, recoverySeconds: recoverySeconds) {
-                Analytics.record(event)
+                Analytics.recordIfPresent(event)
             }
         }
     }
@@ -1016,10 +1046,14 @@ struct MenuBarMenu: View {
                 Divider()
             }
             Button("Open Scarf") {
+                Analytics.menuBarInteraction()
                 NSApplication.shared.activate()
             }
             Divider()
-            Button("Check for Updates…") { updater.checkForUpdates() }
+            Button("Check for Updates…") {
+                Analytics.menuBarInteraction()
+                updater.checkForUpdates()
+            }
             Divider()
             Button("Quit Scarf") {
                 NSApplication.shared.terminate(nil)
@@ -1033,6 +1067,7 @@ struct MenuBarMenu: View {
         Group {
             // Server name as a header, with the open-window action on click.
             Button {
+                Analytics.menuBarInteraction()
                 openWindow(value: status.context.id)
                 NSApplication.shared.activate()
             } label: {
@@ -1049,14 +1084,15 @@ struct MenuBarMenu: View {
                 status.gatewayRunning ? "Messaging Gateway Running" : "Messaging Gateway Stopped",
                 systemImage: status.gatewayRunning ? "circle.fill" : "circle"
             )
-            Button("Start Hermes") { status.startHermes() }
+            Button("Start Hermes") { Analytics.menuBarInteraction(); status.startHermes() }
                 .disabled(status.hermesRunning)
-            Button("Stop Hermes") { status.stopHermes() }
+            Button("Stop Hermes") { Analytics.menuBarInteraction(); status.stopHermes() }
                 .disabled(!status.hermesRunning)
             // A gateway started by hand can't be restarted from here (the
             // stop would kill it and the start can't bring it back), so the
             // item says so instead of doing nothing when clicked.
             Button {
+                Analytics.menuBarInteraction()
                 status.restartHermes()
             } label: {
                 switch status.restartBlock {

@@ -45,9 +45,20 @@ final class StatsScarfMonBackend: ScarfMonBackend {
     ]
 
     private let lock = OSAllocatedUnfairLock<[ScarfMon.Category: Int]>(initialState: [:])
+    private let presence: Analytics.Presence
+
+    init(presence: Analytics.Presence = .shared) {
+        self.presence = presence
+    }
 
     func record(_ sample: ScarfMon.Sample) {
-        guard let event = Self.decide(sample, cap: Self.perCategoryCap, lock: lock) else { return }
+        // Gated: background polling keeps measuring while nobody is at the
+        // Mac, and an unattended event would open an analytics session.
+        // Checked BEFORE `decide`, which spends the per-category cap — an
+        // overnight of slow unattended samples must not use up the budget
+        // for the next day's real ones.
+        guard presence.isPresent,
+              let event = Self.decide(sample, cap: Self.perCategoryCap, lock: lock) else { return }
         Analytics.record(event)
     }
 
