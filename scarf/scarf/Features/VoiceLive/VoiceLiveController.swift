@@ -326,6 +326,7 @@ final class VoiceLiveController {
             // `.startRequested`, so `holdsSession` never reads false in
             // between.
             self.isStartPending = false
+            self.reportWhenLive(session.engine)
             await session.engine.start()
         }
     }
@@ -369,11 +370,42 @@ final class VoiceLiveController {
         Analytics.record(.voiceLiveConsent(decision: .declined))
     }
 
-    /// `voice_used {kind: live}` — the session actually went live: the first
-    /// step out of `.connecting` into a live phase. A start that fails, or is
-    /// cancelled while connecting, is not a use.
+    /// Watches `engine.phase` (Observation) until the session goes live or
+    /// stops trying, and records `voice_used {kind: live}` once. Here rather
+    /// than in a view: a view's `onChange` only runs while it is on screen,
+    /// so leaving Chat during the connect missed the use.
+    private func reportWhenLive(_ engine: any VoiceConversationEngine) {
+        final class Last { var phase: VoiceConversationPhase; init(_ p: VoiceConversationPhase) { phase = p } }
+        let last = Last(engine.phase)
+        func observe() {
+            withObservationTracking { _ = engine.phase } onChange: { [weak self, weak engine] in
+                // `onChange` runs before the new value is stored; read it
+                // after the hop.
+                Task { @MainActor [weak self, weak engine] in
+                    guard let self, let engine, self.engine === engine else { return }
+                    let now = engine.phase
+                    if Self.wentLive(from: last.phase, to: now) {
+                        Analytics.record(.voiceUsed(kind: .live))
+                        return
+                    }
+                    // Still on the way up: keep watching. Anything else
+                    // (failed, ended, cancelled) never went live.
+                    guard now == .connecting || now == last.phase else { return }
+                    last.phase = now
+                    observe()
+                }
+            }
+        }
+        observe()
+    }
+
+    /// `voice_used {kind: live}` — the session actually went live: a step
+    /// from before-live (`.idle`, or `.connecting`) into a live phase. `.idle`
+    /// counts because the chained engine goes live inside one synchronous
+    /// `start()`, so an observer can see idle → listening. A start that
+    /// fails, or is cancelled while connecting, is not a use.
     nonisolated static func wentLive(from old: VoiceConversationPhase, to new: VoiceConversationPhase) -> Bool {
-        old == .connecting && new.isLive
+        (old == .idle || old == .connecting) && new.isLive
     }
 
     /// End gracefully: GPT-Live closes the vendor session and waits for its

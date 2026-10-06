@@ -31,6 +31,9 @@ final class CronViewModel {
     /// Routines, which drive this same view model and report
     /// `bot_routine_action` instead — so a routine is never counted twice.
     var reportsAnalytics = true
+    /// Where those events go. A test seam: the process-wide recorder is
+    /// shared with suites that drive cron concurrently.
+    var recordAnalytics: (UsageEvent) -> Void = { Analytics.record($0) }
     var selectedJob: HermesCronJob?
     var jobOutput: String?
     var availableSkills: [String] = []
@@ -954,7 +957,7 @@ final class CronViewModel {
                 guard let self else { return verdict }
                 self.runningNowJobIDs.remove(jobID)
                 if self.reportsAnalytics {
-                    Analytics.record(.configItemChanged(
+                    self.recordAnalytics(.configItemChanged(
                         area: .cron, action: .run, outcome: Self.analyticsOutcome(verdict)))
                 }
                 let message = Self.runNowMessage(verdict, timeout: timeout)
@@ -1369,7 +1372,7 @@ final class CronViewModel {
             await MainActor.run {
                 onOutcome?(succeeded)
                 if let analytics, self.reportsAnalytics {
-                    Analytics.record(.configItemChanged(
+                    self.recordAnalytics(.configItemChanged(
                         area: .cron, action: analytics, outcome: .init(succeeded: succeeded)))
                 }
                 if succeeded {

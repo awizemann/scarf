@@ -574,6 +574,7 @@ extension PlatformSetupForm {
             return
         }
         isSaving = true
+        let platform = analyticsPlatform
         PlatformSetupHelpers.save(
             context: context,
             envPairs: envPairs,
@@ -581,12 +582,12 @@ extension PlatformSetupForm {
             envUnsetAfterConfig: envUnsetAfterConfig,
             runner: cliRunner
         ) { [weak self] outcome in
+            // Before the `self` guard: the save ran even if the sheet closed.
+            // Only saves that reached the host: the refusals above never ran.
+            Analytics.record(.platformConfigured(platform: platform, outcome: .init(outcome.kind)))
             guard let self else { return }
             self.isSaving = false
             self.applySaveOutcome(outcome)
-            // Only saves that reached the host: the refusals above never ran.
-            Analytics.record(.platformConfigured(
-                platform: self.analyticsPlatform, outcome: .init(outcome.kind)))
         }
     }
 }

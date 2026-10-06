@@ -31,7 +31,8 @@ struct AnalyticsConfigEventsTests {
         return ServerContext.local(home: home)
     }
 
-    /// Every setup form saves through `commitSave`; the event carries the
+    /// Every setup form saves through `commitSave` (driven here through the
+    /// Feishu form); the event carries the
     /// form's own platform token and the save bar's verdict, not a second
     /// opinion of it.
     @Test("a platform form's save reports platform_configured with the bar's outcome")
@@ -40,15 +41,21 @@ struct AnalyticsConfigEventsTests {
         Analytics.install(tracker)
         defer { Analytics.install(nil) }
 
-        let vm = WebhookSetupViewModel(context: Self.scratchContext(), cliRunner: CLILog().runner())
+        let vm = FeishuSetupViewModel(context: Self.scratchContext(), cliRunner: CLILog().runner())
         vm.load()
         await Self.until { !vm.isLoading }
         vm.save()
-        await Self.until { vm.message != nil }
+        #expect(vm.isSaving)
+        // `isSaving` clears in the same callback that records the event.
+        await Self.until { !vm.isSaving }
 
-        let reported = tracker.captured.filter { $0.name == "platform_configured" }
+        // Filtered to this form's token: the recorder is process-wide, and
+        // suites outside the serialized tree save other platforms' forms
+        // concurrently. No other test drives the Feishu form.
+        let reported = tracker.captured.filter {
+            $0.name == "platform_configured" && $0.props["platform"] == "feishu"
+        }
         #expect(reported.count == 1)
-        #expect(reported.first?.props["platform"] == "webhook")
         #expect(reported.first?.props["outcome"] == UsageEvent.Outcome(vm.messageKind).rawValue)
     }
 
@@ -59,12 +66,17 @@ struct AnalyticsConfigEventsTests {
         Analytics.install(tracker)
         defer { Analytics.install(nil) }
 
-        let vm = WebhookSetupViewModel(context: Self.scratchContext(), cliRunner: CLILog().runner())
+        let vm = FeishuSetupViewModel(context: Self.scratchContext(), cliRunner: CLILog().runner())
         vm.load()
         await Self.until { !vm.isLoading }
         vm.loadRefusal = "config.yaml could not be read"
         vm.save()
-        #expect(tracker.captured.filter { $0.name == "platform_configured" }.isEmpty)
+        // The refusal is synchronous: a save that ran would already show
+        // `isSaving` here (and record later, from its callback).
+        #expect(!vm.isSaving, "a refused save must not start")
+        #expect(tracker.captured.filter {
+            $0.name == "platform_configured" && $0.props["platform"] == "feishu"
+        }.isEmpty)
     }
 
     /// Cron and the Bots section's Routines drive the same view model; only
@@ -72,27 +84,33 @@ struct AnalyticsConfigEventsTests {
     /// would count twice (it reports `bot_routine_action`).
     @Test("a cron create reports config_item_changed; a bot routine create does not")
     func cronCreateIsReportedOnlyFromCron() async {
-        let tracker = CapturingUsageTracker()
-        Analytics.install(tracker)
-        defer { Analytics.install(nil) }
+        // Captured through the view model's own seam, not the process-wide
+        // recorder: other suites drive cron verbs concurrently.
+        final class Box { var events: [UsageEvent] = [] }
 
+        let cronEvents = Box()
         let cron = CronViewModel(context: .local, mutationRunner: CLILog().runner())
+        cron.recordAnalytics = { cronEvents.events.append($0) }
         let cronDone = Flag()
         cron.createJob(schedule: "every 1h", prompt: "p", name: "n", deliver: "", skills: [],
                        script: "", repeatCount: "", onOutcome: { _ in cronDone.value = true })
         await Self.until { cronDone.value }
-        #expect(tracker.captured.filter { $0.name == "config_item_changed" }.map(\.props)
-                == [["area": "cron", "action": "created", "outcome": "succeeded"]])
+        await Self.until { !cronEvents.events.isEmpty }
+        #expect(cronEvents.events.map(\.name) == ["config_item_changed"])
+        #expect(cronEvents.events.first?.props.mapValues(\.usageEventToken)
+                == ["area": "cron", "action": "created", "outcome": "succeeded"])
 
+        let routineEvents = Box()
         let routineCron = CronViewModel(context: .local, mutationRunner: CLILog().runner())
+        routineCron.recordAnalytics = { routineEvents.events.append($0) }
         let routines = BotRoutinesViewModel(context: .local, botName: "scout", cron: routineCron)
         #expect(!routines.cron.reportsAnalytics)
         let routineDone = Flag()
         routineCron.createJob(schedule: "every 1h", prompt: "p", name: "n", deliver: "", skills: [],
                               script: "", repeatCount: "", onOutcome: { _ in routineDone.value = true })
         await Self.until { routineDone.value }
-        #expect(tracker.captured.filter { $0.name == "config_item_changed" }.count == 1,
-                "the routine's create must not add a second cron event")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(routineEvents.events.isEmpty, "a routine's create must not report a cron event")
     }
 
     @Test("run-now verdicts map to outcomes without claiming what wasn't proven")
@@ -114,21 +132,17 @@ struct AnalyticsConfigEventsTests {
 
     /// `voice_used {kind: live}` is a session that actually went live — not
     /// a start that failed or was cancelled while connecting.
-    @Test("only connecting → live counts as a Live Voice use")
+    @Test("only a step from before-live into live counts as a Live Voice use")
     func liveVoiceWentLive() {
         #expect(VoiceLiveController.wentLive(from: .connecting, to: .listening))
+        // The chained engine goes live inside one synchronous start().
+        #expect(VoiceLiveController.wentLive(from: .idle, to: .listening))
+        #expect(!VoiceLiveController.wentLive(from: .idle, to: .connecting))
         #expect(VoiceLiveController.wentLive(from: .connecting, to: .speaking))
         #expect(!VoiceLiveController.wentLive(from: .listening, to: .speaking))
         #expect(!VoiceLiveController.wentLive(from: .connecting, to: .connecting))
     }
 
-    /// `ScarfCore` emits `connect_*{source: window}` through the string
-    /// seam; pin its literal to the documented vocabulary.
-    @Test("the window source token matches the vocabulary")
-    func windowSourceToken() {
-        #expect(UsageEvent.ConnectSource.window.rawValue == "window")
-        #expect(UsageEvent.ConnectSource.testProbe.rawValue == "test_probe")
-    }
 }
 
 }

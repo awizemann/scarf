@@ -387,8 +387,8 @@ final class MCPServersViewModel {
                 _ = fileService.setMCPServerEnv(name: name, env: envValues)
             }
             await MainActor.run { [weak self] in
-                guard let self else { return }
                 Self.recordServerChange(.created, .succeeded)
+                guard let self else { return }
                 self.showPresetPicker = false
                 if isOAuthDirect {
                     self.finishOAuthAdd(name: name)
@@ -555,8 +555,8 @@ final class MCPServersViewModel {
                 )
             }
             await MainActor.run { [weak self] in
-                guard let self else { return }
                 Self.recordServerChange(.created, .init(succeeded: result.exitCode == 0))
+                guard let self else { return }
                 if result.exitCode == 0, isOAuthDirect {
                     self.showAddCustom = false
                     self.finishOAuthAdd(name: name)
@@ -629,8 +629,8 @@ final class MCPServersViewModel {
                 )
             }
             await MainActor.run { [weak self] in
-                guard let self else { return }
                 Self.recordServerChange(.created, .init(succeeded: result.exitCode == 0))
+                guard let self else { return }
                 if result.exitCode == 0, isOAuthDirect {
                     self.showAddCustom = false
                     self.finishOAuthAdd(name: name)

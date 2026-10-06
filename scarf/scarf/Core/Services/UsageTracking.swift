@@ -227,7 +227,9 @@ nonisolated final class StatsUsageTracker: UsageTracking {
     func flushBeforeExit(timeout: TimeInterval = 1) {
         guard let client else { return }
         let onDisk = DispatchSemaphore(value: 0)
-        Task.detached {
+        // `.userInitiated`: the main thread waits on this, so a default-
+        // priority task would be a priority inversion.
+        Task.detached(priority: .userInitiated) {
             await client.drainRecorded()
             onDisk.signal()
             await client.flush()

@@ -91,7 +91,9 @@ final class QuickCommandsViewModel: OutcomeMessageHosting {
         isSaving = true
         let ctx = context
         // Read before the write lands: an existing name is an update.
-        let action: UsageEvent.ConfigAction = commands.contains { $0.name == name } ? .updated : .created
+        let existing = commands.map(\.name)
+        let action: UsageEvent.ConfigAction =
+            existing.contains(Self.storedName(for: name, existing: existing)) ? .updated : .created
         Task { [weak self] in
             // TWO `hermes config set` process spawns — two SSH exec channels
             // on a remote host — were running inline on the MainActor.

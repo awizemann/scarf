@@ -33,9 +33,6 @@ struct VoiceLivePanel: View {
             content(engine)
                 .modifier(PanelChrome(controller: controller))
                 .onChange(of: engine.phase) { old, new in
-                    if VoiceLiveController.wentLive(from: old, to: new) {
-                        Analytics.record(.voiceUsed(kind: .live))
-                    }
                     if let line = VoiceLivePresentation.announcement(from: old, to: new, endNote: controller.endNote) {
                         AccessibilityNotification.Announcement(line).post()
                     }
