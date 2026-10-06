@@ -975,7 +975,7 @@ struct BotsViewModelTests {
     // MARK: - Load pipeline costs (Phase B P2 / audit A1-M3+M4)
 
     @Test("a metadata save re-scans the roster but re-reads no avatar bytes")
-    func metadataSaveDoesNotRefetchAvatars() async {
+    func metadataSaveDoesNotRefetchAvatars() async throws {
         let backend = MockBotsBackend([Self.bot("ops", title: "Ops")])
         try? backend.writeAvatar(Data(repeating: 7, count: 128), forProfile: "ops")
         let viewModel = makeViewModel(backend)
@@ -986,13 +986,13 @@ struct BotsViewModelTests {
 
         // Pinning changes profile.yaml and nothing else — the avatar's stat is
         // unchanged, so its cache key hits and no bytes cross the transport.
-        viewModel.togglePinned(viewModel.bots[0])
+        viewModel.togglePinned(try #require(viewModel.bots.first, "the roster never loaded"))
         await waitForIdle(viewModel)
         await waitForLoad(viewModel, expecting: 1)
         #expect(backend.avatarByteReads.count == 1)
         // …and the photo is still on the row, not blanked back to the
         // generated fallback by the reload.
-        #expect(viewModel.rows[0].avatar != nil)
+        #expect(try #require(viewModel.rows.first, "the roster never reloaded").avatar != nil)
     }
 
     @Test("writing an avatar invalidates the cache so the new bytes are read")
@@ -1014,7 +1014,7 @@ struct BotsViewModelTests {
     }
 
     @Test("a mutation's reload does not re-open every bot's database")
-    func mutationsDoNotRefetchActivity() async {
+    func mutationsDoNotRefetchActivity() async throws {
         let backend = MockBotsBackend([Self.bot("ops", title: "Ops"), Self.bot("research", title: "Research")])
         backend.activities = ["ops": BotActivity(lastMessageAt: Date(timeIntervalSince1970: 5), preview: "hi")]
         let viewModel = makeViewModel(backend)
@@ -1024,7 +1024,7 @@ struct BotsViewModelTests {
         let afterFirstLoad = backend.activityReads.count
         #expect(afterFirstLoad == 2, "the first load reads every bot-managed profile once")
 
-        viewModel.togglePinned(viewModel.bots[0])
+        viewModel.togglePinned(try #require(viewModel.bots.first, "the roster never loaded"))
         await waitForIdle(viewModel)
         await waitForLoad(viewModel, expecting: 2)
         #expect(backend.activityReads.count == afterFirstLoad)

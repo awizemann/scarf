@@ -417,13 +417,15 @@ import ScarfCore
         mode.fail = false
         vm.startRun()
         await Self.settle { !vm.isSending && calls.items.count == 2 }
-        #expect(Self.key(in: calls.items[1].args) == key1)
+        let second = try #require(calls.items.dropFirst().first, "the retry never ran")
+        #expect(Self.key(in: second.args) == key1)
         #expect(vm.runs.first?.id == "run_1")
 
         vm.composeText = "long task"
         vm.startRun()
         await Self.settle { !vm.isSending && calls.items.count == 3 }
-        #expect(Self.key(in: calls.items[2].args) != key1, "a new run after a success gets a new key")
+        let third = try #require(calls.items.dropFirst(2).first, "the new run never ran")
+        #expect(Self.key(in: third.args) != key1, "a new run after a success gets a new key")
     }
 
     /// P9 (t-d6384e2e item 6): only a failure that may have created the
@@ -450,6 +452,7 @@ import ScarfCore
         await Self.settle { !vm.isSending && calls.items.count == 1 }
         vm.startRun()
         await Self.settle { !vm.isSending && calls.items.count == 2 }
+        try #require(calls.items.count == 2, "both runs must have been sent")
         let key1 = try #require(Self.key(in: calls.items[0].args))
         let key2 = try #require(Self.key(in: calls.items[1].args))
         #expect((key1 == key2) == keeps, "stderr: \(stderr)")
@@ -466,6 +469,7 @@ import ScarfCore
         vm.composeText = "another task"
         vm.startRun()
         await Self.settle { !vm.isSending && calls.items.count == 2 }
+        try #require(calls.items.count == 2, "both runs must have been sent")
         #expect(Self.key(in: calls.items[0].args) != Self.key(in: calls.items[1].args))
     }
 

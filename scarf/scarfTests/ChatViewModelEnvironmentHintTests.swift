@@ -50,7 +50,7 @@ import ScarfCore
         }
         vm.startNewSession(projectPath: projectPath)
         let booted = await AAE.waitUntil { vm.richChatViewModel.sessionId == "sess-HINT" }
-        #expect(booted, "session never booted")
+        try #require(booted, "session never booted")
         return (vm, spawns, agentsPath, projectPath)
     }
 
@@ -95,7 +95,8 @@ import ScarfCore
         let (_, spawns, agentsPath, _) = try await Self.boot(home: home, store: store)
 
         #expect(spawns.hints.count == 1)
-        #expect(spawns.hints.first! == nil)
+        let hint = try #require(spawns.hints.first, "no spawn recorded")
+        #expect(hint == nil)
         let agents = try String(contentsOfFile: agentsPath, encoding: .utf8)
         #expect(agents.contains(ProjectContextBlock.beginMarker))
         #expect(agents.contains("## Scarf project context"), "the block was refreshed")
@@ -110,7 +111,8 @@ import ScarfCore
 
         let (_, spawns, agentsPath, _) = try await Self.boot(home: home, store: nil)
 
-        #expect(spawns.hints.first! == nil)
+        let hint = try #require(spawns.hints.first, "no spawn recorded")
+        #expect(hint == nil)
         let agents = try String(contentsOfFile: agentsPath, encoding: .utf8)
         #expect(agents.contains("## Scarf project context"))
     }
