@@ -378,9 +378,14 @@ python3 -c "import base64,sys; sig=base64.b64decode(sys.argv[1]); sys.exit(0 if 
 # Sparkle's minimumSystemVersion comes from the shipped app, never a literal:
 # a hardcoded 14.6 outlived the 15.0 deployment-target bump for 12 releases,
 # so Sonoma users were offered updates that could not launch.
+# The bundle's on-disk name is the product name ("scarf.app"); zip paths are
+# case-sensitive even though APFS isn't, so find the top-level app's plist
+# from the listing instead of assuming a spelling.
+APP_PLIST_IN_ZIP="$(zipinfo -1 "$UNIVERSAL_ZIP" | grep -E '^[^/]+\.app/Contents/Info\.plist$' | head -1 || true)"
+[[ -n "$APP_PLIST_IN_ZIP" ]] || die "no top-level .app/Contents/Info.plist in $UNIVERSAL_ZIP"
 MIN_PLIST="$(mktemp)"
-unzip -p "$UNIVERSAL_ZIP" Scarf.app/Contents/Info.plist > "$MIN_PLIST" \
-  || die "could not read Info.plist from $UNIVERSAL_ZIP"
+unzip -p "$UNIVERSAL_ZIP" "$APP_PLIST_IN_ZIP" > "$MIN_PLIST" \
+  || die "could not read $APP_PLIST_IN_ZIP from $UNIVERSAL_ZIP"
 MIN_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$MIN_PLIST")"
 rm -f "$MIN_PLIST"
 [[ "$MIN_SYSTEM_VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] \
