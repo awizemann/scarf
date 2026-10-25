@@ -1355,7 +1355,19 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// 34d0de80e6) is first at v2026.7.30; v2026.7.20 only did it for
     /// `/steer`. Floor v0.19.1 (v2026.7.30 `pyproject.toml` = `0.19.1`).
     /// Drives the wording of Scarf's "you stopped this turn" note.
-    public var hasACPStoppedPromptCarriedForward: Bool { isV0191OrLater }
+    ///
+    /// **Off again wherever `hermes acp` is gateway-backed** (see
+    /// ``hasGatewayBackedACP``): the carry-forward
+    /// (`_attach_interrupted_prompt` / `_take_interrupted_prompt`,
+    /// `acp_adapter/server.py:202-211` @ v0.22.5) lives only in the
+    /// in-process `HermesACPAgent`, which `hermes acp` no longer constructs
+    /// there — `acp_adapter/entry.py:202` calls `HermesACPAgent()` with no
+    /// session manager, and `__new__` (`server.py:245-249`) returns a
+    /// `GatewayACPAgent`, whose `acp_adapter/gateway_server.py` has no such
+    /// path. So the window is v0.19.1 ..< v0.22.1, then exactly v0.22.2.
+    public var hasACPStoppedPromptCarriedForward: Bool {
+        isV0191OrLater && !hasGatewayBackedACP
+    }
 
     /// `database.{journal_mode,wal_autocheckpoint,journal_size_limit}` —
     /// SQLite journal mode + WAL sizing pragmas applied by every Hermes
@@ -2103,7 +2115,15 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// a caller must parse stdout regardless of exit code (same contract as
     /// `cron doctor`). Absent at v2026.8.31, where `plugins_cmd.py` has no
     /// `compat` verb at all, so an older host fails argparse.
-    public var hasPluginsCompat: Bool { isV0211OrLater }
+    ///
+    /// **A WINDOW since v0.21.6:** the `compat` subparser is gone from
+    /// `hermes_cli/subcommands/plugins.py` at v0.21.6 (`:116` registers it
+    /// @ v2026.9.24; `git grep '"compat"' v0.21.6 -- <that file>` is empty,
+    /// and stays empty through v0.22.5). So `0.21.1 <= v < 0.21.6`. Unknown
+    /// version hides it, as it always has.
+    public var hasPluginsCompat: Bool {
+        isV0211OrLater && !isV0216OrLater
+    }
 
     /// `hermes config set` coerces the word `none` (any case) to YAML null
     /// for a key whose `DEFAULT_CONFIG` default is not a string — the
@@ -2484,7 +2504,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// absent key as `nil`; ``HermesConfig/displayCompressionThresholdTokens(capabilities:)``
     /// uses this to show the host's real default instead of "off" on a
     /// host that never wrote the key (an explicit `0`/`null` stays "off").
-    public var hasCompressionThresholdTokensDefault256K: Bool { isV0214OrLater }
+    ///
+    /// **A WINDOW since v0.21.6:** the default goes back to `None` at
+    /// `v0.21.6:hermes_cli/config_defaults.py:593` and stays `None` at every
+    /// later tag through `v0.22.5` (`:607`). So `0.21.4 <= v < 0.21.6`.
+    /// Unknown version stays `false`, as it always has.
+    public var hasCompressionThresholdTokensDefault256K: Bool {
+        isV0214OrLater && !isV0216OrLater
+    }
 
     /// Whether WhatsApp's `gateway.unauthorized_dm_behavior` accepts
     /// `"decline"` (send one polite refusal, then go silent toward that
@@ -2676,6 +2703,160 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// writes (``KanbanToolsetDetector/chatPlatform(for:)``).
     public var hasACPPlatformToolsets: Bool { isV0215OrLater }
 
+    // MARK: v0.21.6 flags
+    //
+    // From here on Hermes tags by semver (`v0.21.6`, …) and `pyproject.toml`
+    // reads `version = "0.0.0"`; `hermes --version`'s date stays frozen at
+    // `2026.9.24`. Each floor was opened at the floor tag AND at `v2026.9.24`
+    // (0.21.5), the tag before it. The two v0.21.6 removals that are windows
+    // on older flags — `hasPluginsCompat` and
+    // `hasCompressionThresholdTokensDefault256K` — stay with their floors.
+
+    /// config.yaml (and every manifest/frontmatter Hermes reads) is parsed
+    /// by ruamel under a YAML 1.1 policy: `hermes_yaml.py` (new at v0.21.6;
+    /// absent at v2026.9.24) "includes bare y/n booleans and rejects
+    /// duplicate keys" (`:3-4`), and `hermes_cli/config.py:34` @ v0.21.6
+    /// reads `import hermes_yaml as yaml` (`utils.py:18` likewise, so
+    /// `fast_safe_load` too), where v2026.9.24 has PyYAML (`config.py:34`
+    /// `import yaml`), which keeps the last of two duplicate keys and reads
+    /// `y`/`n` as strings. A file that no longer parses falls back to the
+    /// last-known-good copy or the defaults (`config.py:2361-2371` @ v0.21.6).
+    public var hasStrictYAMLConfigLoader: Bool { isV0216OrLater }
+
+    /// Whether the bundled tirith pre-exec scanner — and the four
+    /// `security.tirith_*` keys Scarf's Security tab edits — is still on this
+    /// host. A REMOVAL: `security.tirith_{enabled,path,timeout,fail_open}`
+    /// are seeded at `v2026.9.24:hermes_cli/config_defaults.py:1753-1756`;
+    /// at v0.21.6 nothing reads them and `_migrate_to_50`
+    /// (`hermes_cli/config_migrations.py:686-702` @ v0.21.6, still there at
+    /// v0.22.5) deletes them ("the tirith scanner is no longer bundled").
+    ///
+    /// Unknown version KEEPS the section (same policy as
+    /// `hasTavilyWebBackend` / `hasTelegramIgnoreRootDM`: before this flag
+    /// the section was unconditional, and C1 says an undetected host renders
+    /// what it rendered before).
+    public var hasBundledTirith: Bool {
+        guard semver != nil else { return true }          // unknown → keep
+        return !isV0216OrLater
+    }
+
+    /// `hermes plugins install --yes-deps` — answer the Python dependency
+    /// consent question non-interactively (`hermes_cli/subcommands/plugins.py:37-40`
+    /// @ v0.21.6, in a mutually exclusive group with `--no-deps`). No
+    /// `yes-deps` anywhere in that file at v2026.9.24.
+    public var hasPluginInstallDepsConsent: Bool { isV0216OrLater }
+
+    /// `hermes import` on a partial restore prints `Import incomplete: N
+    /// file(s) were not restored …` and returns 1 (`hermes_cli/backup.py:1048-1050`
+    /// @ v0.21.6). The string is absent at v2026.9.24, where a partial
+    /// import still ends in "Done." with exit 0 — so a caller must not read
+    /// exit 0 as "everything restored" below this floor. Sibling of
+    /// `hasBackupPartialExitNonZero` (v0.21.4).
+    public var hasImportPartialExitNonZero: Bool { isV0216OrLater }
+
+    /// Cron jobs carry an `interpreter` field (`_JOB_FIELD_NORMALIZERS` gains
+    /// `"interpreter": _normalize_job_optional_text`, `cron/jobs.py:1763` @
+    /// v0.21.6). `git grep interpreter v2026.9.24 -- cron/jobs.py` is empty.
+    public var hasCronInterpreter: Bool { isV0216OrLater }
+
+    /// Whether Hermes still walks the token-gated org skill mirror
+    /// `skills/_org/<org>/` (named by `_org/.active_org`). A REMOVAL:
+    /// `ORG_MIRROR_DIR_NAME = "_org"` is defined at
+    /// `v2026.9.24:agent/skill_utils.py:36` and read by
+    /// `agent/prompt_builder.py:1147-1155`; at v0.21.6 a whole-tree
+    /// `git grep ORG_MIRROR_DIR_NAME` outside `tests/` is empty, and no
+    /// `active_org` reader remains under `agent/`, `tools/` or `hermes_cli/`.
+    /// `SkillsScanner` walks the mirror unconditionally today.
+    ///
+    /// Unknown version KEEPS it (same policy as `hasBundledTirith`).
+    public var hasSkillsOrgMirror: Bool {
+        guard semver != nil else { return true }          // unknown → keep
+        return !isV0216OrLater
+    }
+
+    /// The honcho, mem0, openviking and supermemory memory providers LEFT
+    /// CORE: `plugins/memory/{honcho,mem0,openviking,supermemory}` exist at
+    /// v2026.9.24 and are gone at v0.21.6 (`git ls-tree v0.21.6
+    /// plugins/memory/` lists only byterover, holographic, retaindb), which
+    /// installs them from `plugin-catalog/<name>.yaml` instead
+    /// (`mem0.yaml`/`openviking.yaml` are new there).
+    public var hasCatalogMemoryProviders: Bool { isV0216OrLater }
+
+    /// Home Assistant LEFT CORE: `plugins/platforms/homeassistant/` and the
+    /// `Platform.HOMEASSISTANT` member (`gateway/config.py:203` @
+    /// v2026.9.24) are both gone at v0.21.6, replaced by
+    /// `plugin-catalog/homeassistant.yaml` (new at v0.21.6).
+    public var hasCatalogHomeAssistant: Bool { isV0216OrLater }
+
+    // MARK: v0.21.7 flags
+    //
+    // Each floor opened at v0.21.7 and at v0.21.6, the tag before it.
+
+    /// Spotify LEFT CORE: `hermes auth spotify` (registered at
+    /// `hermes_cli/subcommands/auth.py:72-73` @ v0.21.6) is gone at v0.21.7,
+    /// where `hermes_cli/left_core_migration.py:157-160` names the
+    /// `spotify` catalog plugin and says "`hermes auth spotify` is now
+    /// `hermes spotify login`" (`plugin-catalog/spotify.yaml`, new at
+    /// v0.21.7). Below the floor the login is the core `auth` verb.
+    public var hasSpotifyPluginLogin: Bool { isV0217OrLater }
+
+    /// The holographic memory provider LEFT CORE: `plugins/memory/holographic`
+    /// is present at v0.21.6 and gone at v0.21.7, replaced by
+    /// `plugin-catalog/holographic.yaml` (new at v0.21.7).
+    public var hasCatalogHolographicMemory: Bool { isV0217OrLater }
+
+    // MARK: v0.22.3 flags
+    //
+    // v0.22.2 REVERTED several v0.22.1 additions and v0.22.3 restored them,
+    // so each flag below was opened at v0.22.0, v0.22.1, v0.22.2 and v0.22.3.
+    // A surface present at v0.22.1 is `isExactlyV0221 || isV0223OrLater`.
+
+    /// `hermes acp` is a VIEWER of the profile gateway rather than an
+    /// in-process agent: `acp_adapter/entry.py:202` constructs
+    /// `HermesACPAgent()` with no session manager and `HermesACPAgent.__new__`
+    /// (`acp_adapter/server.py:245-249` @ v0.22.3/v0.22.5, `:254-258` @
+    /// v0.22.1) returns a `GatewayACPAgent` (`acp_adapter/gateway_server.py`,
+    /// "ACP projection of the profile gateway; never constructs an execution
+    /// owner"). Neither `__new__` nor `gateway_server.py` exists at v0.22.0
+    /// or v0.22.2. Unknown version hides it (a new behaviour).
+    public var hasGatewayBackedACP: Bool { isExactlyV0221 || isV0223OrLater }
+
+    /// `hermes gateway status` prints `✗ <running> but cannot serve this
+    /// Hermes (<stale>)` when the running gateway owner is incompatible
+    /// (`hermes_cli/gateway_status_notes.py:21-27` @ v0.22.1 and v0.22.3;
+    /// the module is absent at v0.22.0 and v0.22.2).
+    public var hasGatewayIncompatibleOwnerStatus: Bool { isExactlyV0221 || isV0223OrLater }
+
+    /// `hermes gateway stop|restart` refuse while sessions are live — they
+    /// name the live turns, cron jobs and background delegations, ask y/N,
+    /// and with no terminal `sys.exit(1)`
+    /// (`refuse_while_sessions_live`, `hermes_cli/gateway_lifecycle_guards.py:97-129`
+    /// @ v0.22.3); `-y`/`--yes`/`--interrupt` (one flag, `dest="interrupt"`,
+    /// `hermes_cli/subcommands/gateway.py:144,151`) skips the question. The
+    /// module and the flag are absent at v0.22.1 AND v0.22.2 — a plain
+    /// v0.22.3 floor, not a restored v0.22.1 surface.
+    public var hasGatewayLiveSessionGuard: Bool { isV0223OrLater }
+
+    /// `hermes gateway restart --detach` — with no installed service, start
+    /// the replacement in the background instead of in this terminal
+    /// (`hermes_cli/subcommands/gateway.py:152-154` @ v0.22.3). Absent at
+    /// v0.22.1 and v0.22.2.
+    public var hasGatewayRestartDetach: Bool { isV0223OrLater }
+
+    // MARK: v0.22.5 flags
+    //
+    // Opened at v0.22.5 and at v0.22.4, the tag before it.
+
+    /// The Singularity terminal backend LEFT CORE:
+    /// `tools/environments/singularity.py` is present at v0.22.4 and gone
+    /// at v0.22.5, where `hermes_cli/left_core_migration.py:47`
+    /// (`LEFT_CORE_TERMINAL_KEYS = {"terminal.singularity_image": …}`) and
+    /// `singularity_in_use` (`:158`) move a home onto the `singularity`
+    /// catalog plugin. `left_core_migration.py` has no singularity row at
+    /// v0.22.4 (the catalog yaml already exists there, but core still runs
+    /// the backend).
+    public var hasCatalogSingularity: Bool { isV0225OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -2865,6 +3046,29 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Whether the connected host is on v0.21.5 or newer. Patch-level floor
     /// for the v0.21.5 group, same rationale as `isV0214OrLater`.
     public var isV0215OrLater: Bool { atLeastSemver(0, 21, 5) }
+
+    /// Whether the connected host is on v0.21.6 or newer. Patch-level floor
+    /// for the v0.21.6 group. From v0.21.6 on, tags are named by semver
+    /// (`v0.21.6`, …) and `pyproject.toml` reads `0.0.0`; the version a host
+    /// reports comes from the tag it was built from, not that file.
+    public var isV0216OrLater: Bool { atLeastSemver(0, 21, 6) }
+
+    /// Whether the connected host is on v0.21.7 or newer. Patch-level floor
+    /// for the v0.21.7 group, same rationale as `isV0216OrLater`.
+    public var isV0217OrLater: Bool { atLeastSemver(0, 21, 7) }
+
+    /// Whether the connected host is on v0.22.3 or newer. Patch-level floor
+    /// for the v0.22.3 group. NB v0.22.2 REVERTED several v0.22.1 additions
+    /// and v0.22.3 restored them, so a surface that first shipped in v0.22.1
+    /// is `semver == 0.22.1 || isV0223OrLater`, never `>= 0.22.1`.
+    public var isV0223OrLater: Bool { atLeastSemver(0, 22, 3) }
+
+    /// Whether the connected host is on v0.22.5 or newer. Patch-level floor
+    /// for the v0.22.5 group, same rationale as `isV0216OrLater`.
+    public var isV0225OrLater: Bool { atLeastSemver(0, 22, 5) }
+
+    /// Exactly v0.22.1 — the release whose additions v0.22.2 reverted.
+    private var isExactlyV0221: Bool { semver == SemVer(major: 0, minor: 22, patch: 1) }
 
     /// Public form of the private floor test, for tables that carry their
     /// own floors as data (see `KnownPlatforms.minimumVersion`) rather than

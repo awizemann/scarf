@@ -1742,6 +1742,191 @@ import Foundation
         #expect(!caps.hasMCPBoolishNumericTruthiness)
     }
 
+    // MARK: - v0.21.6 … v0.22.5 capability flags
+
+    /// Every flag the v0.21.6 / v0.21.7 / v0.22.3 / v0.22.5 groups added,
+    /// as (name, key path). Removals (`hasBundledTirith`,
+    /// `hasSkillsOrgMirror`) and the three narrowed windows are NOT here —
+    /// they go the other way at the floor and have their own tests.
+    static var v0216ThroughV0225Floors: [(String, KeyPath<HermesCapabilities, Bool>)] { [
+        ("isV0216OrLater", \.isV0216OrLater),
+        ("isV0217OrLater", \.isV0217OrLater),
+        ("isV0223OrLater", \.isV0223OrLater),
+        ("isV0225OrLater", \.isV0225OrLater),
+        ("hasStrictYAMLConfigLoader", \.hasStrictYAMLConfigLoader),
+        ("hasPluginInstallDepsConsent", \.hasPluginInstallDepsConsent),
+        ("hasImportPartialExitNonZero", \.hasImportPartialExitNonZero),
+        ("hasCronInterpreter", \.hasCronInterpreter),
+        ("hasCatalogMemoryProviders", \.hasCatalogMemoryProviders),
+        ("hasCatalogHomeAssistant", \.hasCatalogHomeAssistant),
+        ("hasSpotifyPluginLogin", \.hasSpotifyPluginLogin),
+        ("hasCatalogHolographicMemory", \.hasCatalogHolographicMemory),
+        ("hasGatewayBackedACP", \.hasGatewayBackedACP),
+        ("hasGatewayIncompatibleOwnerStatus", \.hasGatewayIncompatibleOwnerStatus),
+        ("hasGatewayLiveSessionGuard", \.hasGatewayLiveSessionGuard),
+        ("hasGatewayRestartDetach", \.hasGatewayRestartDetach),
+        ("hasCatalogSingularity", \.hasCatalogSingularity),
+    ] }
+
+    static let v0225Line = "Hermes Agent v0.22.5 (2026.9.24) · stable · local bf0203a794a0"
+
+    @Test func parseV0225ReleaseLine() {
+        // The date suffix is frozen at 2026.9.24 from v0.21.6 on; only the
+        // semver moves.
+        let caps = HermesCapabilities.parseLine(Self.v0225Line)
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 22, patch: 5))
+        #expect(caps.dateVersion == HermesCapabilities.DateVersion(year: 2026, month: 9, day: 24))
+        #expect(caps.detected)
+    }
+
+    @Test func parseV0225GitInstallLine() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.22.5+12.gabc1234 (2026.9.24) · upstream abc1234")
+        #expect(caps.semver == HermesCapabilities.SemVer(major: 0, minor: 22, patch: 5))
+        #expect(caps.isV0225OrLater)
+    }
+
+    @Test func parseUntaggedGitLineIsUndetected() {
+        #expect(HermesCapabilities.parseLine("Hermes Agent vgit.abc1234 (2026.9.24)") == .empty)
+    }
+
+    @Test func v0225EveryNewFlagOn() {
+        let caps = HermesCapabilities.parseLine(Self.v0225Line)
+        for (name, flag) in Self.v0216ThroughV0225Floors {
+            #expect(caps[keyPath: flag], "\(name)")
+        }
+        // Removals and narrowed windows are closed by now.
+        #expect(!caps.hasBundledTirith)
+        #expect(!caps.hasSkillsOrgMirror)
+        #expect(!caps.hasPluginsCompat)
+        #expect(!caps.hasCompressionThresholdTokensDefault256K)
+        #expect(!caps.hasACPStoppedPromptCarriedForward)
+        // Older floors stay on.
+        #expect(caps.isV0215OrLater)
+        #expect(caps.hasMCPBoolishNumericTruthiness)
+        #expect(caps.hasACPPlatformToolsets)
+        #expect(caps.hasSupervisedGatewayRestart)
+        #expect(caps.hasBackupPartialExitNonZero)
+    }
+
+    @Test func v0215HostKeepsTodaysValues() {
+        let caps = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+        for (name, flag) in Self.v0216ThroughV0225Floors {
+            #expect(!caps[keyPath: flag], "\(name)")
+        }
+        #expect(caps.hasBundledTirith)
+        #expect(caps.hasSkillsOrgMirror)
+        #expect(caps.hasPluginsCompat)
+        #expect(caps.hasCompressionThresholdTokensDefault256K)
+        #expect(caps.hasACPStoppedPromptCarriedForward)
+    }
+
+    @Test func v0216FloorAndRemovals() {
+        // `hermes_yaml.py`, `--yes-deps`, `Import incomplete:`, cron
+        // `interpreter`, `_migrate_to_50` (tirith), and the memory/Home
+        // Assistant moves all land at v0.21.6; `plugins compat`, the
+        // 256K compression default and `ORG_MIRROR_DIR_NAME` leave there.
+        let before = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+        let at = HermesCapabilities.parseLine("Hermes Agent v0.21.6 (2026.9.24)")
+        let v0216: [KeyPath<HermesCapabilities, Bool>] = [
+            \.isV0216OrLater, \.hasStrictYAMLConfigLoader, \.hasPluginInstallDepsConsent,
+            \.hasImportPartialExitNonZero, \.hasCronInterpreter,
+            \.hasCatalogMemoryProviders, \.hasCatalogHomeAssistant,
+        ]
+        for flag in v0216 {
+            #expect(!before[keyPath: flag])
+            #expect(at[keyPath: flag])
+        }
+        let removed: [KeyPath<HermesCapabilities, Bool>] = [
+            \.hasBundledTirith, \.hasSkillsOrgMirror, \.hasPluginsCompat,
+            \.hasCompressionThresholdTokensDefault256K,
+        ]
+        for flag in removed {
+            #expect(before[keyPath: flag])
+            #expect(!at[keyPath: flag])
+        }
+        // The v0.21.7 group is not reached yet.
+        #expect(!at.hasSpotifyPluginLogin)
+        #expect(!at.hasCatalogHolographicMemory)
+    }
+
+    @Test func pluginsCompatWindowIsV0211ThroughV0215() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.0 (2026.8.31)").hasPluginsCompat)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.1 (2026.9.7)").hasPluginsCompat)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)").hasPluginsCompat)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.6 (2026.9.24)").hasPluginsCompat)
+        #expect(!HermesCapabilities.parseLine(Self.v0225Line).hasPluginsCompat)
+    }
+
+    @Test func compression256KDefaultWindowIsV0214ThroughV0215() {
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.3 (2026.9.14)").hasCompressionThresholdTokensDefault256K)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.4 (2026.9.21)").hasCompressionThresholdTokensDefault256K)
+        #expect(HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)").hasCompressionThresholdTokensDefault256K)
+        #expect(!HermesCapabilities.parseLine("Hermes Agent v0.21.6 (2026.9.24)").hasCompressionThresholdTokensDefault256K)
+        #expect(!HermesCapabilities.parseLine(Self.v0225Line).hasCompressionThresholdTokensDefault256K)
+    }
+
+    @Test func v0217Floor() {
+        let before = HermesCapabilities.parseLine("Hermes Agent v0.21.6 (2026.9.24)")
+        let at = HermesCapabilities.parseLine("Hermes Agent v0.21.7 (2026.9.24)")
+        for flag: KeyPath<HermesCapabilities, Bool> in [\.isV0217OrLater, \.hasSpotifyPluginLogin, \.hasCatalogHolographicMemory] {
+            #expect(!before[keyPath: flag])
+            #expect(at[keyPath: flag])
+        }
+    }
+
+    /// v0.22.2 reverted the v0.22.1 gateway-backed ACP and status note;
+    /// v0.22.3 restored them and added the live-session guard and
+    /// `restart --detach`, which v0.22.1 never had.
+    @Test func v0221RevertedAtV0222RestoredAtV0223() {
+        func caps(_ patch: Int) -> HermesCapabilities {
+            HermesCapabilities.parseLine("Hermes Agent v0.22.\(patch) (2026.9.24)")
+        }
+        let restored: [KeyPath<HermesCapabilities, Bool>] = [\.hasGatewayBackedACP, \.hasGatewayIncompatibleOwnerStatus]
+        for flag in restored {
+            #expect(!caps(0)[keyPath: flag])
+            #expect(caps(1)[keyPath: flag])
+            #expect(!caps(2)[keyPath: flag])
+            #expect(caps(3)[keyPath: flag])
+            #expect(caps(4)[keyPath: flag])
+        }
+        let v0223: [KeyPath<HermesCapabilities, Bool>] = [\.isV0223OrLater, \.hasGatewayLiveSessionGuard, \.hasGatewayRestartDetach]
+        for flag in v0223 {
+            #expect(!caps(0)[keyPath: flag])
+            #expect(!caps(1)[keyPath: flag])
+            #expect(!caps(2)[keyPath: flag])
+            #expect(caps(3)[keyPath: flag])
+        }
+        // The stopped-prompt carry-forward lives only in the in-process
+        // agent, so it follows the inverse of `hasGatewayBackedACP`.
+        #expect(caps(0).hasACPStoppedPromptCarriedForward)
+        #expect(!caps(1).hasACPStoppedPromptCarriedForward)
+        #expect(caps(2).hasACPStoppedPromptCarriedForward)
+        #expect(!caps(3).hasACPStoppedPromptCarriedForward)
+    }
+
+    @Test func v0225Floor() {
+        let before = HermesCapabilities.parseLine("Hermes Agent v0.22.4 (2026.9.24)")
+        let at = HermesCapabilities.parseLine(Self.v0225Line)
+        for flag: KeyPath<HermesCapabilities, Bool> in [\.isV0225OrLater, \.hasCatalogSingularity] {
+            #expect(!before[keyPath: flag])
+            #expect(at[keyPath: flag])
+        }
+    }
+
+    @Test func undetectedHostHidesNewFlagsAndKeepsRemovals() {
+        let caps = HermesCapabilities.empty
+        for (name, flag) in Self.v0216ThroughV0225Floors {
+            #expect(!caps[keyPath: flag], "\(name)")
+        }
+        // Removals keep the surface an undetected host rendered before.
+        #expect(caps.hasBundledTirith)
+        #expect(caps.hasSkillsOrgMirror)
+        // The narrowed windows keep their old undetected value (off).
+        #expect(!caps.hasPluginsCompat)
+        #expect(!caps.hasCompressionThresholdTokensDefault256K)
+        #expect(!caps.hasACPStoppedPromptCarriedForward)
+    }
+
     // MARK: - hasOpenCodeFreeProvider's true floor is v0.20.5, not v0.6.0
 
     /// `opencode-free` first ships at tag `v2026.8.19` (v0.20.5, commit
