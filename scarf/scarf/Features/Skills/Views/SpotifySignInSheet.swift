@@ -40,14 +40,16 @@ struct SpotifySignInSheet: View {
         coordinator.featureViewModel(for: .plugins) { PluginsViewModel(context: serverContext) }
     }
 
-    /// Whether the login command is available: always below the plugin
-    /// floor; on a plugin host, nil until the roster has landed, then whether
-    /// it lists `spotify`.
+    /// Whether the login command exists: always below the plugin floor; on a
+    /// plugin host, nil until the roster has landed, then whether `spotify`
+    /// is installed AND enabled — a disabled plugin is not loaded, so
+    /// `hermes spotify login` is not registered
+    /// (``PluginsViewModel/isPluginReady(_:activatesByConfig:)``).
     private var pluginReady: Bool? {
         guard pluginLogin else { return true }
         let viewModel = pluginsViewModel
         guard viewModel.rosterLoaded else { return nil }
-        return viewModel.hasPlugin("spotify")
+        return viewModel.isPluginReady("spotify")
     }
 
     /// Read once by ``advance()``; nil until `loadSetup()` returns.
@@ -67,7 +69,8 @@ struct SpotifySignInSheet: View {
     /// callback from here at all, so it gets the command to run instead.
     enum Gate: Equatable {
         case checking
-        /// v0.21.7+ host without the `spotify` plugin.
+        /// v0.21.7+ host whose `spotify` plugin is missing or not enabled;
+        /// the note offers Install or Enable.
         case needsPlugin
         case needsClientID
         case remote

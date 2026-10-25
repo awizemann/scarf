@@ -31,7 +31,7 @@ struct MemoryTab: View {
             // hosts get nil here and render exactly as before (C1).
             if let capabilities = capabilitiesStore?.capabilities,
                let plugin = SettingsViewModel.memoryProviderPlugin(viewModel.config.memoryProvider, capabilities: capabilities) {
-                PluginRequiredNote(pluginID: plugin, feature: "The \(plugin) memory provider")
+                PluginRequiredNote(pluginID: plugin, feature: "The \(plugin) memory provider", activatesByConfig: true)
             }
             // No "Honcho Eager Init" toggle: Hermes reads `initOnSessionStart`
             // only from the honcho.json host block, never from config.yaml, so

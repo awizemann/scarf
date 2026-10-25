@@ -48,12 +48,26 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// does not offer "Install" over a roster that simply has not arrived.
     private(set) var rosterLoaded = false
 
-    /// Whether the roster lists a plugin installed from catalog entry `id`.
-    /// The left-core rows install under their catalog name ("catalog entry
-    /// name == installed plugin name", `hermes_cli/left_core_migration.py:195`
-    /// @ v0.22.5); a path key (`<dir>/<name>`) is accepted too.
-    func hasPlugin(_ id: String) -> Bool {
-        plugins.contains { $0.name == id || $0.name.hasSuffix("/" + id) }
+    /// The roster's activation state for a plugin installed from catalog
+    /// entry `id`, or nil when it is not installed. The left-core rows
+    /// install under their catalog name ("catalog entry name == installed
+    /// plugin name", `hermes_cli/left_core_migration.py:195` @ v0.22.5); a
+    /// path key (`<dir>/<name>`) is accepted too.
+    func pluginActivation(_ id: String) -> HermesPluginActivation? {
+        plugins.first { $0.name == id || $0.name.hasSuffix("/" + id) }?.activation
+    }
+
+    /// Installed AND loaded. A standalone plugin loads only from
+    /// `plugins.enabled`: `gate_manifest` skips a disabled one (`:278`) and
+    /// one in neither list (`:299`, "not enabled in config"), so its tools
+    /// and CLI commands do not exist (`hermes_cli/plugins_discovery.py` @
+    /// v0.22.5). A memory provider is `kind: exclusive` and activates through
+    /// `memory.provider` instead (`:281-285`; "the loader never reads
+    /// plugins.enabled", `plugins_cmd_install.py:652`), so for it installed
+    /// is enough — pass `activatesByConfig`.
+    func isPluginReady(_ id: String, activatesByConfig: Bool = false) -> Bool {
+        guard let activation = pluginActivation(id) else { return false }
+        return activatesByConfig || activation == .enabled
     }
 
     /// `hermes plugins compat --json` (v0.21.1+). Nil means "no answer" —
@@ -251,32 +265,37 @@ final class PluginsViewModel: OutcomeMessageHosting {
 
     var installReport: InstallReport?
 
-    /// The install identifier whose `--enable` Hermes refused for want of
+    /// The installed plugin name whose `--enable` Hermes refused for want of
     /// Python dependency consent (v0.21.6+,
     /// ``HermesPluginInstallOutcome/needsDependencyConsent``). Drives the
-    /// confirmation that re-runs the install with `--yes-deps`; nil
+    /// confirmation that runs `hermes plugins enable -- <name>`; nil
     /// otherwise.
     var pendingDependencyConsent: String?
 
-    /// Re-runs an install whose enable was refused for want of dependency
-    /// consent, answering that question with `--yes-deps`. Call ONLY from the
-    /// user's explicit confirmation — the flag is their consent to the
-    /// plugin's Python dependencies entering Hermes's shared environment.
+    /// Finishes an install whose enable was refused for want of dependency
+    /// consent by running `hermes plugins enable -- <name>` — the step Hermes
+    /// itself names ("Run `hermes plugins enable` when ready to prepare
+    /// them.", `hermes_cli/plugins_cmd_install.py:148` @ v0.21.6 and v0.22.5).
+    /// Call ONLY from the user's explicit confirmation: it is their consent to
+    /// the plugin's Python dependencies entering Hermes's shared environment.
     ///
-    /// Why a re-install and not `plugins enable`: `--yes-deps` is an
-    /// `install` flag only (`hermes_cli/subcommands/plugins.py:33-40` @
-    /// v0.22.5; the `enable` parser at `:137-143` has none), and it is the
-    /// path Hermes documents for a non-interactive install that should finish
-    /// in one run (`cmd_install` docstring, `plugins_cmd_install.py:592-596`).
-    /// The plugin is already on disk, so `--force` is needed to get past
-    /// `already exists` (`:463-466`); it reinstalls from the same source and
-    /// keeps the user's untracked files (`plugins.py:25-27`). It also keeps a
-    /// memory provider's selection on the same `cmd_install` path
-    /// (`_select_memory_provider`, `:690`), which `plugins enable` never
-    /// touches.
-    func installWithDependencyConsent(_ identifier: String) {
+    /// `cmd_enable` (`plugins_cmd.py:695` @ v0.22.5) asks no dependency
+    /// question: `_activate_key` (`:726`) → `_set_plugin_enabled` →
+    /// `_admit_and_save_plugin_sets` (`:491-524`) → `admit_plugin_set_change`
+    /// → `sync_venv(explicit=True, …)` (`plugins_admission.py:50-74`), which
+    /// prepares the dependencies with no TTY check (`pm/client.py:217-242`).
+    /// It touches only the tree already on disk — no clone, no scan.
+    ///
+    /// Deliberately NOT a re-install: `install --yes-deps` of a plugin already
+    /// on disk refuses with `already exists` unless `--force`
+    /// (`plugins_cmd_install.py:463-466`), and `--force` also accepts a
+    /// caution scan verdict (`should_allow_plugin_install(result, force=force)`,
+    /// `plugins_cmd.py:204`, fed by `plugins_cmd_install.py:448`) and re-clones
+    /// a git source, possibly at a newer revision. Consent must never waive
+    /// the scan.
+    func enableWithDependencyConsent(_ name: String) {
         pendingDependencyConsent = nil
-        install(identifier, enable: true, yesDeps: true)
+        enable(named: name)
     }
 
     /// Installs a plugin, telling the CLI **explicitly** whether to enable
@@ -292,8 +311,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// `showReport: false` is for an install started from outside this pane
     /// (``PluginRequiredNote``), whose outcome the caller shows inline — the
     /// report sheet would otherwise pop up the next time Plugins opens.
-    /// `yesDeps` is ``installWithDependencyConsent(_:)``'s alone.
-    func install(_ identifier: String, enable: Bool, showReport: Bool = true, yesDeps: Bool = false) {
+    func install(_ identifier: String, enable: Bool, showReport: Bool = true) {
         isLoading = true
         // In-progress, not an outcome — nothing has failed yet.
         message = String(localized: "Installing \(identifier)…")
@@ -309,14 +327,8 @@ final class PluginsViewModel: OutcomeMessageHosting {
         let run = cliRunner
         let ctx = context
         Task.detached { [weak self] in
-            // `--force --yes-deps` only after the user's consent, and only on
-            // a host whose parser has `--yes-deps` (v0.21.6+): the dialog that
-            // leads here is armed by a `Cannot enable` line no older host
-            // prints. Flags before `--`, as everywhere on this pane.
             let result = run(
-                ["plugins", "install"]
-                    + (yesDeps ? ["--force", "--yes-deps"] : [])
-                    + [enable ? "--enable" : "--no-enable", "--", identifier],
+                ["plugins", "install", enable ? "--enable" : "--no-enable", "--", identifier],
                 180
             )
             let outcome = HermesPluginInstallOutcome.parse(result.output)
@@ -359,12 +371,12 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     // often because the plugin declares Python dependencies
                     // and Hermes had no terminal to ask about them. Never
                     // "Installed and enabled"; the consent case offers the
-                    // `--yes-deps` re-run.
+                    // `plugins enable` that prepares the dependencies.
                     self.applySaveOutcome(.failure(
                         String(localized: "Installed, but not enabled: \(reason)")
                     ))
-                    if outcome.needsDependencyConsent, !yesDeps {
-                        self.pendingDependencyConsent = identifier
+                    if outcome.needsDependencyConsent, let name = outcome.enableRefusedPlugin {
+                        self.pendingDependencyConsent = name
                     }
                 } else {
                     self.applySaveOutcome(
@@ -446,6 +458,13 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// `allowToolOverride` must come from an explicit in-app confirmation
     /// (`PluginsView`'s tool-override dialog). It is never inferred.
     func enable(_ plugin: HermesPlugin, allowToolOverride: Bool? = nil) {
+        enable(named: plugin.name, allowToolOverride: allowToolOverride)
+    }
+
+    /// ``enable(_:allowToolOverride:)`` by name, for a plugin the roster may
+    /// not carry yet (the dependency-consent follow-up) or that a
+    /// ``PluginRequiredNote`` names.
+    func enable(named name: String, allowToolOverride: Bool? = nil) {
         // Flags first, then `--`, then the positional: argparse reads
         // everything after the first `--` as a positional, so a flag appended
         // afterwards would exit 2.
@@ -460,7 +479,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
         if let allowToolOverride, supportsToolOverrideFlags {
             args.append(allowToolOverride ? "--allow-tool-override" : "--no-allow-tool-override")
         }
-        args += ["--", plugin.name]
+        args += ["--", name]
         runAndReload(
             args,
             success: "Enabled",

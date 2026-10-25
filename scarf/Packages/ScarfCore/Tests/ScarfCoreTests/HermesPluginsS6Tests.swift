@@ -85,6 +85,7 @@ struct HermesPluginsS6Tests {
         """
         let outcome = HermesPluginInstallOutcome.parse(output)
         #expect(outcome.enableRefusal == "dependency install skipped (non-interactive)")
+        #expect(outcome.enableRefusedPlugin == "weather")
         #expect(outcome.needsDependencyConsent)
         #expect(!outcome.enabled)
     }
@@ -95,6 +96,7 @@ struct HermesPluginsS6Tests {
         #expect(!declined.needsDependencyConsent)
         let enabled = HermesPluginInstallOutcome.parse("✓ Plugin weather enabled.\n")
         #expect(enabled.enableRefusal == nil)
+        #expect(enabled.enableRefusedPlugin == nil)
         #expect(!enabled.needsDependencyConsent)
         #expect(enabled.enabled)
     }

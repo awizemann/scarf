@@ -34,6 +34,105 @@ struct MemoryProviderPluginS6Tests {
     }
 }
 
+/// Records every argv the injected runner sees.
+private final class ArgvLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var calls: [[String]] = []
+    func append(_ args: [String]) { lock.lock(); calls.append(args); lock.unlock() }
+    var all: [[String]] { lock.lock(); defer { lock.unlock() }; return calls }
+}
+
+@Suite("S6 · plugin install dependency consent and readiness")
+@MainActor
+struct PluginDependencyConsentS6Tests {
+    private static let refusedInstall = """
+    weather declares Python dependencies:
+      - requests>=2
+    Non-interactive install — skipping dependency install. Run `hermes plugins enable` when ready to prepare them.
+    ✗ Cannot enable weather: dependency install skipped (non-interactive)
+    The plugin stays installed but disabled; re-enable after resolving the conflict.
+    Plugin installed but not enabled. Run `hermes plugins enable weather` to activate.
+    """
+
+    /// A scratch local home — a version-cache key no other test shares —
+    /// primed so `cached(for:)` answers without a probe.
+    private static func context(primedAt caps: HermesCapabilities?) -> ServerContext {
+        let home = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("scarf-s6-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let ctx = ServerContext.local(home: home)
+        if let caps { HermesVersionCache.shared.primeForTesting(caps, for: ctx) }
+        return ctx
+    }
+
+    private static func awaitMessage(on vm: PluginsViewModel) async -> String? {
+        for _ in 0..<400 {
+            if let message = vm.message, !message.hasPrefix("Installing") { return message }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return vm.message
+    }
+
+    /// v0.21.6+: the refusal is a failure and arms the consent dialog with
+    /// the INSTALLED name.
+    @Test func flaggedHostArmsTheConsentDialog() async {
+        let vm = PluginsViewModel(context: Self.context(primedAt: caps(0, 22, 5)),
+                                  cliRunner: { _, _ in (Self.refusedInstall, 0) })
+        vm.install("https://github.com/acme/weather", enable: true)
+        let message = await Self.awaitMessage(on: vm)
+        #expect(message?.contains("not enabled: dependency install skipped") == true)
+        #expect(vm.messageIsFailure)
+        #expect(vm.pendingDependencyConsent == "weather")
+    }
+
+    /// Below the `hasPluginInstallDepsConsent` floor (and with the version
+    /// unknown) the new arm stays unreachable — the old verdict stands (C1).
+    @Test func unflaggedHostKeepsTheOldVerdict() async {
+        for primed in [caps(0, 21, 5), nil] {
+            let vm = PluginsViewModel(context: Self.context(primedAt: primed),
+                                      cliRunner: { _, _ in (Self.refusedInstall, 0) })
+            vm.install("weather", enable: true)
+            let message = await Self.awaitMessage(on: vm)
+            #expect(message == "Installed (not enabled)")
+            #expect(vm.pendingDependencyConsent == nil)
+        }
+    }
+
+    /// The consent follow-up is `plugins enable`, never a forced re-install:
+    /// `--force` would also accept a caution scan verdict and re-clone.
+    @Test func consentRunsPlainEnable() async {
+        let log = ArgvLog()
+        let vm = PluginsViewModel(context: Self.context(primedAt: caps(0, 22, 5)),
+                                  cliRunner: { args, _ in log.append(args); return ("✓ Plugin weather enabled.\n", 0) })
+        vm.pendingDependencyConsent = "weather"
+        vm.enableWithDependencyConsent("weather")
+        for _ in 0..<400 where log.all.isEmpty { try? await Task.sleep(nanoseconds: 5_000_000) }
+        let first = log.all.first ?? []
+        #expect(first == ["plugins", "enable", "--", "weather"])
+        #expect(!first.contains("--force"))
+        #expect(!first.contains("--yes-deps"))
+        #expect(!first.contains("install"))
+        #expect(vm.pendingDependencyConsent == nil)
+    }
+
+    @Test func readinessNeedsEnabledUnlessActivatedByConfig() {
+        let vm = PluginsViewModel(context: Self.context(primedAt: nil), cliRunner: { _, _ in ("", 0) })
+        func plugin(_ name: String, _ activation: HermesPluginActivation) -> HermesPlugin {
+            HermesPlugin(name: name, source: name, activation: activation,
+                         description: "", version: "", path: "", toolOverride: false)
+        }
+        vm.plugins = [plugin("spotify", .enabled), plugin("homeassistant", .disabled),
+                      plugin("singularity", .notEnabled), plugin("honcho", .notEnabled)]
+        #expect(vm.isPluginReady("spotify"))
+        #expect(!vm.isPluginReady("homeassistant"))
+        #expect(!vm.isPluginReady("singularity"))
+        #expect(vm.pluginActivation("homeassistant") == .disabled)
+        #expect(vm.isPluginReady("honcho", activatesByConfig: true))
+        #expect(!vm.isPluginReady("mem0", activatesByConfig: true))
+        #expect(vm.pluginActivation("mem0") == nil)
+    }
+}
+
 @Suite("S6 · Spotify login moved to the spotify plugin")
 @MainActor
 struct SpotifyPluginLoginS6Tests {

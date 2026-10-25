@@ -286,6 +286,10 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     /// `:675-683` @ v0.22.5). `git grep "Cannot enable" v2026.9.24 --
     /// hermes_cli/` finds no plugins line, so an older host never sets it.
     public let enableRefusal: String?
+    /// The `<name>` of that same line — the INSTALLED plugin name
+    /// (`installed_name`, `plugins_cmd_install.py:676` @ v0.22.5), which is
+    /// what `plugins enable` takes; the install identifier may be a URL.
+    public let enableRefusedPlugin: String?
 
     /// `_ConsentRefusal("dependency install skipped (non-interactive)", …)`
     /// (`plugins_cmd_install.py:150` @ v0.21.6 and v0.22.5) — the refusal an
@@ -294,7 +298,8 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     public static let nonInteractiveDepsRefusal = "dependency install skipped (non-interactive)"
 
     /// The enable was refused ONLY for want of dependency consent, so
-    /// re-running the install with `--yes-deps` is the fix.
+    /// `hermes plugins enable <name>` — Hermes's own next step
+    /// (`plugins_cmd_install.py:148`) — is the fix.
     public var needsDependencyConsent: Bool { enableRefusal == Self.nonInteractiveDepsRefusal }
 
     public init(
@@ -305,7 +310,8 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
         notes: String,
         capabilitiesNotGranted: Bool = false,
         configWriteRefusal: String? = nil,
-        enableRefusal: String? = nil
+        enableRefusal: String? = nil,
+        enableRefusedPlugin: String? = nil
     ) {
         self.enabled = enabled
         self.installedDisabled = installedDisabled
@@ -315,6 +321,7 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
         self.capabilitiesNotGranted = capabilitiesNotGranted
         self.configWriteRefusal = configWriteRefusal
         self.enableRefusal = enableRefusal
+        self.enableRefusedPlugin = enableRefusedPlugin
     }
 
     /// Parses `hermes plugins install` stdout.
@@ -341,11 +348,15 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
         let enabled = printedEnabled && refusal == nil
         // `✗ Cannot enable <name>: <reason>` — anchored at column 0 after the
         // glyph, the reason is everything after the first `: ` (a plugin name
-        // carries no colon-space).
-        let enableRefusal: String? = HermesCLIVerdict.significantLines(output).lazy
+        // carries no colon-space); the name sits between the prefix and it.
+        let refusedLine = HermesCLIVerdict.significantLines(output).lazy
             .map(HermesCLIVerdict.unglyphed)
             .first { $0.hasPrefix("Cannot enable ") }
-            .flatMap { head in head.range(of: ": ").map { String(head[$0.upperBound...]) } }
+        let refusedSplit = refusedLine.flatMap { head in head.range(of: ": ").map { (head, $0) } }
+        let enableRefusal = refusedSplit.map { String($0.0[$0.1.upperBound...]) }
+        let enableRefusedPlugin = refusedSplit
+            .map { String($0.0[$0.0.index($0.0.startIndex, offsetBy: "Cannot enable ".count)..<$0.1.lowerBound]) }
+            .flatMap { $0.isEmpty ? nil : $0 }
         var missing: [String] = []
         for raw in output.components(separatedBy: "\n") {
             let trimmed = raw.trimmingCharacters(in: .whitespaces)
@@ -363,7 +374,8 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
             notes: output.trimmingCharacters(in: .whitespacesAndNewlines),
             capabilitiesNotGranted: output.contains(HermesCLIMarkers.pluginsConsentRefusal),
             configWriteRefusal: refusal,
-            enableRefusal: enableRefusal
+            enableRefusal: enableRefusal,
+            enableRefusedPlugin: enableRefusedPlugin
         )
     }
 }
