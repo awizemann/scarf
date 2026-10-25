@@ -2599,6 +2599,9 @@ final class ChatController {
             vm.handleACPEvent(
                 .promptComplete(sessionId: sessionId, response: result)
             )
+            // Gateway-backed ACP announces no compression rotation; follow
+            // it from state.db (no-op on every other host).
+            await vm.followCompressionTipFromDB()
             // A real turn (not an ACP slash command, which stores nothing)
             // has stored the session: apply a pending `/new <name>`.
             if result.stopReason == "end_turn", !wireText.hasPrefix("/") {
@@ -3476,9 +3479,13 @@ final class ChatController {
             // load error lands in the catch below as a failed state with
             // Retry, never a silent new session.
             let source = await SessionResume.fetchSource(context: context, sessionId: sessionID)
+            // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
+            // too, and refuses an unknown one with a JSON-RPC error.
+            let gatewayBacked = await capabilitiesProvider(context).hasGatewayBackedACP
             let outcome = try await SessionResume.resolve(
                 sessionId: sessionID,
                 source: source,
+                gatewayBacked: gatewayBacked,
                 load: { id in
                     let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: id)
                     return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
@@ -4107,9 +4114,14 @@ private struct PermissionSheet: View {
                         Text(permission.title)
                             .font(.headline)
                             .textSelection(.enabled)
-                        Text("Kind: \(permission.kind)")
-                            .font(.caption)
-                            .foregroundStyle(ScarfColor.foregroundMuted)
+                        // A clarify question or a model-switch confirmation
+                        // (gateway-backed ACP only) has no tool kind worth
+                        // naming.
+                        if permission.prompt == .toolApproval {
+                            Text("Kind: \(permission.kind)")
+                                .font(.caption)
+                                .foregroundStyle(ScarfColor.foregroundMuted)
+                        }
                     }
                     .padding(.vertical, 4)
                 }
@@ -4143,7 +4155,7 @@ private struct PermissionSheet: View {
                     }
                 }
             }
-            .navigationTitle("Agent permission")
+            .navigationTitle(permission.prompt.heading ?? String(localized: "Agent permission"))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 // Explicit dismissal affordance (HIG consistency with

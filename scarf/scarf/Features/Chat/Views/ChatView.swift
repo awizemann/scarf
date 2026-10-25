@@ -659,6 +659,10 @@ struct ChatView: View {
                 title: permission.title,
                 kind: permission.kind,
                 options: permission.options,
+                heading: permission.prompt.heading,
+                // Tool approvals keep their styling (C1); the gateway-only
+                // cards style `skip` / `deny` by option kind.
+                optionAllows: permission.prompt == .toolApproval ? nil : permission.optionAllows,
                 onRespond: { optionId in
                     viewModel.respondToPermission(
                         requestId: permission.requestId,
@@ -838,6 +842,14 @@ struct PermissionApprovalView: View {
     let title: String
     let kind: String
     let options: [(optionId: String, name: String)]
+    /// The heading for a request that is not a tool approval (a clarify
+    /// question, a model-switch confirmation —
+    /// `RichChatViewModel.PermissionPrompt`); nil keeps "Tool Approval
+    /// Required".
+    var heading: String? = nil
+    /// Whether an option allows (its ACP kind first,
+    /// `PendingPermission.optionAllows`); nil keeps the `deny`-id rule.
+    var optionAllows: ((String) -> Bool)? = nil
     let onRespond: (String) -> Void
     /// Approve this request AND put the session into `accept_edits` so
     /// the rest of this chat's edits stop asking. Passed the same
@@ -884,8 +896,13 @@ struct PermissionApprovalView: View {
                 .font(.title)
                 .foregroundStyle(kindColor)
 
-            Text("Tool Approval Required")
-                .font(.headline)
+            if let heading {
+                Text(heading)
+                    .font(.headline)
+            } else {
+                Text("Tool Approval Required")
+                    .font(.headline)
+            }
 
             // The tool detail can be an entire security-scanned script.
             // A bounded, scrollable well keeps the dialog a fixed size no
@@ -924,7 +941,7 @@ struct PermissionApprovalView: View {
                 ForEach(Array(options.enumerated()), id: \.element.optionId) { idx, option in
                     let label = idx < 9 ? "\(idx + 1). \(option.name)" : option.name
                     Group {
-                        if option.optionId == "deny" {
+                        if optionAllows.map({ !$0(option.optionId) }) ?? (option.optionId == "deny") {
                             Button(label) {
                                 onRespond(option.optionId)
                                 dismiss()

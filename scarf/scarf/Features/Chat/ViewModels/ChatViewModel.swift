@@ -1833,13 +1833,23 @@ final class ChatViewModel {
             }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }
         }
+        // Gateway-backed ACP runs a mid-turn `/queue <text>` as its own
+        // admission and answers THIS `session/prompt` only when that queued
+        // prompt has run (acp_adapter/gateway_commands.py:286 →
+        // gateway_server.py:621-704 @ v0.22.5), while the running turn's own
+        // call returns first. Counted as a turn, the queue keeps the chat
+        // working (and its chip up) until the queued prompt is done;
+        // counted as non-interruptive, the running turn's return ended the
+        // busy period with the queued prompt still to run.
+        let queueHoldsTurn = parsed.name == "queue" && isNonInterruptive && wasAgentWorking
+            && richChatViewModel.capabilitiesGate.hasGatewayBackedACP
         launchPromptTask(
             client: client,
             sessionId: sessionId,
             wireText: wireText,
             images: images,
             contextNotes: [],
-            isNonInterruptive: isNonInterruptive
+            isNonInterruptive: isNonInterruptive && !queueHoldsTurn
         )
     }
 
@@ -1894,6 +1904,17 @@ final class ChatViewModel {
                 if Self.isModelSwitchCommand(wireText),
                    let reply = richChatViewModel.messages.last(where: { $0.isAssistant })?.content {
                     await followTypedModelSwitch(reply: reply)
+                }
+                // Gateway-backed ACP announces no compression rotation
+                // (`followCompressionTipFromDB`); follow it from state.db,
+                // and list the chain under its new tip as the provenance
+                // path in `startACPEventLoop` does.
+                if await richChatViewModel.followCompressionTipFromDB() {
+                    SessionLineageIndex.shared.record(
+                        server: context.id,
+                        lineage: richChatViewModel.transcriptSessionIds
+                    )
+                    scheduleSessionsRefresh()
                 }
                 // Re-fetch session from DB to pick up cost/token data Hermes may have written
                 await richChatViewModel.refreshSessionFromDB()
@@ -2011,6 +2032,13 @@ final class ChatViewModel {
                     providerID: targetProviderID
                 )
                 self?.logger.info("mid-chat model switch to \(targetModelID) (provider: \(targetProviderID ?? "auto")) succeeded")
+            } catch where ACPClientError.isGatewayRefusal(error, reason: "model_switch_cancelled") {
+                // Gateway-backed ACP asked to confirm a guarded model and
+                // the user declined (`set_session_model`,
+                // acp_adapter/gateway_server.py:483-485 @ v0.22.5): nothing
+                // changed, which is not an error.
+                self?.logger.info("mid-chat model switch to \(targetModelID) declined at Hermes's confirmation")
+                self?.currentModelPreset = previous
             } catch {
                 self?.logger.warning("mid-chat model switch failed: \(error.localizedDescription)")
                 self?.currentModelPreset = previous
@@ -3167,7 +3195,13 @@ final class ChatViewModel {
     /// Collapse an agent-supplied permission option id onto the taxonomy's
     /// two-value `decision`. The id itself is never recorded: Hermes picks
     /// those strings and a future one could carry anything.
-    static func analyticsPermissionDecision(optionId: String) -> UsageEvent.PermissionDecision {
+    static func analyticsPermissionDecision(optionId: String, kind: String? = nil) -> UsageEvent.PermissionDecision {
+        // The option's ACP kind decides when the request carried one
+        // (`RichChatViewModel.permissionOptionAllows`): a clarify card's
+        // `skip` is `reject_once` with no deny marker in its id.
+        if let kind = kind?.lowercased(), !kind.isEmpty {
+            return kind.hasPrefix("reject") ? .deny : .approve
+        }
         let id = optionId.lowercased()
         // Substring match, not equality: Hermes ships `reject_once` /
         // `reject_always` alongside a bare `deny`. Deliberately no `"no"`
@@ -3184,8 +3218,10 @@ final class ChatViewModel {
     /// open), and answering the head would misroute the decision.
     func respondToPermission(requestId: Int, optionId: String) {
         guard let client = acpClient else { return }
+        let kind = richChatViewModel.permissionQueue
+            .first { $0.requestId == requestId }?.optionKinds[optionId]
         Analytics.record(.permissionPromptResponded(
-            decision: Self.analyticsPermissionDecision(optionId: optionId)
+            decision: Self.analyticsPermissionDecision(optionId: optionId, kind: kind)
         ))
         Task {
             await client.respondToPermission(requestId: requestId, optionId: optionId)
@@ -3679,9 +3715,14 @@ final class ChatViewModel {
         if let listed { source = listed } else {
             source = await SessionResume.fetchSource(context: context, sessionId: sessionId)
         }
+        // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
+        // too, and refuses an unknown one with a JSON-RPC error. The probed
+        // capabilities, awaited: a guess here would skip a loadable session.
+        let gatewayBacked = await capabilitiesForProjectContext().hasGatewayBackedACP
         return try await SessionResume.resolve(
             sessionId: sessionId,
             source: source,
+            gatewayBacked: gatewayBacked,
             load: { id in
                 let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: id)
                 return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)

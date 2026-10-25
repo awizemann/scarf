@@ -1171,6 +1171,18 @@ public enum ACPClientError: Error, LocalizedError {
         }
     }
 
+    /// Whether `error` is gateway-backed ACP's refusal `reason`. The
+    /// gateway path raises a bare reason code (`GatewayClientError` /
+    /// `GatewayRPCError`, hermes_cli/gateway_client.py:46-58 @ v0.22.5;
+    /// `str(exc)` is the code), which the acp lib wraps as `-32603` with
+    /// the code alone in `data.details` (acp/connection.py:228-233,
+    /// agent-client-protocol 0.9.0). Matches that exact code only — never
+    /// any other `-32603`.
+    public static func isGatewayRefusal(_ error: Error, reason: String) -> Bool {
+        guard case let ACPClientError.rpcError(code, _, details) = error, code == -32603 else { return false }
+        return details?.trimmingCharacters(in: .whitespacesAndNewlines) == reason
+    }
+
     /// Pick the most signal-rich line from a stderr tail for the
     /// user-facing error summary.
     ///
@@ -1276,6 +1288,22 @@ public enum ACPErrorHint {
 
     public static func classify(errorMessage: String, stderrTail: String) -> Classification? {
         let haystack = errorMessage + "\n" + stderrTail
+
+        // Gateway-backed ACP (0.22.1, 0.22.3+) refusing to attach to the
+        // profile gateway. Both are bare reason codes, which reach the
+        // banner as "<code> (ACP error -32603)" (`detailsLead`), so they
+        // are matched on the message alone: `acp_policy_unavailable` is a
+        // running gateway too old to serve editor sessions (it lacks the
+        // `acp-editor-policy-v1` capability, `new_session`,
+        // acp_adapter/gateway_server.py:269-274 @ v0.22.5) and
+        // `profile_mismatch` a gateway that answers for another profile
+        // (`_client`, :164-166). No in-process adapter tag raises either.
+        if errorMessage.contains("acp_policy_unavailable") {
+            return Classification(hint: "The Hermes gateway that is running is older than this Hermes and can't serve chats. Restart it (`hermes gateway restart`), then try again.")
+        }
+        if errorMessage.contains("profile_mismatch") {
+            return Classification(hint: "The Hermes gateway that answered belongs to a different profile than this chat. Check which gateway is running (`hermes gateway status`) and restart this profile's gateway.")
+        }
 
         // SSH-level failures come first — they apply only to remote
         // contexts and the patterns are unambiguous (system ssh prints

@@ -494,6 +494,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     // chat menu. Model switching mid-chat remains the `session/set_model`
     // path, which is ungated (present at every adapter tag — see the
     // retirement note in the v0.13 group).
+    //
+    // "Not ACP" in this group means the in-process adapter. Gateway-backed
+    // ACP (``hasGatewayBackedACP``) advertises 14 commands
+    // (`COMMANDS`, acp_adapter/gateway_session_meta.py:26-41 @ v0.22.5),
+    // answers `/new` and `/clear` as the session's `reset`
+    // (`ROUTES`, acp_adapter/gateway_commands.py:281-295), and forwards
+    // every other registered command to the owner's `slash.exec`, which
+    // runs what it serves for the session and refuses the rest by name
+    // (`run_command`, :21-30) — never sent to the model as prompt text
+    // (`_slash_command`, gateway_server.py:25-43).
 
     /// `/subgoal` slash command — appends user-specified success criteria
     /// to the active `/goal` loop. Argument forms: `<text>`, `remove N`,
@@ -518,8 +528,10 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `/sessions` slash command — browse and resume previous sessions
     /// from inside an active chat (v0.14+).
     ///
-    /// **CLI/gateway only, NOT ACP** (`hermes_cli/commands.py:148` @
-    /// v2026.9.7; absent from `acp_adapter/` at every tag).
+    /// **CLI/gateway only, NOT in-process ACP** (`hermes_cli/commands.py:148`
+    /// @ v2026.9.7; absent from the in-process adapter at every tag). On
+    /// gateway-backed ACP it goes to the owner's `slash.exec` (see the note
+    /// above `hasSubgoal`).
     ///
     /// **No consumer** — P34 removed its slash-menu row. Scarf exposes
     /// session browse via the sidebar, which is the native equivalent.
@@ -531,9 +543,10 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// for OpenAI/Codex models (v0.14+). Argument forms:
     /// `[auto|codex_app_server]`.
     ///
-    /// **CLI/gateway only, NOT ACP** (`hermes_cli/commands.py:156-158` @
-    /// v2026.9.7, alias `codex_runtime`; absent from `acp_adapter/` at
-    /// every tag).
+    /// **CLI/gateway only, NOT in-process ACP** (`hermes_cli/commands.py:156-158`
+    /// @ v2026.9.7, alias `codex_runtime`; absent from the in-process
+    /// adapter at every tag). On gateway-backed ACP it goes to the owner's
+    /// `slash.exec` (see the note above `hasSubgoal`).
     ///
     /// **No consumer** — P34 removed its slash-menu row. Kept because the
     /// floor is source-verified and rediscovering it costs a tag walk.

@@ -17,6 +17,18 @@ import os
 /// session in the same cwd, SAID OUT LOUD in the transcript — the model has
 /// none of the earlier context, whatever the replayed transcript shows.
 ///
+/// Gateway-backed ACP (Hermes 0.22.1 and 0.22.3+,
+/// `HermesCapabilities.hasGatewayBackedACP`) widens both halves. Its
+/// sessions are stored as `source = 'local'` (gateway/session_policy.py:85-89
+/// @ v0.22.5; the surface moves to `created_source`), and `session/load`
+/// also adopts the old local CLI/TUI/GUI rows (`_attach_info`,
+/// acp_adapter/gateway_server.py:327-338 → `LEGACY_LOCAL_SOURCES`,
+/// hermes_state_local_migration.py:15). A load it can't serve is a
+/// JSON-RPC error, not an empty result: `GatewayRPCError("not_found")`
+/// leaves `load_session` (`_resume`, :340-409) and the acp lib wraps it as `-32603`
+/// with `data.details = "not_found"` (acp/connection.py:228-233,
+/// agent-client-protocol 0.9.0).
+///
 /// Bot Chat makes the same source call up front
 /// (`CanonicalBotChat.isACPBorn`) and picks a different transport instead;
 /// chat has no second transport, so it continues as a new session.
@@ -57,13 +69,30 @@ public enum SessionResume {
         }
     }
 
+    /// The sources a gateway-backed `session/load` can attach: `local`
+    /// (every acp/cli/tui/gui session the gateway created,
+    /// gateway/session_policy.py:85-89 @ v0.22.5) plus the legacy local
+    /// rows it adopts on first attach (`LEGACY_LOCAL_SOURCES`,
+    /// hermes_state_local_migration.py:15 @ v0.22.5). Messaging, webui,
+    /// cron and API rows still need their own authority
+    /// (`validate_legacy_row`, :44-56).
+    static let gatewayLoadableSources: Set<String> = [
+        "local", "acp", "cli", "tui", "gui", "desktop", "oneshot", "tool",
+    ]
+
     /// The source a resume must NOT try to load, or nil when a load is
     /// worth attempting. An unknown source (nil / empty — the lookup
     /// failed, or a pre-`source` row) attempts the load: Hermes is the
     /// authority, and its not-restorable answer is still handled.
-    public static func unloadableSource(_ source: String?) -> String? {
+    ///
+    /// - Parameter gatewayBacked: the host runs gateway-backed ACP
+    ///   (`HermesCapabilities.hasGatewayBackedACP`); then every
+    ///   ``gatewayLoadableSources`` source is attempted too. False keeps
+    ///   the `acp`-only rule of the in-process adapter.
+    public static func unloadableSource(_ source: String?, gatewayBacked: Bool = false) -> String? {
         guard let source = source?.trimmingCharacters(in: .whitespacesAndNewlines),
               !source.isEmpty, source != "acp" else { return nil }
+        if gatewayBacked, gatewayLoadableSources.contains(source) { return nil }
         return source
     }
 
@@ -71,8 +100,13 @@ public enum SessionResume {
     /// other error (a timeout, a dead process, a JSON-RPC error such as a
     /// future -32602) is transient or real, and must surface as an error
     /// with a retry — never be papered over by a new session.
-    public static func isNotRestorable(_ error: Error) -> Bool {
+    ///
+    /// - Parameter gatewayBacked: also accept gateway-backed ACP's
+    ///   not-found refusal (`-32603`, details exactly `not_found` — see the
+    ///   type doc). Any other `-32603` still surfaces.
+    public static func isNotRestorable(_ error: Error, gatewayBacked: Bool = false) -> Bool {
         if case ACPClientError.sessionNotRestorable = error { return true }
+        if gatewayBacked, ACPClientError.isGatewayRefusal(error, reason: "not_found") { return true }
         return false
     }
 
@@ -86,11 +120,12 @@ public enum SessionResume {
     public static func resolve(
         sessionId: String,
         source: String?,
+        gatewayBacked: Bool = false,
         load: (String) async throws -> (sessionId: String, head: String?),
         newSession: () async throws -> String,
         isolation: isolated (any Actor)? = #isolation
     ) async throws -> Outcome {
-        if let unloadable = unloadableSource(source) {
+        if let unloadable = unloadableSource(source, gatewayBacked: gatewayBacked) {
             let newId = try await newSession()
             noteFallback(from: sessionId, to: newId, reason: .nonACPSource(unloadable))
             return .continuedAsNew(sessionId: newId, reason: .nonACPSource(unloadable))
@@ -98,7 +133,7 @@ public enum SessionResume {
         do {
             let loaded = try await load(sessionId)
             return .loaded(sessionId: loaded.sessionId, head: loaded.head)
-        } catch where isNotRestorable(error) {
+        } catch where isNotRestorable(error, gatewayBacked: gatewayBacked) {
             let newId = try await newSession()
             noteFallback(from: sessionId, to: newId, reason: .notRestorable)
             return .continuedAsNew(sessionId: newId, reason: .notRestorable)

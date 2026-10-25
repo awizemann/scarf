@@ -251,6 +251,13 @@ public enum ACPEvent: @unchecked Sendable {
         updatedAt: String?,
         provenance: ACPSessionProvenance? = nil
     )
+    /// `current_mode_update`: the session's edit-approval mode changed
+    /// outside this client's own `session/set_mode` (another surface's
+    /// `edit_policy` change). Only gateway-backed ACP sends it
+    /// (`_project_mode`, acp_adapter/gateway_server.py:1051-1062 @
+    /// v0.22.5); no in-process adapter tag does (absent from
+    /// `acp_adapter/` @ v2026.9.24 and v0.22.0).
+    case currentModeUpdate(sessionId: String, modeId: String)
     case connectionLost(reason: String)
     case unknown(sessionId: String, type: String)
 
@@ -268,6 +275,7 @@ public enum ACPEvent: @unchecked Sendable {
              let .promptComplete(sid, _),
              let .availableCommands(sid, _),
              let .sessionInfoUpdate(sid, _, _, _),
+             let .currentModeUpdate(sid, _),
              let .unknown(sid, _):
             return sid
         case let .permissionRequest(sid, _, _):
@@ -408,17 +416,27 @@ public struct ACPPermissionRequestEvent: Sendable {
     /// including when it gave up waiting and denied the tool itself.
     /// Empty when the request carried none.
     public let toolCallId: String
+    /// Each option's ACP `PermissionOptionKind` (`allow_once`,
+    /// `allow_always`, `reject_once`, `reject_always`), keyed by option id.
+    /// `kind` is a required field of ACP's `PermissionOption` and Hermes
+    /// sets it on every option it builds (acp_adapter/permissions.py:42-50,
+    /// edit_approval.py:233-234 @ v2026.9.24; :45-47 @ v2026.3.30), so the
+    /// answer's meaning comes from here, not from the id's text. An option
+    /// without one is simply absent.
+    public let optionKinds: [String: String]
 
     public init(
         toolCallTitle: String,
         toolCallKind: String,
         options: [(optionId: String, name: String)],
-        toolCallId: String = ""
+        toolCallId: String = "",
+        optionKinds: [String: String] = [:]
     ) {
         self.toolCallTitle = toolCallTitle
         self.toolCallKind = toolCallKind
         self.options = options
         self.toolCallId = toolCallId
+        self.optionKinds = optionKinds
     }
 }
 
@@ -629,6 +647,12 @@ public enum ACPEventParser {
                 provenance: ACPSessionProvenance(meta: update["_meta"])
             )
 
+        case "current_mode_update":
+            guard let modeId = update["currentModeId"] as? String, !modeId.isEmpty else {
+                return .unknown(sessionId: sessionId, type: updateType)
+            }
+            return .currentModeUpdate(sessionId: sessionId, modeId: modeId)
+
         default:
             return .unknown(sessionId: sessionId, type: updateType)
         }
@@ -648,11 +672,19 @@ public enum ACPEventParser {
             return (optionId: id, name: name)
         }
 
+        var optionKinds: [String: String] = [:]
+        for opt in optionsRaw {
+            if let id = opt["optionId"] as? String, let kind = opt["kind"] as? String, !kind.isEmpty {
+                optionKinds[id] = kind
+            }
+        }
+
         let event = ACPPermissionRequestEvent(
             toolCallTitle: toolCall["title"] as? String ?? "",
             toolCallKind: toolCall["kind"] as? String ?? "other",
             options: options,
-            toolCallId: toolCall["toolCallId"] as? String ?? ""
+            toolCallId: toolCall["toolCallId"] as? String ?? "",
+            optionKinds: optionKinds
         )
         return .permissionRequest(sessionId: sessionId, requestId: requestId, request: event)
     }

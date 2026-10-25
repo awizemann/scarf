@@ -532,10 +532,11 @@ public final class RichChatViewModel {
     public func resolvePermission(requestId: Int, answeredWith optionId: String) {
         if let answered = permissionQueue.first(where: { $0.requestId == requestId }),
            !answered.toolCallId.isEmpty {
-            answeredPermissionAllowed[answered.toolCallId] = Self.permissionOptionAllows(optionId)
+            let allowed = answered.optionAllows(optionId)
+            answeredPermissionAllowed[answered.toolCallId] = allowed
             if answeredPermissionAllowed.count > 16 {
                 answeredPermissionAllowed.removeAll()
-                answeredPermissionAllowed[answered.toolCallId] = Self.permissionOptionAllows(optionId)
+                answeredPermissionAllowed[answered.toolCallId] = allowed
             }
         }
         resolvePermission(requestId: requestId)
@@ -547,11 +548,21 @@ public final class RichChatViewModel {
     @ObservationIgnored
     private var answeredPermissionAllowed: [String: Bool] = [:]
 
-    /// Whether an option id is an allow. Hermes's ids are `allow_once`,
-    /// `allow_session`, `allow_always`, `deny`, `deny_always`
-    /// (acp_adapter/permissions.py:33-50 @ v2026.9.24); anything with a
-    /// deny-like marker is a denial, as `ChatViewModel` classifies them.
-    nonisolated static func permissionOptionAllows(_ optionId: String) -> Bool {
+    /// Whether an option is an allow. The option's ACP `kind` decides when
+    /// the request carried one: `reject_once` / `reject_always` are
+    /// denials, every other kind an allow. Hermes has stamped a kind that
+    /// agrees with its id on every option it ever built (`allow_once` /
+    /// `allow_session` / `allow_always` are allow kinds, `deny` /
+    /// `deny_always` reject kinds — acp_adapter/permissions.py:42-50 @
+    /// v2026.9.24, :45-47 @ v2026.3.30), so for those requests nothing
+    /// changes; the ids alone misread gateway-backed ACP's clarify card,
+    /// whose `skip` option is `reject_once` (acp_adapter/elicitation.py:64
+    /// @ v0.22.5). Without a kind, anything with a deny-like marker in the
+    /// id is a denial, as `ChatViewModel` classifies them.
+    nonisolated static func permissionOptionAllows(_ optionId: String, kind: String? = nil) -> Bool {
+        if let kind = kind?.lowercased(), !kind.isEmpty {
+            return !kind.hasPrefix("reject")
+        }
         let id = optionId.lowercased()
         return !["deny", "reject", "decline", "cancel"].contains { id.contains($0) }
     }
@@ -2157,19 +2168,76 @@ public final class RichChatViewModel {
         /// The request's tool-call id, which Hermes closes when it stops
         /// waiting (see `ACPPermissionRequestEvent.toolCallId`).
         public let toolCallId: String
+        /// Option id → ACP option kind (see
+        /// `ACPPermissionRequestEvent.optionKinds`).
+        public let optionKinds: [String: String]
+        /// What the card asks. `.toolApproval` everywhere except on
+        /// gateway-backed ACP, which reuses `session/request_permission`
+        /// for two other questions (see ``PermissionPrompt``).
+        public let prompt: PermissionPrompt
 
         public init(
             requestId: Int,
             title: String,
             kind: String,
             options: [(optionId: String, name: String)],
-            toolCallId: String = ""
+            toolCallId: String = "",
+            optionKinds: [String: String] = [:],
+            prompt: PermissionPrompt = .toolApproval
         ) {
             self.requestId = requestId
             self.title = title
             self.kind = kind
             self.options = options
             self.toolCallId = toolCallId
+            self.optionKinds = optionKinds
+            self.prompt = prompt
+        }
+
+        /// Whether answering with `optionId` allows (see
+        /// `RichChatViewModel.permissionOptionAllows(_:kind:)`).
+        public func optionAllows(_ optionId: String) -> Bool {
+            RichChatViewModel.permissionOptionAllows(optionId, kind: optionKinds[optionId])
+        }
+    }
+
+    /// What a `session/request_permission` card asks the user.
+    ///
+    /// Gateway-backed ACP (`HermesCapabilities.hasGatewayBackedACP`) sends
+    /// two requests that are not tool approvals, told apart by their
+    /// tool-call id: the `clarify` tool's question (`clarify-<id>`, the
+    /// question as the title and one `choice-N` option per answer plus
+    /// `skip`, acp_adapter/elicitation.py:55-71 @ v0.22.5) and the
+    /// confirmation a guarded model switch asks for (`model-confirm-<hex>`,
+    /// `_model_confirmer`, acp_adapter/gateway_server.py:533-563). No
+    /// in-process adapter tag uses either id (`perm-check-N` /
+    /// `edit-approval-N` only, acp_adapter/permissions.py @ v2026.9.24).
+    public enum PermissionPrompt: Equatable, Sendable {
+        case toolApproval
+        case clarify
+        case modelConfirmation
+
+        /// Classify a request by its tool-call id. Always `.toolApproval`
+        /// off gateway-backed hosts (C1).
+        public init(toolCallId: String, gatewayBacked: Bool) {
+            guard gatewayBacked else { self = .toolApproval; return }
+            if toolCallId.hasPrefix("clarify-") {
+                self = .clarify
+            } else if toolCallId.hasPrefix("model-confirm-") {
+                self = .modelConfirmation
+            } else {
+                self = .toolApproval
+            }
+        }
+
+        /// The card's heading, or nil for a tool approval (each platform
+        /// keeps its own wording for those).
+        public var heading: String? {
+            switch self {
+            case .toolApproval: return nil
+            case .clarify: return String(localized: "Hermes Has a Question")
+            case .modelConfirmation: return String(localized: "Confirm Model Switch")
+            }
         }
     }
 
@@ -2301,6 +2369,38 @@ public final class RichChatViewModel {
             }
             await dataService.close()
         }
+    }
+
+    /// Follow a compression rotation the host did not announce, from
+    /// state.db (read-only, C3). Returns true when the transcript's lineage
+    /// grew.
+    ///
+    /// Gateway-backed ACP's `session_info_update` carries only the title —
+    /// no `_meta.hermes.sessionProvenance` (`title_update`,
+    /// acp_adapter/gateway_session_meta.py:127-130 @ v0.22.5; provenance
+    /// rides only the new/load replies, `_session_fields`,
+    /// gateway_server.py:297-314) — so `noteSessionRotation` never fires
+    /// on those hosts. The rows still chain the same way
+    /// (`_CHAIN_STEP_SQL`, hermes_state_compression.py:29-49 @ v0.22.5), so
+    /// after a turn the chain is walked forward from the newest row this
+    /// transcript covers. No-op on every other host (C1).
+    @discardableResult
+    public func followCompressionTipFromDB() async -> Bool {
+        guard capabilitiesGate.hasGatewayBackedACP,
+              let from = transcriptSessionIds.last else { return false }
+        // A private data service, like `SessionResume.fetchSource`, so this
+        // read can't close the transcript's own connection under a load.
+        let service = HermesDataService(context: context)
+        guard await service.open() else { return false }
+        let chain = (try? await service.compressionChains(for: [from]))?[from] ?? []
+        await service.close()
+        guard self.transcriptSessionIds.last == from else { return false }
+        var grew = false
+        for id in chain where !transcriptCovers(id) {
+            noteSessionRotation(to: id)
+            grew = true
+        }
+        return grew
     }
 
     /// Tell the transcript what the send path actually put on the wire for
@@ -2712,7 +2812,7 @@ public final class RichChatViewModel {
                 ScarfMon.event(.chatStream, "mac.handleACPEvent.preEngagementDropped", count: 1)
                 return
             case .promptComplete, .permissionRequest, .connectionLost,
-                 .availableCommands, .sessionInfoUpdate, .unknown:
+                 .availableCommands, .sessionInfoUpdate, .currentModeUpdate, .unknown:
                 break
             }
         }
@@ -2741,7 +2841,11 @@ public final class RichChatViewModel {
                 title: request.toolCallTitle,
                 kind: request.toolCallKind,
                 options: request.options,
-                toolCallId: request.toolCallId
+                toolCallId: request.toolCallId,
+                optionKinds: request.optionKinds,
+                prompt: PermissionPrompt(
+                    toolCallId: request.toolCallId,
+                    gatewayBacked: capabilitiesGate.hasGatewayBackedACP)
             ))
         case .promptComplete(_, let response):
             handlePromptComplete(response: response)
@@ -2758,6 +2862,14 @@ public final class RichChatViewModel {
             // internal id, and every DB read must cover it (R14-2).
             if let current = provenance?.currentHermesSessionId {
                 noteSessionRotation(to: current)
+            }
+        case .currentModeUpdate(_, let modeId):
+            // Another surface changed the session's edit-approval mode on
+            // the gateway (`_project_mode`, acp_adapter/gateway_server.py:
+            // 1051-1062 @ v0.22.5): the chip follows. An id Scarf doesn't
+            // know leaves it alone.
+            if capabilitiesGate.hasGatewayBackedACP, let mode = ACPApprovalMode(rawValue: modeId) {
+                activeApprovalMode = mode
             }
         case .unknown:
             break
@@ -3174,11 +3286,24 @@ public final class RichChatViewModel {
                 carriesForward: capabilitiesGate.hasACPStoppedPromptCarriedForward)
         }
 
-        // Accumulate token usage from this prompt
-        acpInputTokens += response.inputTokens
-        acpOutputTokens += response.outputTokens
-        acpThoughtTokens += response.thoughtTokens
-        acpCachedReadTokens += response.cachedReadTokens
+        // The prompt's `usage` is the session's RUNNING total, not this
+        // turn's: Hermes copies the agent's `session_*` counters into the
+        // turn result (`run_agent.py:14337` @ v2026.5.7,
+        // `agent/turn_finalizer.py:30-34` @ v2026.9.24) and the gateway path
+        // sends the owner's session counters (`turn_usage`,
+        // acp_adapter/gateway_session_meta.py:117-124 @ v0.22.5). Summing
+        // them per turn double-counted every earlier turn. v2026.3.30 sent
+        // no usage at all (its result has no `usage` key), which is all
+        // zeros here. Replace only when the response carried a figure: a
+        // synthesized failure result and a usage-less response are zeros
+        // and must not wipe the running total.
+        if response.inputTokens > 0 || response.outputTokens > 0
+            || response.thoughtTokens > 0 || response.cachedReadTokens > 0 {
+            acpInputTokens = response.inputTokens
+            acpOutputTokens = response.outputTokens
+            acpThoughtTokens = response.thoughtTokens
+            acpCachedReadTokens = response.cachedReadTokens
+        }
         // Compression count is a session-wide running total emitted by
         // Hermes; each prompt response carries the latest value, so we
         // replace rather than accumulate. The `max` guard tolerates
@@ -3198,6 +3323,15 @@ public final class RichChatViewModel {
         // server.py:985-1011 @ v2026.9.24), so by the time this turn
         // completes nothing is left queued. Clear the whole mirror, not one
         // entry (S02-F3). A cancelled turn drains the same way.
+        //
+        // Gateway-backed ACP runs a `/queue` prompt as its OWN admission
+        // (`ROUTES['queue']`, acp_adapter/gateway_commands.py:286 → `prompt`
+        // waits for that admission's terminal, gateway_server.py:621-704 @
+        // v0.22.5), so the running turn's `session/prompt` returns BEFORE
+        // the queued one runs. The Mac send path therefore counts that
+        // `/queue` as an interruptive turn (ScarfGo counts every turn), and
+        // the running turn's return never reaches here while it is in
+        // flight: this clear runs when the last queued prompt finished.
         if !queuedPrompts.isEmpty {
             queuedPrompts = []
         }
@@ -3229,7 +3363,7 @@ public final class RichChatViewModel {
             id: id,
             sessionId: sessionId ?? "",
             role: "system",
-            content: "Connection lost: \(reason). Use the Session menu to start or resume a session.",
+            content: Self.connectionLostNote(reason: reason, gatewayBacked: capabilitiesGate.hasGatewayBackedACP),
             toolCallId: nil,
             toolCalls: [],
             toolName: nil,
@@ -3245,6 +3379,19 @@ public final class RichChatViewModel {
         setLiveActivityStatus(nil)
         clearPendingPermissions()
         buildMessageGroups()
+    }
+
+    /// The transcript line for a connection Scarf could not get back.
+    ///
+    /// On gateway-backed ACP the turn is not this process's: closing the
+    /// editor connection tears down only its own view of the session
+    /// (`aclose`, acp_adapter/gateway_server.py:1165-1178 @ v0.22.5) and
+    /// the profile gateway keeps running the turn, so the line must not
+    /// read as if it stopped.
+    nonisolated static func connectionLostNote(reason: String, gatewayBacked: Bool) -> String {
+        gatewayBacked
+            ? String(localized: "Connection lost: \(reason). A turn that was running keeps running on the Hermes gateway — resume the session from the Session menu to see how it ended.")
+            : "Connection lost: \(reason). Use the Session menu to start or resume a session."
     }
 
     // MARK: - Streaming Message Management

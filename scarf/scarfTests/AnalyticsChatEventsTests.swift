@@ -117,6 +117,14 @@ struct AnalyticsChatEventsTests {
         #expect(!decision(exotic).contains("/Users"))
     }
 
+    @Test("an option's ACP kind decides when the request carried one")
+    func permissionDecisionsByKind() {
+        // Gateway-backed ACP's clarify card: `skip` is `reject_once`.
+        #expect(ChatViewModel.analyticsPermissionDecision(optionId: "skip", kind: "reject_once") == .deny)
+        #expect(ChatViewModel.analyticsPermissionDecision(optionId: "choice-0", kind: "allow_once") == .approve)
+        #expect(ChatViewModel.analyticsPermissionDecision(optionId: "skip") == .approve)
+    }
+
     // MARK: - input mode
 
     @Test("input modes are exactly the taxonomy's tokens")
