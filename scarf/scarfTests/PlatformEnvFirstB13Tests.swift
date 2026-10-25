@@ -175,7 +175,7 @@ struct AllowlistEnvFirstB13Tests {
         try "DISCORD_BOT_TOKEN=t\nDISCORD_ALLOWED_CHANNELS=111,222\n"
             .write(toFile: ctx.paths.envFile, atomically: true, encoding: .utf8)
         try "discord:\n  require_mention: true\n".write(toFile: ctx.paths.configYAML, atomically: true, encoding: .utf8)
-        #expect(GatewayConfigWriter.saveList(context: ctx, platform: "discord", key: "allowed_channels", items: ["111", "222"]))
+        #expect(GatewayConfigWriter.saveList(context: ctx, platform: "discord", key: "allowed_channels", items: ["111", "222"], capabilities: .empty))
         let outcome = PlatformSetupHelpers.saveForm(
             context: ctx, envPairs: [:], configKV: [:], envUnsetAfterConfig: ["DISCORD_ALLOWED_CHANNELS"])
         #expect(!outcome.isFailure)
@@ -323,7 +323,7 @@ struct AllowlistEnvFirstB13bTests {
             .write(toFile: ctx.paths.configYAML, atomically: true, encoding: .utf8)
         for (p, k, items) in [("matrix", "allowed_rooms", ["!a:x", "!b:x"]), ("slack", "allowed_channels", ["C1", "C2"]),
                               ("mattermost", "allowed_channels", ["m1", "m2"])] {
-            #expect(GatewayConfigWriter.saveList(context: ctx, platform: p, key: k, items: items))
+            #expect(GatewayConfigWriter.saveList(context: ctx, platform: p, key: k, items: items, capabilities: .empty))
         }
         let outcome = PlatformSetupHelpers.saveForm(
             context: ctx, envPairs: [:], configKV: [:],

@@ -214,6 +214,7 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
 
         let ctx = context
         let platform = platform
+        let caps = capabilities
         let listKey = (capabilities.hasGatewayAllowlists ? kind?.yamlKey : nil)
         // `.whitespacesAndNewlines`, not `.whitespaces`: a channel id
         // pasted with a trailing newline (or a whole multi-line paste)
@@ -256,14 +257,19 @@ final class GatewayBehaviorViewModel: OutcomeMessageHosting {
                 // Step 1: list write via direct YAML edit — `hermes config
                 // set` can't write list values.
                 if let listKey {
-                    let ok = GatewayConfigWriter.saveList(
+                    switch GatewayConfigWriter.saveListChecked(
                         context: ctx,
                         platform: platform,
                         key: listKey,
-                        items: trimmedItems
-                    )
-                    if !ok {
+                        items: trimmedItems,
+                        capabilities: caps
+                    ) {
+                    case .saved:
+                        break
+                    case .failed:
                         return .failure(String(localized: "Failed to write allowlist to config.yaml"))
+                    case .refusedDuplicateKey(let why):
+                        return .failure(why)
                     }
                 }
                 // Step 2: scalar saves via `hermes config set`, then the

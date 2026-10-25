@@ -295,8 +295,35 @@ public enum GatewayConfigWriter {
         context: ServerContext,
         platform: String,
         key: String,
-        items: [String]
+        items: [String],
+        capabilities: HermesCapabilities
     ) -> Bool {
+        saveListChecked(
+            context: context, platform: platform, key: key, items: items, capabilities: capabilities
+        ) == .saved
+    }
+
+    /// What ``saveListChecked(context:platform:key:items:capabilities:)``
+    /// did. `.refusedDuplicateKey` is kept apart from `.failed` so the
+    /// caller can name the one refusal the user has to fix in the file.
+    public enum SaveOutcome: Sendable, Equatable {
+        case saved
+        case failed
+        /// The rewrite would leave a key repeated in one mapping, which a
+        /// v0.21.6+ host refuses to load — see
+        /// ``HermesYAML/duplicateKeyWriteRefusal(in:capabilities:)``.
+        case refusedDuplicateKey(String)
+    }
+
+    /// ``saveList(context:platform:key:items:capabilities:)`` with the
+    /// duplicate-key refusal visible to the caller.
+    public static func saveListChecked(
+        context: ServerContext,
+        platform: String,
+        key: String,
+        items: [String],
+        capabilities: HermesCapabilities
+    ) -> SaveOutcome {
         let path = context.paths.configYAML
         // GUARDED. `readText(path) ?? ""` used to collapse "unreadable" into
         // "empty", so a blipped read published a config.yaml holding nothing
@@ -310,17 +337,24 @@ public enum GatewayConfigWriter {
         // bytes this rewrite is about to replace. Contention past the wait
         // bound reports as the same `false` — never a hang.
         let file = GuardedTextFile(context: context, label: "config.yaml")
+        var duplicateKeyRefusal: String?
         do {
             try file.mutate(path) { loaded in
                 switch setListChecked(in: loaded.text, platform: platform, key: key, items: items) {
-                case .updated(let text): return text
+                case .updated(let text):
+                    // v0.21.6+: never publish a file the host would refuse.
+                    if let why = HermesYAML.duplicateKeyWriteRefusal(in: text, capabilities: capabilities) {
+                        duplicateKeyRefusal = why
+                        throw WriteRefusal(reason: why)
+                    }
+                    return text
                 case .unchanged: return nil          // already correct
                 case .refused(let why): throw WriteRefusal(reason: why)
                 }
             }
-            return true
+            return .saved
         } catch {
-            return false
+            return duplicateKeyRefusal.map(SaveOutcome.refusedDuplicateKey) ?? .failed
         }
     }
 

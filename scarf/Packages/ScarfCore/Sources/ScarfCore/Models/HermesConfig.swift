@@ -2016,6 +2016,20 @@ public struct HermesConfig: Sendable {
     /// Scarf's parser normalizes that case to `[]` rather than `nil`.
     public var multiplexProfileAllowlist: [String]?
 
+    /// The first key config.yaml repeats inside one mapping, recorded only
+    /// when the file was parsed for a host with
+    /// ``HermesCapabilities/hasStrictYAMLConfigLoader`` (v0.21.6+), whose
+    /// ruamel loader refuses such a file outright. Below that floor — and
+    /// for every parse that was not handed capabilities — it stays nil and
+    /// the file reads last-wins as it always has (C1). See
+    /// ``HermesYAML/firstDuplicateKey(in:)``.
+    public var yamlDuplicateKey: YAMLDuplicateKey?
+
+    /// The user-facing error for ``yamlDuplicateKey``, or nil.
+    public var strictYAMLLoadError: String? {
+        yamlDuplicateKey.map(HermesYAML.duplicateKeyLoadMessage)
+    }
+
     public init(
         model: String,
         provider: String,

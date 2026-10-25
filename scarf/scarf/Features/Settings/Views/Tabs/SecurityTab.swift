@@ -21,6 +21,12 @@ struct SecurityTab: View {
         capabilitiesStore?.capabilities.hasApprovalSmartPolicy ?? false
     }
 
+    /// The capabilities the Tirith section is gated on. No store yet reads as
+    /// `.empty` — an undetected host, which `hasBundledTirith` KEEPS.
+    private var tirithCapabilities: HermesCapabilities {
+        capabilitiesStore?.capabilities ?? .empty
+    }
+
     var body: some View {
         // P39c: the managed lock is per-section here, not tab-wide. Every
         // writer below is a `config set <key>` whose managed arm prints
@@ -38,13 +44,19 @@ struct SecurityTab: View {
         }
         .disabled(viewModel.isManagedHost)
 
-        SettingsSection(title: "Tirith Sandbox", icon: "shield.checkerboard") {
-            ToggleRow(label: "Enabled", isOn: viewModel.config.security.tirithEnabled) { viewModel.setTirithEnabled($0) }
-            EditableTextField(label: "Binary Path", value: viewModel.config.security.tirithPath) { viewModel.setTirithPath($0) }
-            StepperRow(label: "Timeout (s)", value: viewModel.config.security.tirithTimeout, range: 1...60) { viewModel.setTirithTimeout($0) }
-            ToggleRow(label: "Fail Open", isOn: viewModel.config.security.tirithFailOpen) { viewModel.setTirithFailOpen($0) }
+        // v0.21.6 removed the bundled tirith scanner: nothing reads the four
+        // keys and `_migrate_to_50` deletes them
+        // (`HermesCapabilities.hasBundledTirith`). An older or undetected
+        // host renders the section exactly as before (C1).
+        if tirithCapabilities.hasBundledTirith {
+            SettingsSection(title: "Tirith Sandbox", icon: "shield.checkerboard") {
+                ToggleRow(label: "Enabled", isOn: viewModel.config.security.tirithEnabled) { viewModel.setTirithEnabled($0, capabilities: tirithCapabilities) }
+                EditableTextField(label: "Binary Path", value: viewModel.config.security.tirithPath) { viewModel.setTirithPath($0, capabilities: tirithCapabilities) }
+                StepperRow(label: "Timeout (s)", value: viewModel.config.security.tirithTimeout, range: 1...60) { viewModel.setTirithTimeout($0, capabilities: tirithCapabilities) }
+                ToggleRow(label: "Fail Open", isOn: viewModel.config.security.tirithFailOpen) { viewModel.setTirithFailOpen($0, capabilities: tirithCapabilities) }
+            }
+            .disabled(viewModel.isManagedHost)
         }
-        .disabled(viewModel.isManagedHost)
 
         SettingsSection(title: "Website Blocklist", icon: "xmark.shield") {
             ToggleRow(label: "Enabled", isOn: viewModel.config.security.blocklistEnabled) { viewModel.setBlocklistEnabled($0) }

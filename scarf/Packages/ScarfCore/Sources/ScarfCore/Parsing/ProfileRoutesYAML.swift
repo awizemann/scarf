@@ -35,12 +35,17 @@ public enum ProfileRoutesYAML {
     /// wins, but only when it parses to an actual list — a bare
     /// `profile_routes:` header with no items is `None` to PyYAML, so Hermes
     /// falls through to the nested `gateway.profile_routes:` form.
-    public static func parse(_ yaml: String) -> HermesProfileRoutes {
+    ///
+    /// `capabilities` reaches the `multiplex_profiles` / `gateway.standalone`
+    /// boolish reads only (bare `y`/`n` on a strict-loader host — see
+    /// ``HermesYAML/boolishValue(_:capabilities:)``); the default is the
+    /// pre-v0.21.6 reading.
+    public static func parse(_ yaml: String, capabilities: HermesCapabilities = .empty) -> HermesProfileRoutes {
         let lines = yaml
             .replacingOccurrences(of: "\r\n", with: "\n")
             .components(separatedBy: "\n")
 
-        let multiplex = parseMultiplex(yaml)
+        let multiplex = parseMultiplex(yaml, capabilities: capabilities)
 
         func result(_ routes: [HermesProfileRoute], _ location: HermesProfileRoutes.Location) -> HermesProfileRoutes {
             HermesProfileRoutes(
@@ -84,7 +89,7 @@ public enum ProfileRoutesYAML {
     /// `standalone` is `gateway.standalone` — `gateway:` section only, the
     /// one spelling `profile_is_standalone` reads
     /// (`hermes_cli/profiles.py:1018`, `:1029-1031` @ `v2026.9.24`).
-    private static func parseMultiplex(_ yaml: String) -> (
+    private static func parseMultiplex(_ yaml: String, capabilities: HermesCapabilities) -> (
         value: Bool, isTopLevel: Bool, isSet: Bool, isExplicitFalse: Bool, standalone: Bool
     ) {
         let values = HermesYAML.parseNestedYAML(yaml).values
@@ -133,9 +138,9 @@ public enum ProfileRoutesYAML {
         // a literal `== "true"` read `multiplex_profiles: yes` (and `on`,
         // and `1`) as OFF on a host that had it ON. `False` is the dataclass
         // default (:561) and what an unrecognised token falls back to.
-        let value = HermesYAML.boolishValue(raw) ?? false
-        let standalone = HermesYAML.boolishValue(values["gateway.standalone"]) ?? false
-        return (value, topLevel != nil, raw != nil, HermesYAML.boolishValue(raw) == false, standalone)
+        let value = HermesYAML.boolishValue(raw, capabilities: capabilities) ?? false
+        let standalone = HermesYAML.boolishValue(values["gateway.standalone"], capabilities: capabilities) ?? false
+        return (value, topLevel != nil, raw != nil, HermesYAML.boolishValue(raw, capabilities: capabilities) == false, standalone)
     }
 
     /// True when `profile_routes` is written as a NON-empty flow list

@@ -148,8 +148,15 @@ final class DashboardViewModel {
             )
         }.value
 
+        // A config.yaml the host's strict loader refuses (a duplicate key,
+        // v0.21.6+) is surfaced on LOCAL contexts too, like the state.db
+        // miss: it is not a transient read, and the gateway will not start
+        // until it is fixed. Always nil on an older host (C1).
+        var strictYAMLError: String?
         switch results.cfg {
-        case .success(let c): config = c
+        case .success(let c):
+            config = c
+            strictYAMLError = c.strictYAMLLoadError
         case .failure(let e):
             config = .empty
             collectedErrors.append("config.yaml — \(e.localizedDescription)")
@@ -172,6 +179,7 @@ final class DashboardViewModel {
         // filesystem), and a transient "file doesn't exist yet" on fresh
         // installs shouldn't scare users.
         let surfaced = (snapshotError.map { ["state.db — \($0)"] } ?? [])
+            + (strictYAMLError.map { ["config.yaml — \($0)"] } ?? [])
             + (context.isRemote ? collectedErrors : [])
         lastReadError = surfaced.isEmpty ? nil : surfaced.joined(separator: "\n")
 

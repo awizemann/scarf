@@ -46,8 +46,20 @@ struct HermesFileService: Sendable {
         }
         return ScarfMon.measure(.diskIO, "loadConfig") {
             guard let content = readFile(context.paths.configYAML) else { return .empty }
-            return HermesConfig(yaml: content)
+            return HermesConfig(yaml: content, capabilities: yamlCapabilities)
         }
+    }
+
+    /// The capabilities every config.yaml parse (and direct MCP-entry
+    /// write) here is judged under — the
+    /// host's MEMOIZED answer only, never a probe: `loadConfig` has callers
+    /// that must not spawn `hermes --version` (C10), and the cache is warm
+    /// for any window that has been open a moment. A miss reads the file the
+    /// pre-v0.21.6 way, which is what an unknown host renders anyway (C1).
+    /// Decides bare `y`/`n` and ``HermesConfig/yamlDuplicateKey``
+    /// (``HermesCapabilities/hasStrictYAMLConfigLoader``).
+    private nonisolated var yamlCapabilities: HermesCapabilities {
+        HermesVersionCache.shared.cached(for: context) ?? .empty
     }
 
     private nonisolated static let perfLogger = Logger(subsystem: "com.scarf.mon", category: "HermesFileService")
@@ -57,7 +69,7 @@ struct HermesFileService: Sendable {
     /// (permission denied, missing file, sqlite3 not installed, etc.)
     /// instead of silently falling back to `.empty`.
     nonisolated func loadConfigResult() -> Result<HermesConfig, Error> {
-        readFileResult(context.paths.configYAML).map { HermesConfig(yaml: $0) }
+        readFileResult(context.paths.configYAML).map { HermesConfig(yaml: $0, capabilities: yamlCapabilities) }
     }
 
     /// What a PROVEN config.yaml read found: the parsed config and its raw
@@ -127,7 +139,7 @@ struct HermesFileService: Sendable {
             throw LoadRefusal.unreadable(path: path)
         }
         return ProvenConfig(
-            config: loaded.exists ? HermesConfig(yaml: loaded.text) : .empty,
+            config: loaded.exists ? HermesConfig(yaml: loaded.text, capabilities: yamlCapabilities) : .empty,
             rawText: loaded.text
         )
     }
@@ -820,6 +832,7 @@ struct HermesFileService: Sendable {
         else { return (false, refusal) }
 
         let configFile = GuardedTextFile(context: context, label: "config.yaml")
+        var duplicateKeyRefusal: String?
         let ok = (try? configFile.withLock(context.paths.configYAML) { () -> Bool in
             guard let loaded = try? configFile.load(context.paths.configYAML), loaded.exists else {
                 return false
@@ -831,6 +844,11 @@ struct HermesFileService: Sendable {
                 Self.logger.warning(
                     "refusing to write OAuth MCP entry \(name, privacy: .public): unfamiliar mcp_servers layout"
                 )
+                return false
+            }
+            // v0.21.6+: never publish a file the host's strict loader refuses.
+            if let why = HermesYAML.duplicateKeyWriteRefusal(in: newYAML, capabilities: yamlCapabilities) {
+                duplicateKeyRefusal = why
                 return false
             }
             backUpConfigOnceForThisLaunch(originalText: yaml)
@@ -859,7 +877,7 @@ struct HermesFileService: Sendable {
             }
             return true
         }) ?? false
-        guard ok else { return (false, refusal) }
+        guard ok else { return (false, duplicateKeyRefusal ?? refusal) }
         return (true, String(
             localized: "Saved “\(name)” with OAuth. Sign in to finish connecting it.",
             comment: "OAuth MCP server entry written; the user still has to sign in"
@@ -2174,6 +2192,13 @@ struct HermesFileService: Sendable {
         combined.append(contentsOf: location.suffix)
         let newYAML = combined.joined(separator: "\n")
         guard newYAML != yaml else { return true }
+        // v0.21.6+: never publish a file the host's strict loader refuses.
+        if let why = HermesYAML.duplicateKeyWriteRefusal(in: newYAML, capabilities: yamlCapabilities) {
+            Self.logger.warning(
+                "refusing to patch MCP server \(name, privacy: .public): \(why, privacy: .public)"
+            )
+            return false
+        }
 
         backUpConfigOnceForThisLaunch(originalText: yaml)
         // Failures are logged and swallowed here on purpose: the read-back

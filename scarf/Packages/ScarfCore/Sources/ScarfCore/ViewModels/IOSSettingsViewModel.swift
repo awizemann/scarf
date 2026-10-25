@@ -82,10 +82,11 @@ public final class IOSSettingsViewModel {
         // it — two blocking round trips, so this is `OffPool.run` rather
         // than `Task.detached`, which would park a pool thread through both
         // (charter C10).
-        managedInstall = await OffPool.run {
+        let (caps, managed) = await OffPool.run {
             let caps = HermesVersionCache.shared.capabilitiesSync(for: ctx)
-            return HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
+            return (caps, HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps))
         }
+        managedInstall = managed
 
         guard let text else {
             // Neither read found the file. If the Hermes CLI still
@@ -118,7 +119,11 @@ public final class IOSSettingsViewModel {
         }
 
         rawYAML = text
-        config = HermesConfig(yaml: text)
+        // `caps` decides bare `y`/`n` and the duplicate-key check (v0.21.6+
+        // strict loader); a file that host refuses is named in the same
+        // banner an unreachable one is. Nil on every older host (C1).
+        config = HermesConfig(yaml: text, capabilities: caps)
+        lastError = config.strictYAMLLoadError
         // Blocking transport read: off the pool (C10). An unreadable `.env`
         // leaves the rows on config.yaml, as before.
         platformEnv = await OffPool.run {

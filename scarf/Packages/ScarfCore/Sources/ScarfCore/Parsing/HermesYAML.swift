@@ -78,6 +78,26 @@ public struct ParsedYAML: Sendable {
     }
 }
 
+/// A key repeated inside one YAML mapping — see
+/// ``HermesYAML/firstDuplicateKey(in:)``.
+public struct YAMLDuplicateKey: Sendable, Equatable {
+    /// Dotted path of the repeated key (`agent.max_turns`). A key inside a
+    /// sequence item carries `[]` after the sequence's own key
+    /// (`profile_routes[].name`).
+    public let path: String
+    /// 1-based line of the first occurrence.
+    public let firstLine: Int
+    /// 1-based line of the repeat — the one ruamel's `DuplicateKeyError`
+    /// names.
+    public let line: Int
+
+    public init(path: String, firstLine: Int, line: Int) {
+        self.path = path
+        self.firstLine = firstLine
+        self.line = line
+    }
+}
+
 /// Entry points for Hermes-flavored YAML parsing. Stateless, pure
 /// functions — no Foundation types that differ cross-platform.
 public enum HermesYAML {
@@ -611,6 +631,136 @@ public enum HermesYAML {
                           blockScalarPaths: blockScalarPaths)
     }
 
+    // MARK: - Duplicate keys (strict loader, v0.21.6+)
+
+    /// The first key that appears twice in ONE mapping of `rawYAML`, or nil.
+    ///
+    /// ``parseNestedYAML(_:)`` resolves a repeated key last-wins, which is
+    /// PyYAML's rule and still the right READ on a host below
+    /// ``HermesCapabilities/hasStrictYAMLConfigLoader``. From v0.21.6 Hermes
+    /// loads through ruamel (`hermes_yaml.py:3-4`, "rejects duplicate keys"),
+    /// which raises `DuplicateKeyError` instead (ruamel 0.18.16 from the
+    /// v0.22.5 venv, probed: `a: 1\na: 2`, a repeat inside a nested block,
+    /// and a repeat inside one sequence item all raise; the same key in two
+    /// DIFFERENT mappings — `a:` beside `x:\n  a:`, or one per sequence item
+    /// — loads). The gateway and cron then refuse to start
+    /// (`require_parseable_user_config`, `hermes_cli/config.py:436-469` @
+    /// v0.22.5; called from `gateway/run.py:5942` / `cron/scheduler.py:2236`
+    /// @ v0.21.6), so this is a fact about the file the user must be shown,
+    /// not a value to pick.
+    ///
+    /// This is a scan over the same block subset the parser reads, not a
+    /// second parser: it tracks which mapping each `key:` line belongs to
+    /// (a new one per sequence item) and skips `|`/`>` bodies, folded
+    /// continuation lines and comments the way ``parseNestedYAML(_:)`` does.
+    /// Keys compare by their decoded TEXT, so `a:` and `'a':` collide, as
+    /// ruamel says they do. Flow mappings (`{a: 1, a: 2}`) are not scanned.
+    public static func firstDuplicateKey(in rawYAML: String) -> YAMLDuplicateKey? {
+        struct Mapping {
+            let indent: Int
+            let path: String
+            var lines: [String: Int] = [:]
+            var lastKey: String?
+            var childPath: String {
+                guard let lastKey else { return path }
+                return path.isEmpty ? lastKey : path + "." + lastKey
+            }
+        }
+        func decodedKey(_ raw: Substring) -> String {
+            YAMLScalar.unquote(String(raw).trimmingCharacters(in: yamlWhitespace))
+        }
+
+        var mappings: [Mapping] = []
+        // Column of the key that owns an open `|`/`>` body, and of the last
+        // scalar key (deeper lines are its folded continuation) — the same
+        // two guards ``parseNestedYAML(_:)`` keeps.
+        var blockScalarOwner: Int?
+        var lastScalarIndent: Int?
+        let lines = YAMLScalar.strippingBOM(rawYAML).components(separatedBy: "\n")
+        for (offset, rawLine) in lines.enumerated() {
+            let line = rawLine.hasSuffix("\r") ? String(rawLine.dropLast()) : rawLine
+            let trimmed = line.trimmingCharacters(in: yamlWhitespace)
+            if trimmed.isEmpty { continue }
+            let indent = line.prefix(while: { $0 == " " }).count
+            if let owner = blockScalarOwner {
+                if indent > owner { continue }
+                blockScalarOwner = nil
+            }
+            if let last = lastScalarIndent, indent > last { continue }
+            if trimmed.hasPrefix("#") { continue }
+
+            while let top = mappings.last, top.indent > indent { mappings.removeLast() }
+
+            var content = Substring(trimmed)
+            var column = indent
+            if trimmed == "-" || trimmed.hasPrefix("- ") {
+                // A sequence item: the mapping it holds (if any) is a fresh
+                // one, so a key repeated across items is not a duplicate.
+                let owner = mappings.last
+                content = trimmed.dropFirst().drop(while: { $0 == " " })
+                column = indent + (trimmed.count - content.count)
+                while let top = mappings.last, top.indent >= column { mappings.removeLast() }
+                guard !content.isEmpty else { lastScalarIndent = nil; continue }
+                guard blockKeySpan(in: String(content)) != nil else {
+                    // A plain item: deeper lines are its continuation.
+                    lastScalarIndent = indent
+                    continue
+                }
+                let path = owner.map(\.childPath) ?? ""
+                mappings.append(Mapping(indent: column, path: path + "[]"))
+            } else {
+                guard blockKeySpan(in: trimmed) != nil else { continue }
+                if mappings.last?.indent != indent {
+                    mappings.append(Mapping(indent: indent, path: mappings.last?.childPath ?? ""))
+                }
+            }
+            guard let span = blockKeySpan(in: String(content)), !mappings.isEmpty else { continue }
+            let key = decodedKey(span.key)
+            let lineNumber = offset + 1
+            var mapping = mappings.removeLast()
+            if let first = mapping.lines[key] {
+                let path = mapping.path.isEmpty ? key : mapping.path + "." + key
+                return YAMLDuplicateKey(path: path, firstLine: first, line: lineNumber)
+            }
+            mapping.lines[key] = lineNumber
+            mapping.lastKey = key
+            mappings.append(mapping)
+
+            let afterColon = String(span.afterColon).trimmingCharacters(in: yamlWhitespace)
+            if afterColon.isEmpty || afterColon.hasPrefix("#") {
+                lastScalarIndent = nil
+            } else if isBlockScalarHeader(afterColon) {
+                lastScalarIndent = nil
+                blockScalarOwner = column
+            } else {
+                lastScalarIndent = column
+            }
+        }
+        return nil
+    }
+
+    /// What Scarf shows for a config.yaml a strict-loader host cannot load
+    /// because of `dup`. Only ever built on a host with
+    /// ``HermesCapabilities/hasStrictYAMLConfigLoader`` — below it the same
+    /// file loads last-wins exactly as Scarf reads it (see
+    /// ``HermesConfig/yamlDuplicateKey``).
+    public static func duplicateKeyLoadMessage(_ dup: YAMLDuplicateKey) -> String {
+        String(localized: "config.yaml has the key “\(dup.path)” twice (lines \(dup.firstLine) and \(dup.line)). This Hermes refuses a settings file with a duplicate key: the gateway and cron jobs won’t start, and other commands fall back to your last good settings or the defaults. Delete one of the two lines.")
+    }
+
+    /// The refusal a text writer reports instead of publishing `newText`, or
+    /// nil when the write may go ahead. Gated on
+    /// ``HermesCapabilities/hasStrictYAMLConfigLoader``:
+    /// below the floor a duplicate is something Hermes reads last-wins, and
+    /// the writers keep their old behaviour byte for byte (C1).
+    public static func duplicateKeyWriteRefusal(
+        in newText: String, capabilities: HermesCapabilities
+    ) -> String? {
+        guard capabilities.hasStrictYAMLConfigLoader,
+              let dup = firstDuplicateKey(in: newText) else { return nil }
+        return String(localized: "config.yaml would have the key “\(dup.path)” twice (lines \(dup.firstLine) and \(dup.line)), and this Hermes refuses to load a settings file with a duplicate key, so nothing was saved. Remove the duplicate, then try again.")
+    }
+
     /// True when `text` opens a quoted scalar that has not closed yet — the
     /// one shape in which a continuation line beginning with `#` is CONTENT
     /// rather than a comment. `yaml.dump` quotes any scalar carrying a `#`
@@ -1112,7 +1262,20 @@ public enum HermesYAML {
     /// ever match it). The same vocabulary is what PyYAML has already turned
     /// into real bools before any per-key reader runs, so this is the ONE
     /// boolean spelling in config.yaml — there is no per-key variant.
-    public static func boolishValue(_ raw: String?) -> Bool? {
+    ///
+    /// `capabilities` adds the strict loader's two extra words. From v0.21.6
+    /// (``HermesCapabilities/hasStrictYAMLConfigLoader``) config.yaml is read
+    /// by ruamel under YAML 1.1, whose bool resolver also takes a BARE `y`,
+    /// `Y`, `n` or `N` (`hermes_yaml.py:3-4`; ruamel 0.18.16 from the v0.22.5
+    /// venv, probed: those four load as `True`/`True`/`False`/`False`, the
+    /// quoted `'y'` stays a string, and the word set is otherwise PyYAML's
+    /// — `yes`/`Yes`/`YES`, `on`/`On`/`ON`, … with `yEs`/`oN` still strings).
+    /// `str(True)` then reaches `_bool_token` as `"true"`. Below the floor
+    /// PyYAML leaves `y`/`n` strings in neither token set, so the default
+    /// (`.empty`) keeps that answer: nil.
+    public static func boolishValue(
+        _ raw: String?, capabilities: HermesCapabilities = .empty
+    ) -> Bool? {
         guard let raw else { return nil }
         // P57: the trim runs AFTER unquoting. `_bool_token` strips the STRING
         // PyYAML handed it, and for a quoted scalar that string is the quoted
@@ -1123,6 +1286,10 @@ public enum HermesYAML {
         let v = strippedScalar(raw).lowercased()
         if ["true", "1", "yes", "on"].contains(v) { return true }
         if ["false", "0", "no", "off"].contains(v) { return false }
+        if capabilities.hasStrictYAMLConfigLoader, !isQuotedScalar(raw) {
+            if v == "y" { return true }
+            if v == "n" { return false }
+        }
         // P57: PyYAML types a BARE scalar before any Hermes reader sees it,
         // and `str(int)` of the result is what `_bool_token` compares — so
         // `01`, `+1`, `0x1` and `0b1` are all the token `"1"` (truthy) and

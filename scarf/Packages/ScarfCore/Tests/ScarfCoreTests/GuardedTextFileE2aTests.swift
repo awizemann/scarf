@@ -196,7 +196,7 @@ import Foundation
             let original = "model:\n  default: gpt-4o\n"
             try Self.writeConfig(ctx, original)
             let ok = GatewayConfigWriter.saveList(
-                context: ctx, platform: "slack", key: "allowed_channels", items: ["C1"]
+                context: ctx, platform: "slack", key: "allowed_channels", items: ["C1"], capabilities: .empty
             )
             #expect(ok)
             let after = try #require(Self.text(ctx.paths.configYAML))
@@ -216,7 +216,7 @@ import Foundation
             try Self.writeConfig(ctx, original)
             try Self.chmod(ctx.paths.configYAML, 0o000)
             let ok = GatewayConfigWriter.saveList(
-                context: ctx, platform: "slack", key: "allowed_channels", items: ["C1"]
+                context: ctx, platform: "slack", key: "allowed_channels", items: ["C1"], capabilities: .empty
             )
             #expect(!ok)
             try Self.chmod(ctx.paths.configYAML, 0o644)

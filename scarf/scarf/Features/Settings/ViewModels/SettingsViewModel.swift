@@ -1075,10 +1075,26 @@ final class SettingsViewModel {
 
     func setRedactSecrets(_ value: Bool) { setSetting("security.redact_secrets", value: value ? "true" : "false") }
     func setRedactPII(_ value: Bool) { setSetting("privacy.redact_pii", value: value ? "true" : "false") }
-    func setTirithEnabled(_ value: Bool) { setSetting("security.tirith_enabled", value: value ? "true" : "false") }
-    func setTirithPath(_ value: String) { setSetting("security.tirith_path", value: value) }
-    func setTirithTimeout(_ value: Int) { setSetting("security.tirith_timeout", value: String(value)) }
-    func setTirithFailOpen(_ value: Bool) { setSetting("security.tirith_fail_open", value: value ? "true" : "false") }
+    // `security.tirith_*` — dead keys from v0.21.6 (`_migrate_to_50` deletes
+    // them; see `HermesCapabilities.hasBundledTirith`), so a host without
+    // the bundled scanner is never written one. The section is hidden there
+    // too; this is the guard behind it.
+    func setTirithEnabled(_ value: Bool, capabilities: HermesCapabilities) {
+        guard capabilities.hasBundledTirith else { return }
+        setSetting("security.tirith_enabled", value: value ? "true" : "false")
+    }
+    func setTirithPath(_ value: String, capabilities: HermesCapabilities) {
+        guard capabilities.hasBundledTirith else { return }
+        setSetting("security.tirith_path", value: value)
+    }
+    func setTirithTimeout(_ value: Int, capabilities: HermesCapabilities) {
+        guard capabilities.hasBundledTirith else { return }
+        setSetting("security.tirith_timeout", value: String(value))
+    }
+    func setTirithFailOpen(_ value: Bool, capabilities: HermesCapabilities) {
+        guard capabilities.hasBundledTirith else { return }
+        setSetting("security.tirith_fail_open", value: value ? "true" : "false")
+    }
     func setBlocklistEnabled(_ value: Bool) { setSetting("security.website_blocklist.enabled", value: value ? "true" : "false") }
     func setHumanDelayMode(_ value: String) { setSetting("human_delay.mode", value: value) }
     func setHumanDelayMinMS(_ value: Int) { setSetting("human_delay.min_ms", value: String(value)) }
@@ -1222,7 +1238,7 @@ final class SettingsViewModel {
     /// Write `agent.reasoning_overrides` (dict — `hermes config set` can't).
     /// Refused silently on pre-v0.20 hosts (the UI is hidden there too).
     func saveReasoningOverrides(_ pairs: [(key: String, value: String)], capabilities: HermesCapabilities) async {
-        await saveDirectYAML(label: "agent.reasoning_overrides") { yaml in
+        await saveDirectYAML(label: "agent.reasoning_overrides", capabilities: capabilities) { yaml in
             PowerSettingsWriter.setReasoningOverrides(in: yaml, pairs: pairs, capabilities: capabilities)
         }
     }
@@ -1230,7 +1246,7 @@ final class SettingsViewModel {
     /// Write `model_catalog.excluded_providers` (list — `hermes config set`
     /// stringifies arrays). Refused silently on pre-v0.20 hosts.
     func saveExcludedProviders(_ providers: [String], capabilities: HermesCapabilities) async {
-        await saveDirectYAML(label: "model_catalog.excluded_providers") { yaml in
+        await saveDirectYAML(label: "model_catalog.excluded_providers", capabilities: capabilities) { yaml in
             PowerSettingsWriter.setExcludedProviders(in: yaml, providers: providers, capabilities: capabilities)
         }
     }
@@ -1248,7 +1264,7 @@ final class SettingsViewModel {
         location: HermesProfileRoutes.Location,
         capabilities: HermesCapabilities
     ) async {
-        await saveDirectYAML(label: "profile_routes") { yaml in
+        await saveDirectYAML(label: "profile_routes", capabilities: capabilities) { yaml in
             // Re-derive the live location from the YAML we are about to
             // edit rather than trusting the snapshot the view was rendered
             // from: Hermes (or a hand edit) may have moved the block since
@@ -1294,8 +1310,15 @@ final class SettingsViewModel {
     /// Shared read → transform → write → reload path for the direct-YAML
     /// writers, mirroring `GatewayConfigWriter.saveList`'s no-op-on-equal
     /// behavior and `setSetting`'s save toast.
+    ///
+    /// `capabilities` gates the one check every direct write shares: on a
+    /// v0.21.6+ host (``HermesCapabilities/hasStrictYAMLConfigLoader``) a
+    /// result that repeats a key in one mapping is refused, because that
+    /// host refuses to load it. Older hosts write exactly as before (C1).
     private func saveDirectYAML(
-        label: String, transform: @escaping @Sendable (String) -> String?
+        label: String,
+        capabilities: HermesCapabilities,
+        transform: @escaping @Sendable (String) -> String?
     ) async {
         // MANAGED-HOST BOUNCE, the same one ``enqueueConfigWrite`` does —
         // and here it is the ONLY guard there is. A `config set` on a managed
@@ -1322,16 +1345,18 @@ final class SettingsViewModel {
         let previous = writeChain
         let save = Task { [weak self] in
             _ = await previous?.value
-            await self?.performDirectYAMLSave(label: label, transform: transform)
+            await self?.performDirectYAMLSave(label: label, capabilities: capabilities, transform: transform)
         }
         writeChain = Task { _ = await save.value }
         await save.value
     }
 
-    /// The body of ``saveDirectYAML(label:transform:)``, split out so the
-    /// chain hop above stays legible.
+    /// The body of ``saveDirectYAML(label:capabilities:transform:)``, split
+    /// out so the chain hop above stays legible.
     private func performDirectYAMLSave(
-        label: String, transform: @escaping @Sendable (String) -> String?
+        label: String,
+        capabilities: HermesCapabilities,
+        transform: @escaping @Sendable (String) -> String?
     ) async {
         let path = context.paths.configYAML
         // GUARDED. `readText(path) ?? ""` collapsed "unreadable" into
@@ -1377,6 +1402,11 @@ final class SettingsViewModel {
                         return .rejectedValue
                     }
                     if updated != existing {
+                        if let why = HermesYAML.duplicateKeyWriteRefusal(
+                            in: updated, capabilities: capabilities
+                        ) {
+                            return .failure(why)
+                        }
                         guard (try? file.write(updated, to: path, after: loaded)) != nil else {
                             return .writeFailed
                         }
@@ -1415,7 +1445,7 @@ final class SettingsViewModel {
         }
     }
 
-    /// What one ``saveDirectYAML(label:transform:)`` hop decided, carried
+    /// What one ``saveDirectYAML(label:capabilities:transform:)`` hop decided, carried
     /// back to the main actor so no `@Observable` state is touched off it.
     private enum DirectYAMLOutcome: Sendable {
         case saved(config: HermesConfig, rawYAML: String?)

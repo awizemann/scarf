@@ -170,6 +170,11 @@ public actor KanbanToolsetEnabler {
         plan: @escaping @Sendable (String) -> MutationPlan
     ) async -> PlanOutcome {
         await Task.detached(priority: .utility) {
+            // The host's MEMOIZED capabilities only — never a probe (the
+            // chat surfaces that call this have long since resolved them).
+            // Gates the v0.21.6+ duplicate-key refusal below; an unknown or
+            // older host writes exactly as before (C1).
+            let capabilities = HermesVersionCache.shared.cached(for: context) ?? .empty
             let file = GuardedTextFile(context: context, label: "config.yaml")
             do {
                 var outcome = PlanOutcome.noChange
@@ -186,6 +191,12 @@ public actor KanbanToolsetEnabler {
                         outcome = .failed(message: reason)
                         return nil
                     case .rewrite(let newYaml):
+                        if let why = HermesYAML.duplicateKeyWriteRefusal(
+                            in: newYaml, capabilities: capabilities
+                        ) {
+                            outcome = .failed(message: why)
+                            return nil
+                        }
                         outcome = .wrote
                         return newYaml
                     }

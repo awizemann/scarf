@@ -23,7 +23,13 @@ public extension HermesConfig {
     /// for everything else, not a throw. The iOS Settings view
     /// surfaces the raw file on top of this so users can spot a
     /// broken key even when the struct came back defaulted.
-    init(yaml: String) {
+    ///
+    /// `capabilities` decides the two things the v0.21.6 strict loader
+    /// changed (``HermesCapabilities/hasStrictYAMLConfigLoader``): bare
+    /// `y`/`n` read as booleans, and a repeated key is recorded in
+    /// ``HermesConfig/yamlDuplicateKey``. The default (`.empty`) is the
+    /// pre-v0.21.6 reading.
+    init(yaml: String, capabilities: HermesCapabilities = .empty) {
         let parsed = HermesYAML.parseNestedYAML(yaml)
         let values = parsed.values
         let lists = parsed.lists
@@ -65,7 +71,7 @@ public extension HermesConfig {
         // the unsafe direction for a true-by-default key.
         func boolTrueDefault(_ key: String) -> Bool {
             guard let raw = values[key] else { return true }
-            return HermesYAML.boolishValue(raw) != false
+            return HermesYAML.boolishValue(raw, capabilities: capabilities) != false
         }
         // Raw scalar for a `_SHARED_KEYS` member of a gateway platform,
         // resolved with Hermes's OWN precedence rather than a key list ordered
@@ -116,7 +122,7 @@ public extension HermesConfig {
         /// NOT for `mattermost.require_mention` — that key's reader has its
         /// own three-word falsy set (see `mattermostRequireMention` below).
         func sharedPlatformBool(_ plat: String, _ key: String, default def: Bool) -> Bool {
-            HermesYAML.boolishValue(sharedPlatformScalar(plat, key)) ?? def
+            HermesYAML.boolishValue(sharedPlatformScalar(plat, key), capabilities: capabilities) ?? def
         }
         /// `mattermost.require_mention`, which reaches its comparison as a
         /// `str()` of whatever PyYAML loaded rather than as a boolish scalar
@@ -238,7 +244,7 @@ public extension HermesConfig {
         // `checkpoints.enabled: yes` wrong in the one direction the sentinel
         // exists to protect.
         func boolishOpt(_ key: String) -> Bool? {
-            HermesYAML.boolishValue(values[key])
+            HermesYAML.boolishValue(values[key], capabilities: capabilities)
         }
         // The boolean reader for a key with a KNOWN default (either polarity).
         // `def` is used only when the key is absent or carries a scalar in
@@ -842,7 +848,7 @@ public extension HermesConfig {
             // P57: `boolTrueDefault`'s rule is now a call, not a copy — the
             // copy compared the quoted body verbatim and knew no int
             // resolver, so `" false"` and `0x0` read as ON.
-            let restartNotice = HermesYAML.boolishValue(restartRaw) != false
+            let restartNotice = HermesYAML.boolishValue(restartRaw, capabilities: capabilities) != false
             // Skip platforms with no v0.13 fields present anywhere in the
             // file. Without this guard, every supported platform would
             // round-trip an all-default block back through writes even
@@ -1126,7 +1132,7 @@ public extension HermesConfig {
             // parseNestedYAML doesn't model — so it gets its own scanner,
             // which also reports which of the two accepted forms Hermes
             // would actually read (v0.19+, gateway/profile_routing.py).
-            profileRoutes: ProfileRoutesYAML.parse(yaml),
+            profileRoutes: ProfileRoutesYAML.parse(yaml, capabilities: capabilities),
             // `multiplex_profile_allowlist` (v0.20.4+) — true-optional list.
             // A top-level key takes PRECEDENCE over `gateway.*` by PRESENCE
             // (`gateway/config_loader.py:75` presence bridge;
@@ -1160,6 +1166,9 @@ public extension HermesConfig {
                 "tool_loop_guardrails.non_interactive_hard_stop_enabled"
             )
         )
+        if capabilities.hasStrictYAMLConfigLoader {
+            yamlDuplicateKey = HermesYAML.firstDuplicateKey(in: yaml)
+        }
     }
 
     /// See ``HermesConfig/namedCustomProviders``. Reads block form

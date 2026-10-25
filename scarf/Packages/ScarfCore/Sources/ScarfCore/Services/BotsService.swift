@@ -294,6 +294,15 @@ public struct BotsService: Sendable {
         guard let updated = HermesBotProfileYAML.write(identity: identity, into: loaded.text) else {
             throw BotsError.unsafeToWrite(path: path)
         }
+        // From v0.21.6 profile.yaml is read by the strict loader too
+        // (`_load_yaml_dict` → `hermes_yaml.safe_load`,
+        // `hermes_cli/profiles.py:698` @ v0.21.6), and a duplicate key makes
+        // `read_profile_meta` fall back to empty defaults — the bot vanishes
+        // from the roster. The writer only refuses repeats of the keys it
+        // edits; refuse the rest the same way. Older hosts: unchanged (C1).
+        if HermesYAML.duplicateKeyWriteRefusal(in: updated, capabilities: capabilities) != nil {
+            throw BotsError.unsafeToWrite(path: path)
+        }
         try guarded.write(updated, to: path, after: loaded)
     }
 

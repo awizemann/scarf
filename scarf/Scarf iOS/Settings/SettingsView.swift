@@ -593,7 +593,11 @@ struct SettingsView: View {
         Section("Security") {
             yesNoRow("Redact secrets", vm.config.security.redactSecrets)
             yesNoRow("Redact PII", vm.config.security.redactPII)
-            yesNoRow("Tirith enabled", vm.config.security.tirithEnabled)
+            // Gone from v0.21.6 (`hasBundledTirith`); an older or undetected
+            // host shows the row as before (C1).
+            if caps.hasBundledTirith {
+                yesNoRow("Tirith enabled", vm.config.security.tirithEnabled)
+            }
             yesNoRow("Website blocklist", vm.config.security.blocklistEnabled)
             if !vm.config.security.blocklistDomains.isEmpty {
                 ForEach(vm.config.security.blocklistDomains.prefix(5), id: \.self) { domain in
