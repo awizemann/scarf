@@ -568,7 +568,9 @@ enum HermesReference {
             into: yaml, name: "n", url: "https://new", sse: false, replacing: true))
         #expect(!out.contains("https://old"))
         #expect(!out.contains("Authorization"))
-        #expect(out.contains("  n:\n    url: 'https://new'\n    auth: oauth\n    enabled: true\n  keep:\n    command: x"))
+        // A bare `n` key is a YAML 1.1 bool to Hermes v0.21.6+'s ruamel
+        // loader, so `YAMLScalar.quoteIfNeeded` single-quotes it.
+        #expect(out.contains("  'n':\n    url: 'https://new'\n    auth: oauth\n    enabled: true\n  keep:\n    command: x"))
     }
 
     /// Scarf writes it, Scarf reads it, and Hermes loads it as the same
