@@ -78,6 +78,11 @@ struct TerminalTab: View {
 
         if viewModel.config.terminalBackend == "singularity" {
             SettingsSection(title: "Singularity", icon: "aqi.medium") {
+                // v0.22.5: the backend left core for the `singularity`
+                // catalog plugin (`hermes_cli/left_core_migration.py:268-272`).
+                if capabilitiesStore?.capabilities.hasCatalogSingularity == true {
+                    PluginRequiredNote(pluginID: "singularity", feature: "The Singularity backend")
+                }
                 EditableTextField(label: "Image", value: viewModel.config.terminal.singularityImage) { viewModel.setSingularityImage($0) }
             }
         }

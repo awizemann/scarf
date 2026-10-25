@@ -174,7 +174,7 @@ final class SpotifyAuthFlow {
         } else {
             proc = context.makeTransport().makeProcess(
                 executable: context.paths.hermesBinary,
-                args: Self.argv(clientID: clientIDArgument)
+                args: Self.argv(clientID: clientIDArgument, pluginLogin: usesPluginLogin)
             )
             if !context.isRemote {
                 var env = localEnvironment ?? [:]
@@ -196,7 +196,7 @@ final class SpotifyAuthFlow {
         do {
             try proc.run()
         } catch {
-            state = .failure(reason: "Couldn't start `hermes auth spotify`: \(error.localizedDescription)")
+            state = .failure(reason: "Couldn't start `\(Self.commandName(pluginLogin: usesPluginLogin))`: \(error.localizedDescription)")
             // Nothing spawned, so nothing will ever reach EOF or report an
             // exit: this run is over here, and its pipes go with it. (On this
             // path the write ends really are still the parent's — Foundation
@@ -495,9 +495,36 @@ final class SpotifyAuthFlow {
     /// v2026.4.30 Spotify floor on (`hermes_cli/main.py:8444` @ v2026.4.30;
     /// `hermes_cli/subcommands/auth.py:76-77` @ v2026.9.24). `=` form so a
     /// value can never be read as an option.
-    nonisolated static func argv(clientID: String?) -> [String] {
+    ///
+    /// `pluginLogin` (``HermesCapabilities/hasSpotifyPluginLogin``, v0.21.7+):
+    /// `hermes auth spotify` is gone and the login is the `spotify` catalog
+    /// plugin's `hermes spotify login` (`hermes_cli/left_core_migration.py:247-252`
+    /// @ v0.21.7 / v0.22.5). The plugin lives outside the Hermes repo
+    /// (`plugin-catalog/spotify.yaml`: NousResearch/hermes-official-plugins),
+    /// so its argparse is NOT in tagged source and no flag is passed (C5):
+    /// the tagged docs mention `--client-id` / `--no-browser`
+    /// (`website/docs/user-guide/features/spotify.md:257`,
+    /// `guides/oauth-over-ssh.md:24` @ v0.22.5), but docs are not the parser.
+    /// So `clientID` is ignored on this path — a first-time sign-in with no
+    /// client ID on the host still hits the plugin's wizard. Tokens still
+    /// land in `providers.spotify` of `auth.json` (`spotify.md:5`), which the
+    /// verdict reads.
+    nonisolated static func argv(clientID: String?, pluginLogin: Bool = false) -> [String] {
+        if pluginLogin { return ["spotify", "login"] }
         guard let clientID, !clientID.isEmpty else { return ["auth", "spotify"] }
         return ["auth", "spotify", "--client-id=\(clientID)"]
+    }
+
+    /// The login spelling for logs and failure text.
+    nonisolated static func commandName(pluginLogin: Bool) -> String {
+        pluginLogin ? "hermes spotify login" : "hermes auth spotify"
+    }
+
+    /// Whether this window's host has moved the login into the plugin. The
+    /// version cache is warm by the time any Spotify sheet can open, and
+    /// `cached` never spawns; unknown reads as the old spelling (C1).
+    var usesPluginLogin: Bool {
+        HermesVersionCache.shared.cached(for: context)?.hasSpotifyPluginLogin ?? false
     }
 
     /// Spotify client IDs are 32 hex characters; accept any plain
@@ -587,11 +614,21 @@ final class SpotifyAuthFlow {
     /// Scarf's own spawn cannot finish on a remote host — the browser on
     /// this Mac is redirected to this Mac's 127.0.0.1:43827, where nothing
     /// listens, and a first-time wizard needs a terminal (S07-F6).
-    static func remoteCommandLine(for context: ServerContext, redirectURI: String = redirectURI) -> String {
+    ///
+    /// `pluginLogin` (v0.21.7+): plain `hermes spotify login` — no
+    /// `--no-browser`, for the same C5 reason as ``argv(clientID:pluginLogin:)``.
+    /// Over ssh it is not needed: with `SSH_CLIENT`/`SSH_TTY` set the login
+    /// skips the browser open itself (`website/docs/user-guide/features/spotify.md:69`
+    /// @ v0.22.5).
+    static func remoteCommandLine(
+        for context: ServerContext,
+        redirectURI: String = redirectURI,
+        pluginLogin: Bool = false
+    ) -> String {
         let port = callbackPort(of: redirectURI)
         return GatewaySetupTerminalCommand.shellLine(
             for: context,
-            hermesArgs: ["auth", "spotify", "--no-browser"],
+            hermesArgs: pluginLogin ? ["spotify", "login"] : ["auth", "spotify", "--no-browser"],
             localForwards: ["\(port):127.0.0.1:\(port)"]
         )
     }

@@ -20,8 +20,17 @@ import ScarfCore
 struct SpotifySignInSheet: View {
     @Environment(\.serverContext) private var serverContext
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
 
     var onSignedIn: () -> Void = {}
+
+    /// v0.21.7+: the login is the `spotify` plugin's `hermes spotify login`
+    /// (``SpotifyAuthFlow/argv(clientID:pluginLogin:)``), which takes no
+    /// verified `--client-id`, so a first-time setup runs its wizard in
+    /// Terminal instead of through the Client ID field.
+    private var pluginLogin: Bool {
+        capabilitiesStore?.capabilities.hasSpotifyPluginLogin ?? false
+    }
 
     @State private var flow: SpotifyAuthFlow?
     @State private var successDismissTask: Task<Void, Never>?
@@ -62,6 +71,8 @@ struct SpotifySignInSheet: View {
             } else if setup.clientIDKnown {
                 gate = .running
                 f.start()
+            } else if pluginLogin {
+                gate = .remote
             } else {
                 gate = .needsClientID
             }
@@ -183,15 +194,22 @@ struct SpotifySignInSheet: View {
     /// A remote window: the OAuth callback listens on the HOST's loopback,
     /// so sign-in has to run there, with the port forwarded to this Mac.
     private var remoteView: some View {
-        let line = SpotifyAuthFlow.remoteCommandLine(for: serverContext, redirectURI: redirectURI)
+        let line = SpotifyAuthFlow.remoteCommandLine(for: serverContext, redirectURI: redirectURI, pluginLogin: pluginLogin)
         return VStack(alignment: .leading, spacing: 10) {
-            Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort(of: redirectURI))) on that host, so Scarf can't complete it from this window.")
-                .font(.callout)
-                .fixedSize(horizontal: false, vertical: true)
-            Text("Run this in Terminal on this Mac. It connects with the callback port forwarded, then asks for a Client ID the first time and prints the sign-in link — open that link in your browser here.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if serverContext.isRemote {
+                Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort(of: redirectURI))) on that host, so Scarf can't complete it from this window.")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Run this in Terminal on this Mac. It connects with the callback port forwarded, then asks for a Client ID the first time and prints the sign-in link — open that link in your browser here.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // Local first-time setup on the plugin login (v0.21.7+).
+                Text("First-time Spotify setup asks for the Client ID of your own Spotify developer app, which needs a terminal. Run this in Terminal; afterwards Scarf can sign in again on its own.")
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             Text(verbatim: line)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)
@@ -234,7 +252,7 @@ struct SpotifySignInSheet: View {
     private var startingView: some View {
         VStack(spacing: 12) {
             ProgressView()
-            Text("Starting `hermes auth spotify`…")
+            Text("Starting `\(SpotifyAuthFlow.commandName(pluginLogin: pluginLogin))`…")
                 .font(.callout)
                 .foregroundStyle(.secondary)
         }

@@ -44,6 +44,18 @@ final class PluginsViewModel: OutcomeMessageHosting {
     }
 
     var plugins: [HermesPlugin] = []
+    /// True once the first `load()` has landed, so ``PluginRequiredNote``
+    /// does not offer "Install" over a roster that simply has not arrived.
+    private(set) var rosterLoaded = false
+
+    /// Whether the roster lists a plugin installed from catalog entry `id`.
+    /// The left-core rows install under their catalog name ("catalog entry
+    /// name == installed plugin name", `hermes_cli/left_core_migration.py:195`
+    /// @ v0.22.5); a path key (`<dir>/<name>`) is accepted too.
+    func hasPlugin(_ id: String) -> Bool {
+        plugins.contains { $0.name == id || $0.name.hasSuffix("/" + id) }
+    }
+
     /// `hermes plugins compat --json` (v0.21.1+). Nil means "no answer" —
     /// an older host, or a command that didn't run — which is deliberately
     /// distinct from a report with no affected plugins. The banner only
@@ -200,6 +212,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
                 self?.plugins = result
                 self?.compatReport = compat
                 self?.managedInstall = managed
+                self?.rosterLoaded = true
                 self?.isLoading = false
             }
         }
@@ -238,6 +251,34 @@ final class PluginsViewModel: OutcomeMessageHosting {
 
     var installReport: InstallReport?
 
+    /// The install identifier whose `--enable` Hermes refused for want of
+    /// Python dependency consent (v0.21.6+,
+    /// ``HermesPluginInstallOutcome/needsDependencyConsent``). Drives the
+    /// confirmation that re-runs the install with `--yes-deps`; nil
+    /// otherwise.
+    var pendingDependencyConsent: String?
+
+    /// Re-runs an install whose enable was refused for want of dependency
+    /// consent, answering that question with `--yes-deps`. Call ONLY from the
+    /// user's explicit confirmation — the flag is their consent to the
+    /// plugin's Python dependencies entering Hermes's shared environment.
+    ///
+    /// Why a re-install and not `plugins enable`: `--yes-deps` is an
+    /// `install` flag only (`hermes_cli/subcommands/plugins.py:33-40` @
+    /// v0.22.5; the `enable` parser at `:137-143` has none), and it is the
+    /// path Hermes documents for a non-interactive install that should finish
+    /// in one run (`cmd_install` docstring, `plugins_cmd_install.py:592-596`).
+    /// The plugin is already on disk, so `--force` is needed to get past
+    /// `already exists` (`:463-466`); it reinstalls from the same source and
+    /// keeps the user's untracked files (`plugins.py:25-27`). It also keeps a
+    /// memory provider's selection on the same `cmd_install` path
+    /// (`_select_memory_provider`, `:690`), which `plugins enable` never
+    /// touches.
+    func installWithDependencyConsent(_ identifier: String) {
+        pendingDependencyConsent = nil
+        install(identifier, enable: true, yesDeps: true)
+    }
+
     /// Installs a plugin, telling the CLI **explicitly** whether to enable
     /// it, per the user's choice in the install sheet.
     ///
@@ -247,7 +288,12 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// `cmd_install` prompt "Enable '<name>' now? [y/N]" on stdin — and on
     /// a non-tty it silently answers **no**, which is why Scarf's installs
     /// reported "Installed" while leaving the plugin inert.
-    func install(_ identifier: String, enable: Bool) {
+    ///
+    /// `showReport: false` is for an install started from outside this pane
+    /// (``PluginRequiredNote``), whose outcome the caller shows inline — the
+    /// report sheet would otherwise pop up the next time Plugins opens.
+    /// `yesDeps` is ``installWithDependencyConsent(_:)``'s alone.
+    func install(_ identifier: String, enable: Bool, showReport: Bool = true, yesDeps: Bool = false) {
         isLoading = true
         // In-progress, not an outcome — nothing has failed yet.
         message = String(localized: "Installing \(identifier)…")
@@ -261,12 +307,23 @@ final class PluginsViewModel: OutcomeMessageHosting {
         // of it — lives on this path, so a test that cannot reach the real
         // path proves nothing about the shipped behaviour.
         let run = cliRunner
+        let ctx = context
         Task.detached { [weak self] in
+            // `--force --yes-deps` only after the user's consent, and only on
+            // a host whose parser has `--yes-deps` (v0.21.6+): the dialog that
+            // leads here is armed by a `Cannot enable` line no older host
+            // prints. Flags before `--`, as everywhere on this pane.
             let result = run(
-                ["plugins", "install", enable ? "--enable" : "--no-enable", "--", identifier],
+                ["plugins", "install"]
+                    + (yesDeps ? ["--force", "--yes-deps"] : [])
+                    + [enable ? "--enable" : "--no-enable", "--", identifier],
                 180
             )
             let outcome = HermesPluginInstallOutcome.parse(result.output)
+            // C1: an older host never prints the refusal line, and the gate
+            // keeps the new arm unreachable there anyway. The cache is warm —
+            // `load()` probed it — and `cached` never spawns.
+            let depsConsent = HermesVersionCache.shared.cached(for: ctx)?.hasPluginInstallDepsConsent ?? false
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.isLoading = false
@@ -297,6 +354,18 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     self.applySaveOutcome(.failure(
                         String(localized: "Installed, but it could not be enabled: \(refusal)")
                     ))
+                } else if !failed, enable, depsConsent, let reason = outcome.enableRefusal {
+                    // v0.21.6+: installed but left disabled, exit 0 — most
+                    // often because the plugin declares Python dependencies
+                    // and Hermes had no terminal to ask about them. Never
+                    // "Installed and enabled"; the consent case offers the
+                    // `--yes-deps` re-run.
+                    self.applySaveOutcome(.failure(
+                        String(localized: "Installed, but not enabled: \(reason)")
+                    ))
+                    if outcome.needsDependencyConsent, !yesDeps {
+                        self.pendingDependencyConsent = identifier
+                    }
                 } else {
                     self.applySaveOutcome(
                         failed
@@ -306,7 +375,9 @@ final class PluginsViewModel: OutcomeMessageHosting {
                                        : String(localized: "Installed (not enabled)"))
                     )
                 }
-                self.installReport = InstallReport(identifier: identifier, outcome: outcome, failed: failed)
+                if showReport {
+                    self.installReport = InstallReport(identifier: identifier, outcome: outcome, failed: failed)
+                }
                 self.load(force: true)
             }
         }
@@ -394,6 +465,8 @@ final class PluginsViewModel: OutcomeMessageHosting {
             args,
             success: "Enabled",
             successMarkers: HermesCLIMarkers.pluginsEnableSuccess,
+            // v0.22.3+ prints `✓ Plugin <key> enabled.` with no tail.
+            successLine: HermesCLIMarkers.isPluginsEnabledLine,
             failureMarkers: HermesCLIMarkers.pluginsEnableFailure,
             // P39 (round-4 review): the managed refusal is matched ANCHORED.
             // `plugins update` prints the raw `git pull` output and the
@@ -427,6 +500,8 @@ final class PluginsViewModel: OutcomeMessageHosting {
             ["plugins", "disable", "--", plugin.name],
             success: "Disabled",
             successMarkers: HermesCLIMarkers.pluginsDisableSuccess,
+            // v0.22.3+ prints `⊘ Plugin <key> disabled.` with no tail.
+            successLine: HermesCLIMarkers.isPluginsDisabledLine,
             failureMarkers: HermesCLIMarkers.pluginsDisableFailure,
             // P39 (round-4 review): the managed refusal is matched ANCHORED.
             // `plugins update` prints the raw `git pull` output and the
@@ -502,6 +577,7 @@ final class PluginsViewModel: OutcomeMessageHosting {
         _ args: [String],
         success: String,
         successMarkers: [String]? = nil,
+        successLine: (@Sendable (String) -> Bool)? = nil,
         failureMarkers: [String] = [],
         anchoredFailureMarkers: [String] = [],
         failureWins: Bool = false
@@ -516,7 +592,8 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     successMarkers: markers,
                     failureMarkers: failureMarkers,
                     anchoredFailureMarkers: anchoredFailureMarkers,
-                    failureWins: failureWins
+                    failureWins: failureWins,
+                    successLine: successLine
                 )
             } ?? HermesCLIOutcome(
                 succeeded: result.exitCode == 0,

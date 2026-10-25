@@ -222,6 +222,11 @@ public enum HermesCLIVerdict {
     ///     write into a reported failure — and with `failureWins: true`, it
     ///     did so unconditionally. Every refusal line on these paths is
     ///     printed at column 0, so anchoring costs nothing and closes it.
+    ///   - successLine: a whole-line success shape, tried alongside
+    ///     `successMarkers`, for a success line no fixed substring can name
+    ///     without matching other text — `plugins enable`'s
+    ///     `✓ Plugin <key> enabled.` since v0.22.3
+    ///     (``HermesCLIMarkers/isPluginsEnabledLine(_:)``).
     public static func judge(
         output: String,
         exitCode: Int32,
@@ -230,7 +235,8 @@ public enum HermesCLIVerdict {
         anchoredFailureMarkers: [String] = [],
         failureWins: Bool = false,
         fallbackDetail: Bool = true,
-        successAnchored: Bool = false
+        successAnchored: Bool = false,
+        successLine: ((String) -> Bool)? = nil
     ) -> HermesCLIOutcome {
         let lines = significantLines(output)
         func matchesFailure(_ line: String) -> Bool {
@@ -249,6 +255,7 @@ public enum HermesCLIVerdict {
             )
         }
         func matchesSuccess(_ line: String) -> Bool {
+            if let successLine, successLine(line) { return true }
             guard successAnchored else { return successMarkers.contains { line.contains($0) } }
             let head = unglyphed(line)
             return successMarkers.contains { head.hasPrefix($0) }
@@ -748,7 +755,8 @@ public enum HermesCLIMarkers {
 
     /// `✓ Plugin <key> enabled. Takes effect on next session.` (:1023), or
     /// `Plugin '<key>' is already enabled.` (:1012) when it was already on.
-    /// Stable since v2026.6.19:801.
+    /// Stable since v2026.6.19:801 through v0.22.2 (`plugins_cmd.py:729`);
+    /// v0.22.3 dropped the tail — see ``isPluginsEnabledLine(_:)``.
     public static let pluginsEnableSuccess = [
         "Takes effect on next session.",
         "is already enabled.",
@@ -773,11 +781,38 @@ public enum HermesCLIMarkers {
     ]
 
     /// `⊘ Plugin <key> disabled. Takes effect on next session.` (:1198), or
-    /// the already-disabled line.
+    /// the already-disabled line. Through v0.22.2 (`plugins_cmd.py:765`);
+    /// v0.22.3 dropped the tail — see ``isPluginsDisabledLine(_:)``.
     public static let pluginsDisableSuccess = [
         "Takes effect on next session.",
         "is already disabled.",
     ]
+
+    /// v0.22.3+ `plugins enable` success line: `✓ Plugin <key> enabled.`
+    /// (`hermes_cli/plugins_cmd.py:729` @ v0.22.3 and v0.22.5, where v0.22.2's
+    /// `:729` still ends `enabled. Takes effect on next session.`). With the
+    /// tail gone no substring names it — `enabled.` alone is in the
+    /// `already enabled.` line and in plugin-authored text — so the whole line
+    /// is matched: column 0 after the glyph, `Plugin `, one space-free key,
+    /// ` enabled.`. An older host never prints that shape, so accepting it
+    /// there changes nothing; ``pluginsEnableSuccess`` still carries theirs.
+    public static func isPluginsEnabledLine(_ line: String) -> Bool {
+        isPluginToggleLine(line, tail: " enabled.")
+    }
+
+    /// v0.22.3+ `plugins disable` success line: `⊘ Plugin <key> disabled.`
+    /// (`hermes_cli/plugins_cmd.py:765` @ v0.22.3 and v0.22.5). Same shape
+    /// rule as ``isPluginsEnabledLine(_:)``.
+    public static func isPluginsDisabledLine(_ line: String) -> Bool {
+        isPluginToggleLine(line, tail: " disabled.")
+    }
+
+    private static func isPluginToggleLine(_ line: String, tail: String) -> Bool {
+        let head = HermesCLIVerdict.unglyphed(line)
+        guard head.hasPrefix("Plugin "), head.hasSuffix(tail) else { return false }
+        let key = head.dropFirst("Plugin ".count).dropLast(tail.count)
+        return !key.isEmpty && !key.contains(" ")
+    }
 
     /// Same `_fail` refusal as enable, minus one: `disable` runs no consent
     /// screen and no legacy-relay refusal.
@@ -2228,6 +2263,22 @@ public enum HermesPluginsUpdateVerdict {
             && head.contains(HermesCLIMarkers.pluginsUpdateSecurityDisabled)
     }
 
+    /// v0.22.3+: the update is scanned BEFORE it is applied, and a refused one
+    /// exits 1 through `_fail` with `Blocked: <scan reason + report>` or
+    /// `Update of <name> not applied: <reason>`
+    /// (`hermes_cli/plugins_cmd_update.py:140,142` @ v0.22.3 and v0.22.5;
+    /// `Blocked:` is new at v0.22.3, the catalog re-pin's `not applied:` is at
+    /// `plugins_cmd_catalog.py:677` @ v0.22.2). The block reason is the
+    /// FIRST line of a multi-line message whose last line is the generic
+    /// "configure scanning" hint (`plugins_cmd.py:217-223` @ v0.22.5), so the
+    /// last-line fallback quoted the hint instead of the reason. Only picks
+    /// the detail of a nonzero run; it never decides the verdict.
+    static func isRefusedUpdateLine(_ line: String) -> Bool {
+        let head = HermesCLIVerdict.unglyphed(line)
+        return head.hasPrefix("Blocked: ")
+            || (head.hasPrefix("Update of ") && head.contains(" not applied: "))
+    }
+
     public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
         let lines = HermesCLIVerdict.significantLines(output)
         let succeeded = lines.contains(where: isSuccessLine)
@@ -2240,7 +2291,8 @@ public enum HermesPluginsUpdateVerdict {
         // `failureWins`, as before: the consent refusal and the managed
         // refusal both print BEFORE the success line by design.
         if exitCode != 0 || refusal != nil || !succeeded {
-            return HermesCLIOutcome(succeeded: false, detail: refusal ?? lines.last)
+            let refused = exitCode != 0 ? lines.first(where: isRefusedUpdateLine) : nil
+            return HermesCLIOutcome(succeeded: false, detail: refusal ?? refused ?? lines.last)
         }
         // The scan verdict is keyed on the FLAGGED line, not on the disable.
         // `_rescan_after_update` prints `⚠ Security scan flagged the updated

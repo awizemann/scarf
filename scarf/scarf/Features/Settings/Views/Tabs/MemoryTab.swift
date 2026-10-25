@@ -27,12 +27,21 @@ struct MemoryTab: View {
 
         SettingsSection(title: "External Provider", icon: "externaldrive.connected.to.line.below") {
             PickerRow(label: "Provider", selection: viewModel.config.memoryProvider, options: viewModel.memoryProviders) { viewModel.setMemoryProvider($0) }
+            // A provider that left core needs its catalog plugin (S6). Older
+            // hosts get nil here and render exactly as before (C1).
+            if let capabilities = capabilitiesStore?.capabilities,
+               let plugin = SettingsViewModel.memoryProviderPlugin(viewModel.config.memoryProvider, capabilities: capabilities) {
+                PluginRequiredNote(pluginID: plugin, feature: "The \(plugin) memory provider")
+            }
             // No "Honcho Eager Init" toggle: Hermes reads `initOnSessionStart`
-            // only from the honcho.json host block
-            // (`plugins/memory/honcho/client.py:108-118,323` @ v2026.9.24),
-            // never from config.yaml, so the row Scarf had wrote a key nothing
-            // read (T3-F1). Hermes's own web dashboard edits that block
-            // (`hermes_cli/web_routers/memory_providers.py:310`).
+            // only from the honcho.json host block, never from config.yaml, so
+            // the row Scarf had wrote a key nothing read (T3-F1). That reader
+            // was in core at v2026.9.24 (`plugins/memory/honcho/client.py:108-118,323`);
+            // from v0.21.6 honcho is the `honcho` catalog plugin
+            // (`plugin-catalog/honcho.yaml`, plastic-labs/honcho
+            // `hermes-plugin-honcho`), outside this repo, and Scarf still writes
+            // no such key. Hermes's own web dashboard edits that block
+            // (`hermes_cli/web_routers/memory_providers.py:310` @ v2026.9.24).
             HStack {
                 Text("Setup")
                     .font(.caption)

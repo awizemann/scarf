@@ -181,6 +181,30 @@ final class SettingsViewModel {
         ("tr", "Türkçe (Turkish)"),
     ]
     var memoryProviders = ["", "honcho", "openviking", "mem0", "hindsight", "holographic", "retaindb", "byterover", "supermemory"]
+
+    /// The catalog plugin a memory provider now comes from on this host, or
+    /// nil while it still ships in core (or is not a left-core provider).
+    /// The provider name IS the catalog entry name
+    /// (`catalog_source(name)`, `hermes_cli/memory_provider_migration.py:103-107`
+    /// @ v0.22.5; `plugin-catalog/<name>.yaml` exists for all six).
+    ///
+    /// - honcho, mem0, openviking, supermemory: `plugins/memory/<name>` at
+    ///   v2026.9.24, gone at v0.21.6 (``HermesCapabilities/hasCatalogMemoryProviders``).
+    /// - holographic: gone at v0.21.7 (``HermesCapabilities/hasCatalogHolographicMemory``).
+    /// - hindsight: already absent from `plugins/memory/` at v2026.9.24
+    ///   (catalog-only, `plugin-catalog/hindsight.yaml`), but it rides the
+    ///   v0.21.6 flag so an older host renders exactly what it did (C1).
+    /// - retaindb and byterover are still in core at v0.22.5.
+    static func memoryProviderPlugin(_ provider: String, capabilities: HermesCapabilities) -> String? {
+        switch provider {
+        case "honcho", "mem0", "openviking", "supermemory", "hindsight":
+            return capabilities.hasCatalogMemoryProviders ? provider : nil
+        case "holographic":
+            return capabilities.hasCatalogHolographicMemory ? provider : nil
+        default:
+            return nil
+        }
+    }
     var saveMessage: String?
     /// Outcome of ``saveMessage`` (GW-F4). The toast used to render every
     /// message — including "Could not save …" and the guarded-write

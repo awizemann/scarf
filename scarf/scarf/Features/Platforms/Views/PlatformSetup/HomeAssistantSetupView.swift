@@ -4,12 +4,19 @@ import ScarfDesign
 
 struct HomeAssistantSetupView: View {
     @State private var viewModel: HomeAssistantSetupViewModel
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
     init(context: ServerContext) { _viewModel = State(initialValue: HomeAssistantSetupViewModel(context: context)) }
 
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             instructions
+            // v0.21.6: the adapter left core for the `homeassistant` catalog
+            // plugin (`hermes_cli/left_core_migration.py:240-246` @ v0.22.5);
+            // the HASS_* keys and `platforms.homeassistant` are unchanged.
+            if capabilitiesStore?.capabilities.hasCatalogHomeAssistant == true {
+                PluginRequiredNote(pluginID: "homeassistant", feature: "Home Assistant")
+            }
 
             SettingsSection(title: "Connection", icon: "network") {
                 EditableTextField(label: "URL", value: viewModel.url) { viewModel.url = $0 }

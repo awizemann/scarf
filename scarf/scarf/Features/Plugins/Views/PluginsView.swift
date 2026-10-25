@@ -91,6 +91,9 @@ struct PluginsView: View {
         } message: {
             Text("This plugin declares the `tools.override` capability. Granting it lets the plugin take over built-in tools such as `shell_exec` and `write_file` for every session on this host.")
         }
+        // v0.21.6+: an install left disabled for want of dependency consent.
+        // The report sheet asks first; this catches it once that is closed.
+        .pluginDependencyConsentDialog(viewModel, isEnabled: viewModel.installReport == nil)
         .sheet(item: Binding(
             get: { viewModel.installReport },
             set: { if $0 == nil { viewModel.installReport = nil } }
@@ -142,6 +145,7 @@ struct PluginsView: View {
         }
         .padding()
         .frame(minWidth: 560, minHeight: 380)
+        .pluginDependencyConsentDialog(viewModel)
     }
 
     private var header: some View {
