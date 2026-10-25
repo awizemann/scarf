@@ -40,8 +40,10 @@ usage: hermes sessions list [-h] ...
 ```
 
 Read-back only. Output is a fixed-width table whose header is
-`Title  Workspace  Last Active  ID`; the script counts rows beginning
-`Reply with exactly`.
+`Title  Workspace  Last Active  ID`; the script counts rows by the trailing session
+id, in either shape Hermes mints: `YYYYMMDD_HHMMSS_<6 hex>` (`hermes_state_ids.py`
+`new_session_id`, v2026.9.24) or, from v0.22.x where `-z` runs through the gateway,
+`local-<64 hex>` (`hermes_state_keys.py:74` `local_identity`, v0.22.5).
 
 ## `cron create` / `cron pause` / `cron list --all`
 
@@ -218,6 +220,23 @@ provider plugins*; built-in memory is two plain markdown files at
 `$HERMES_HOME/memories/MEMORY.md` and `USER.md`, which Scarf's own Memory section
 reads and edits directly (`MemoryView.swift:514-523`). The fixture therefore writes
 those two files itself — the same way the app does — rather than inventing a verb.
+
+## `gateway stop` — stopping the fixture's own gateway
+
+```
+$ hermes gateway stop --help          # v0.22.5
+usage: hermes gateway stop [-h] [--system] [--all] [-y]
+```
+
+On v0.22.x `hermes -z` is a gateway client (`gateway_chat.py:172` `connect_gateway`
+→ `ensure_gateway_runtime`), so seeding leaves a gateway daemon running in the
+fixture home, and a rerun into the same dir then fails (DeletedWalGenerationError).
+The script runs `HERMES_HOME=<fixture> hermes gateway stop [--yes]` at the end of
+seeding and before clearing a reused fixture dir. `-y/--yes` (alias `--interrupt`,
+skips the live-session refusal) exists only from v0.22.3, so it is passed only when
+`gateway stop --help` lists it. With no gateway running, `gateway stop` prints
+`No gateway running for this profile` and exits 0 at v2026.9.24 and v0.22.5; the
+script logs the result either way and never fails on it.
 
 ---
 

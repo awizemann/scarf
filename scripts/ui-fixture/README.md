@@ -128,6 +128,11 @@ destination *is*, or is *inside*, the real `~/.hermes` (symlinks resolved), or i
 empty or carries `.scarf-test-home-marker`; any other non-empty directory is
 refused rather than wiped.
 
+On Hermes v0.22.x, `hermes -z` starts a gateway daemon in the fixture home. The
+script stops it (`gateway stop`, plus `--yes` where the CLI has it) at the end of
+seeding and before clearing a reused fixture dir, so a rerun into the same dir works
+and no daemon outlives the build (see `VERBS.md`).
+
 Charter C3 — Scarf never writes `state.db` — is intact: the app under test stays
 read-only, every mutation the CLI can express goes through the CLI, and the two
 exceptions above are this script writing the throwaway home it just built, never

@@ -112,6 +112,10 @@ final class ConfigJourneyUITests: ScarfUITestCase {
         // `openhue` is the skill (and the `skills.row.` key). A test that
         // read the first entry of `skills/` would look for a
         // `skills.row.smart-home` that has never existed.
+        //
+        // Only a DIRECTORY holding a `SKILL.md` is a skill: v0.22.x homes
+        // also carry the bundled skills plus a `DESCRIPTION.md` per
+        // category, which is not one. Prefer the fixture's seeded `openhue`.
         let skillsDir = (isolatedHome as NSString).appendingPathComponent("skills")
         let fm = FileManager.default
         let installed: [(category: String, name: String)] = ((try? fm.contentsOfDirectory(atPath: skillsDir)) ?? [])
@@ -121,10 +125,15 @@ final class ConfigJourneyUITests: ScarfUITestCase {
                 let categoryDir = (skillsDir as NSString).appendingPathComponent(category)
                 return ((try? fm.contentsOfDirectory(atPath: categoryDir)) ?? [])
                     .filter { !$0.hasPrefix(".") }
+                    .filter { name in
+                        let skillMD = ((categoryDir as NSString).appendingPathComponent(name) as NSString)
+                            .appendingPathComponent("SKILL.md")
+                        return fm.fileExists(atPath: skillMD)
+                    }
                     .sorted()
                     .map { (category, $0) }
             }
-        guard let skill = installed.first else {
+        guard let skill = installed.first(where: { $0.name == "openhue" }) ?? installed.first else {
             throw XCTSkip("No <category>/<skill> under \(skillsDir) — run with TEST_RUNNER_SCARF_UITEST_FIXTURE pointing at a seeded fixture home (scripts/ui-fixture/make-ui-fixture.sh).")
         }
         let skillName = skill.name

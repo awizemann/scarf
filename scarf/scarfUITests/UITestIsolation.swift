@@ -170,6 +170,10 @@ class ScarfUITestCase: XCTestCase {
         app.launchArguments = ["--scarf-test-mode"] + Self.standardLaunchArguments + extraLaunchArguments
         app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
         app.launchEnvironment["HERMES_HOME"] = isolatedHome
+        // Lets a version-routing `hermes` shim pick a Hermes build per run.
+        if let liveHermes = ProcessInfo.processInfo.environment["SCARF_LIVE_HERMES"] {
+            app.launchEnvironment["SCARF_LIVE_HERMES"] = liveHermes
+        }
         return app
     }
 

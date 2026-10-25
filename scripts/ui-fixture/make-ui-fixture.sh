@@ -245,6 +245,8 @@ verify_all_verbs() {
     verify_flag "--yes"     skills repair-official
     verify_verb skills list
 
+    verify_verb gateway stop
+
     note "all verbs and flags verified"
 }
 
@@ -257,6 +259,36 @@ fi
 
 # ---------------------------------------------------------------- build the home
 
+# ---------------------------------------------------------------- fixture gateway
+
+# On v0.22.x `hermes -z` is a gateway client: it reaches the agent through
+# `connect_gateway` → `ensure_gateway_runtime`, which spawns an unmanaged
+# gateway daemon IN THE FIXTURE HOME (`hermes_cli/main.py` _run_oneshot_from_args
+# → `gateway_chat_startup.launch_gateway_chat`; `hermes_cli/gateway_client.py:288`,
+# v0.22.5). Left running, it holds the fixture's state.db open, and a rerun into
+# the same dir fails once its contents are cleared under it
+# (DeletedWalGenerationError). So the fixture's own gateway is stopped at the
+# end of seeding, and before a reused fixture dir is cleared.
+#
+# `--yes` (alias of `--interrupt`) exists only from v0.22.3
+# (`hermes_cli/subcommands/gateway.py:144`); it skips the live-session refusal,
+# which would otherwise exit 1 on a non-TTY. Probed from the verb's own help,
+# never inferred from a version string. With no gateway running, `gateway stop`
+# prints "No gateway running for this profile" and exits 0 at both v2026.9.24
+# and v0.22.5 — but any failure here is reported, never fatal: the seeded data
+# is already in place.
+stop_fixture_gateway() {
+    local home="$1" help out rc
+    local -a argv=(gateway stop)
+    help="$("$HERMES_BIN" gateway stop --help 2>&1 || true)"
+    case "$help" in *"--yes"*) argv+=(--yes) ;; esac
+    set +e
+    out="$(HERMES_HOME="$home" "$HERMES_BIN" "${argv[@]}" 2>&1)"
+    rc=$?
+    set -e
+    note "hermes ${argv[*]} (exit $rc): $(printf '%s' "$out" | tail -1)"
+}
+
 step "Preparing fixture home: $DEST_ABS"
 
 if [ -e "$DEST_ABS" ]; then
@@ -268,6 +300,8 @@ if [ -e "$DEST_ABS" ]; then
         die "$DEST_ABS is non-empty and carries no $MARKER_FILENAME — refusing to overwrite a directory this script did not create"
     fi
     note "reusing existing fixture dir (clearing it)"
+    # A previous run may have left its gateway running on this home.
+    [ -f "$DEST_ABS/$MARKER_FILENAME" ] && stop_fixture_gateway "$DEST_ABS"
     # Contents only; never the directory itself (it may be a caller-made mktemp -d).
     find "$DEST_ABS" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 else
@@ -340,8 +374,12 @@ done
 
 sessions_out="$(capture sessions list)"
 # Count rows by session id, not title: the model may title a one-shot chat
-# ("FIXTURE-1") instead of leaving the prompt as its preview.
-session_count="$(printf '%s\n' "$sessions_out" | grep -cE '[0-9]{8}_[0-9]{6}_[0-9a-f]{6}[[:space:]]*$' || true)"
+# ("FIXTURE-1") instead of leaving the prompt as its preview. Two id shapes,
+# by Hermes version: `YYYYMMDD_HHMMSS_<6 hex>` (`hermes_state_ids.py`
+# `new_session_id`, v2026.9.24 = 0.21.5) and, from v0.22.x where `-z` runs
+# through the gateway, `local-<sha256 hex>` (`hermes_state_keys.py:74`
+# `local_identity`, v0.22.5).
+session_count="$(printf '%s\n' "$sessions_out" | grep -cE '([0-9]{8}_[0-9]{6}_[0-9a-f]{6}|local-[0-9a-f]{64})[[:space:]]*$' || true)"
 [ "$session_count" -ge 3 ] || { printf '%s\n' "$sessions_out" >&2; die "expected 3 seeded sessions, 'hermes sessions list' shows $session_count"; }
 note "sessions in state.db: $session_count"
 
@@ -704,6 +742,11 @@ cat > "$DEST_ABS/memories/USER.md" <<'EOF'
 - FIXTURE-MEMORY-2: fixture user profile, seeded for UI tests. Not a real person.
 EOF
 note "memories/MEMORY.md, memories/USER.md"
+
+# ---------------------------------------------------------------- stop the fixture gateway
+
+step "Stopping any gateway running in the fixture home"
+stop_fixture_gateway "$DEST_ABS"
 
 # ---------------------------------------------------------------- self-check
 

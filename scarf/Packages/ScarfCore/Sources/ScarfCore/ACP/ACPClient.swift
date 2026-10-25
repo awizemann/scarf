@@ -1305,6 +1305,18 @@ public enum ACPErrorHint {
             return Classification(hint: "The Hermes gateway that answered belongs to a different profile than this chat. Check which gateway is running (`hermes gateway status`) and restart this profile's gateway.")
         }
 
+        // `hermes acp` on an install without the ACP extra prints this to
+        // stderr and exits 1 (`cmd_acp`'s ImportError path). The opening
+        // line is the same at v2026.9.24 (`main_dep_hints.py:18`) and
+        // v0.21.6+ (`main_agent_cmds.py:86` @ v0.21.6, :97 @ v0.22.5);
+        // the command it suggests differs, so it is quoted from Hermes's
+        // own output: "From the Hermes environment, run: hermes pm install
+        // --extra acp" (`pm/extras.py` `install_hint`, v0.21.6+) or "Run
+        // `hermes update` to reinstall dependencies." (v2026.9.24).
+        if haystack.contains("The ACP server can't start: its protocol packages are missing from this install.") {
+            return Classification(hint: acpExtraMissingHint(in: haystack))
+        }
+
         // SSH-level failures come first — they apply only to remote
         // contexts and the patterns are unambiguous (system ssh prints
         // them verbatim to stderr). Without these classifications a
@@ -1436,6 +1448,26 @@ public enum ACPErrorHint {
             return Classification(hint: "This chat's model isn't available from the provider any more. Pick another model from the model menu in the chat header, or start a new chat.")
         }
         return nil
+    }
+
+    /// Hint for a `hermes acp` that is missing its ACP extra, naming the
+    /// command Hermes itself printed (see `classify`).
+    private static func acpExtraMissingHint(in haystack: String) -> String {
+        let lead = "Hermes's ACP server can't start: its protocol packages are missing from this Hermes install."
+        let patterns = [
+            #"From the Hermes environment, run: ([^\n]+)"#,
+            #"Run `([^`\n]+)` to reinstall dependencies"#,
+        ]
+        for pattern in patterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern),
+                  let match = regex.firstMatch(in: haystack, range: NSRange(haystack.startIndex..., in: haystack)),
+                  let range = Range(match.range(at: 1), in: haystack) else { continue }
+            let command = haystack[range].trimmingCharacters(in: .whitespaces)
+            if !command.isEmpty {
+                return "\(lead) Hermes says to run `\(command)`, then restart Hermes."
+            }
+        }
+        return "\(lead) Run the install command Hermes printed (see details), then restart Hermes."
     }
 
     /// Best-effort extraction of an OAuth provider name from raw error
