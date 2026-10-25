@@ -124,6 +124,23 @@ import Foundation
 
     // MARK: - Write side
 
+    @Test func writerQuotesEverySpellingRuamelReadsAsABool() {
+        // The four ruamel-only bools get quoted, on every host.
+        for word in ["y", "Y", "n", "N"] {
+            #expect(YAMLScalar.quoteIfNeeded(word) == "'\(word)'", "\(word)")
+        }
+        // The PyYAML set was already quoted; strings ruamel leaves alone
+        // stay bare.
+        for word in ["yes", "On", "FALSE"] {
+            #expect(YAMLScalar.quoteIfNeeded(word) == "'\(word)'", "\(word)")
+        }
+        for word in ["yEs", "oN", "ye", "nn", "yn"] {
+            #expect(YAMLScalar.quoteIfNeeded(word) == word, "\(word)")
+        }
+        // The reader side keeps PyYAML's answer.
+        #expect(!YAMLScalar.resolvesToNonString("y"))
+    }
+
     @Test func writeRefusalIsGatedOnTheFloor() {
         let dup = "a: 1\na: 2\n"
         #expect(HermesYAML.duplicateKeyWriteRefusal(in: dup, capabilities: Self.v0215) == nil)

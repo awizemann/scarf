@@ -259,12 +259,23 @@ public enum YAMLScalar {
             || raw.last == " "
             || raw.contains("\t")
             || resolvesToNonString(raw)
+            || yaml11OnlyBools.contains(raw)
         if !needsQuoting { return raw }
         // Single-quote, escaping any embedded single quotes by doubling.
         // `HermesYAML.stripYAMLQuotes` / `normalizedScalar` UN-double on the
         // way back in — an asymmetric pair here grew one `'` per save.
         return singleQuoted(raw)
     }
+
+    /// The plain spellings v0.21.6+'s ruamel loader (`hermes_yaml.py:3-4`,
+    /// YAML 1.1) resolves to a bool and PyYAML does not: probed against
+    /// ruamel 0.18.16 in the v0.22.5 venv, its bool set is exactly
+    /// ``boolResolverPattern``'s plus these four (`yEs`, `oN` and the rest
+    /// stay strings in both). ``quoteIfNeeded(_:)`` quotes them on EVERY
+    /// host — a quoted `'y'` is the string `y` to PyYAML as well, so older
+    /// hosts read the same value — while ``resolvesToNonString(_:)`` keeps
+    /// PyYAML's reading for the readers that use it.
+    static let yaml11OnlyBools: Set<String> = ["y", "Y", "n", "N"]
 
     /// Single-quoted form, escaping an embedded `'` by doubling — YAML's one
     /// escape in this style.
