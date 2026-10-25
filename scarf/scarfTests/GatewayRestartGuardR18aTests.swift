@@ -21,19 +21,23 @@ struct GatewayRestartGuardR18aTests {
     }
 
     private static func viewModel(
-        status: String, statusExit: Int32 = 0, manager: String = "", calls: Calls
+        status: String, statusExit: Int32 = 0, manager: String = "", calls: Calls,
+        capabilities: HermesCapabilities = .empty
     ) -> MessagingGatewayViewModel {
         let home = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("scarf-r18a-\(UUID().uuidString)")
         try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         return MessagingGatewayViewModel(
             context: .local(home: home),
-            capabilities: .empty,
+            capabilities: capabilities,
             cliRunner: { args, _ in
                 calls.record(args)
                 if args == ["gateway", "status"] { return (status, statusExit) }
-                if args == ["status"] { return (manager, 0) }
+                if args.first == "status" { return (manager, 0) }
                 if args == ["gateway", "restart"] { return ("✓ Service restarted", 0) }
+                if args == ["gateway", "restart", "--detach"] {
+                    return ("✓ Stopped gateway for this profile\nStarting gateway...\n✓ Started the gateway in the background", 0)
+                }
                 return ("", 0)
             }
         )
@@ -58,6 +62,22 @@ struct GatewayRestartGuardR18aTests {
         #expect(message == HermesGatewayRestartGuard.runningWithoutServiceNote)
         #expect(vm.actionFailed == true, "it stays until the next action")
         #expect(vm.isBusy == false)
+    }
+
+    /// v0.22.3+: `gateway restart --detach` starts the replacement in the
+    /// background, so a hand-run gateway restarts — with `--detach`, never
+    /// the bare verb.
+    @Test func aHandRunGatewayRestartsDetachedOnV0223() async throws {
+        let calls = Calls()
+        let vm = Self.viewModel(
+            status: HermesGatewayRestartGuardFixtures.manualRunning, calls: calls,
+            capabilities: HermesCapabilities.parseLine("Hermes Agent v0.22.5 (2026.9.24)"))
+        vm.restartGateway()
+        await Self.until(timeout: 10) { vm.actionMessage != nil }
+        #expect(calls.all.contains(["gateway", "restart", "--detach"]), "\(calls.all)")
+        #expect(!calls.all.contains(["gateway", "restart"]))
+        #expect(vm.actionFailed == false)
+        #expect(vm.actionMessage == "Gateway restarted")
     }
 
     @Test func aStoppedNoServiceGatewayIsNotRestartedInTheForegroundEither() async throws {

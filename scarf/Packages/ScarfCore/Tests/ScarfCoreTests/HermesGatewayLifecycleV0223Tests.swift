@@ -136,6 +136,33 @@ import Foundation
         #expect(HermesGatewayRestartGuard.runningPIDs(statusOutput: Self.incompatibleHandRun) == [4242])
     }
 
+    // MARK: - hand-run restart via --detach
+
+    static func decide(status: String, caps: HermesCapabilities, stopThenStart: Bool = false) -> HermesGatewayRestartGuard.Decision {
+        HermesGatewayRestartGuard.decide(
+            run: { args, _ in args == ["gateway", "status"] ? (status, 0) : ("", 0) },
+            stateJSON: { nil }, capabilities: caps, stopThenStart: stopThenStart)
+    }
+
+    /// v0.22.3+ `restart --detach` starts the replacement in the background,
+    /// so a hand-run gateway (the incompatible one included) may restart.
+    @Test func handRunGatewayRestartsWhereDetachExists() {
+        for status in [HermesGatewayRestartGuardR18aTests.manualRunning, Self.incompatibleHandRun] {
+            #expect(Self.decide(status: status, caps: Self.v0225) == .restart(externallySupervised: false))
+            // Older hosts keep today's refusal…
+            for caps in [Self.v0222, Self.v0221, HermesCapabilities.empty] {
+                #expect(Self.decide(status: status, caps: caps)
+                    == .refuse(HermesCLIOutcome(succeeded: false, detail: HermesGatewayRestartGuard.runningWithoutServiceNote)))
+            }
+            // …and a stop + start never takes the `--detach` arm.
+            #expect(Self.decide(status: status, caps: Self.v0225, stopThenStart: true)
+                == .refuse(HermesCLIOutcome(succeeded: false, detail: HermesGatewayRestartGuard.runningWithoutServiceNote)))
+        }
+        // A stopped no-service gateway is unchanged.
+        #expect(Self.decide(status: HermesGatewayRestartGuardR18aTests.manualStopped, caps: Self.v0225)
+            == .refuse(HermesCLIOutcome(succeeded: false, detail: HermesGatewayRestartGuard.stoppedWithoutServiceNote)))
+    }
+
     // MARK: - status --all
 
     @Test func fullStatusArgvFromV0216Only() {

@@ -218,7 +218,8 @@ public enum HermesGatewayRestartGuard {
         return decision(
             statusOutput: status.output, statusExitCode: status.exitCode,
             stateJSON: stopThenStart ? nil : stateJSON(), capabilities: capabilities,
-            managerStatusOutput: manager.exitCode == -1 ? nil : manager.output, profileName: profileName)
+            managerStatusOutput: manager.exitCode == -1 ? nil : manager.output, profileName: profileName,
+            stopThenStart: stopThenStart)
     }
 
     /// ``decide(run:stateJSON:capabilities:stopThenStart:timeout:)`` for a
@@ -276,9 +277,12 @@ public enum HermesGatewayRestartGuard {
 
     /// The decision for probes already run: see
     /// ``refusal(statusOutput:statusExitCode:stateJSON:capabilities:managerStatusOutput:)``.
+    ///
+    /// - Parameter stopThenStart: the caller restarts by stop + start, which
+    ///   never takes `gateway restart`'s `--detach` arm.
     public static func decision(
         statusOutput: String, statusExitCode: Int32, stateJSON: Data?, capabilities: HermesCapabilities,
-        managerStatusOutput: String? = nil, profileName: String? = nil
+        managerStatusOutput: String? = nil, profileName: String? = nil, stopThenStart: Bool = false
     ) -> Decision {
         let trimmed = statusOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         // No answer at all: a restart might be the destructive kind, so it
@@ -300,6 +304,18 @@ public enum HermesGatewayRestartGuard {
             if capabilities.hasSupervisedGatewayRestart,
                isExternallySupervised(stateJSON: stateJSON, runningPIDs: runningPIDs(statusOutput: statusOutput)) {
                 return .restart(externallySupervised: true)
+            }
+            // v0.22.3+: `gateway restart --detach` (which Scarf passes there,
+            // ``HermesGatewayServiceVerdict/argv(_:capabilities:interrupt:)``)
+            // ends this exact path — no service, hand-run gateway — in
+            // `start_restart_replacement` (`gateway.py:5532-5540` @ v0.22.5),
+            // which with `--detach` calls `start_detached_replacement`
+            // (`gateway_supervised_restart.py:148-150`): the replacement is
+            // `Popen`ed in its own session with stdio to `logs/gateway-stdio.log`
+            // (`gateway_runtime_start.py:75-80`, `:86-97`) instead of running
+            // inside Scarf's spawn. A stop + start still cannot bring it back.
+            if capabilities.hasGatewayRestartDetach, !stopThenStart {
+                return .restart(externallySupervised: false)
             }
             return .refuse(HermesCLIOutcome(succeeded: false, detail: runningWithoutServiceNote))
         }
