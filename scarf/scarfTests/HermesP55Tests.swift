@@ -88,6 +88,23 @@ struct HermesP55GoalArmTests {
         #expect(rich.transientHint == RichChatViewModel.acpUnhandledSlashNotice(name: "goal"))
     }
 
+    /// Gateway-backed ACP forwards a registered `/goal` to the owner's
+    /// `slash.exec`, which answers in the transcript: no
+    /// "ordinary prompt" notice.
+    @MainActor
+    @Test("no ordinary-prompt notice on gateway-backed ACP")
+    func noNoticeOnGatewayBackedACP() throws {
+        let chatVM = ChatViewModel(context: .local)
+        Self.suppressKanbanOnboarding(for: chatVM.context)
+        let rich = chatVM.richChatViewModel
+        rich.setSessionId("s")
+        rich.publishCapabilities(HermesCapabilities.parseLine("Hermes Agent v0.22.5 (2026.9.24)"))
+
+        chatVM.sendViaACP(client: Self.deadClient(), text: "/goal ship v2.9")
+
+        #expect(rich.transientHint == nil)
+    }
+
     /// The kanban teaching moment rode on the dropped `/goal` arm and
     /// moved into the `default:` one. Its one surviving reader of a `/goal`
     /// argument decides only whether to raise the sheet.
@@ -119,7 +136,7 @@ struct HermesP55GoalArmTests {
         #expect(!src.contains("case \"subgoal\":"))
         #expect(!src.contains("Goal locked"))
         #expect(!src.contains("goalChip"))
-        #expect(src.contains("RichChatViewModel.acpUnhandledSlashNotice(name: parsedSlash.name)"))
+        #expect(src.contains("RichChatViewModel.acpUnhandledSlashNotice(\n                name: parsedSlash.name, capabilities: vm.capabilitiesGate"))
         // And the Mac side's `default:` arm calls the same helper.
         let mac = try String(
             contentsOf: repoRoot.appendingPathComponent(
@@ -129,7 +146,7 @@ struct HermesP55GoalArmTests {
         )
         #expect(!mac.contains("case \"goal\":"))
         #expect(!mac.contains("case \"subgoal\":"))
-        #expect(mac.contains("RichChatViewModel.acpUnhandledSlashNotice(name: parsed.name)"))
+        #expect(mac.contains("RichChatViewModel.acpUnhandledSlashNotice(\n                name: parsed.name, capabilities: richChatViewModel.capabilitiesGate"))
     }
 }
 

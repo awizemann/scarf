@@ -1808,7 +1808,9 @@ final class ChatViewModel {
             // had `case` arms that painted a goal pill and a "Goal locked"
             // toast for state Hermes had never been asked to hold;
             // `acpUnhandledSlashNotice` says what was actually sent instead.
-            if let notice = RichChatViewModel.acpUnhandledSlashNotice(name: parsed.name) {
+            if let notice = RichChatViewModel.acpUnhandledSlashNotice(
+                name: parsed.name, capabilities: richChatViewModel.capabilitiesGate
+            ) {
                 richChatViewModel.transientHint = notice
                 scheduleHintClear()
                 // The kanban teaching moment rode on the dropped `/goal`

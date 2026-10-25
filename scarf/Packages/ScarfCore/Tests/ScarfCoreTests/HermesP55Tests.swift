@@ -236,8 +236,23 @@ struct HermesP55GoalMirrorTests {
         #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "") == nil)
     }
 
-    /// Capability-free on purpose: there is no host version on which the
-    /// adapter answers these names, so the notice must not vary with one.
+    /// Gateway-backed ACP (0.22.1, 0.22.3+) forwards both names to the
+    /// owner's `slash.exec` (acp_adapter/gateway_commands.py:21-30,90-106 @
+    /// v0.22.5), so the notice is withheld there and only there.
+    @Test("no notice on gateway-backed ACP; older hosts unchanged")
+    func noticeWithheldOnGatewayBackedACP() {
+        let gateway = HermesCapabilities.parseLine("Hermes Agent v0.22.5 (2026.9.24)")
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "goal", capabilities: gateway) == nil)
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "subgoal", capabilities: gateway) == nil)
+        let reverted = HermesCapabilities.parseLine("Hermes Agent v0.22.2 (2026.9.24)")
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "goal", capabilities: reverted)
+                == RichChatViewModel.acpUnhandledSlashNotice(name: "goal"))
+        #expect(RichChatViewModel.acpUnhandledSlashNotice(name: "goal", capabilities: reverted) != nil)
+    }
+
+    /// No in-process adapter version answers these names, so the roster
+    /// does not vary with one (gateway-backed ACP withholds the notice
+    /// instead — see `noticeWithheldOnGatewayBackedACP`).
     @Test("the answer is the same on every host generation")
     func noticeIsCapabilityFree() {
         #expect(RichChatViewModel.acpUnhandledSlashNames == ["goal", "subgoal"])

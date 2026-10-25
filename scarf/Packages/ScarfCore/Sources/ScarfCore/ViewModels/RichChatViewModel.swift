@@ -1354,10 +1354,22 @@ public final class RichChatViewModel {
     public static let acpUnhandledSlashNames: Set<String> = ["goal", "subgoal"]
 
     /// The one-line notice for a name in ``acpUnhandledSlashNames``. `nil`
-    /// for every other name. Capability-free on purpose: there is no host
-    /// version on which the answer differs.
-    public static func acpUnhandledSlashNotice(name: String?) -> String? {
-        guard let name, acpUnhandledSlashNames.contains(name) else { return nil }
+    /// for every other name, and on gateway-backed ACP
+    /// (`HermesCapabilities.hasGatewayBackedACP`): there a registered
+    /// command is never prompt text (`_slash_command`,
+    /// acp_adapter/gateway_server.py:25-43 @ v0.22.5, and `goal` / `subgoal`
+    /// are registered, hermes_cli/commands.py:149,168). Neither is in
+    /// `ROUTES` (gateway_commands.py:281-295), so `run_command` (:21-30)
+    /// forwards it to the owner's `slash.exec` (`_forward`, :90-106), whose
+    /// report, notice or by-name refusal reaches the transcript as the
+    /// command's reply. The notice would then misstate what was sent.
+    /// Every in-process adapter tag answers the same (see above).
+    public static func acpUnhandledSlashNotice(
+        name: String?,
+        capabilities: HermesCapabilities = .empty
+    ) -> String? {
+        guard let name, acpUnhandledSlashNames.contains(name),
+              !capabilities.hasGatewayBackedACP else { return nil }
         return String(localized: "Hermes chat has no /\(name) — sent as an ordinary prompt.")
     }
 

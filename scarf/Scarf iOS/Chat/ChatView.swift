@@ -2394,7 +2394,9 @@ final class ChatController {
             // tag (`acp_adapter/commands.py:44-66` @ `v2026.9.7`), so the
             // text is an ordinary prompt everywhere and the optimistic pill
             // these arms used to paint was Scarf-invented state.
-            if let notice = RichChatViewModel.acpUnhandledSlashNotice(name: parsedSlash.name) {
+            if let notice = RichChatViewModel.acpUnhandledSlashNotice(
+                name: parsedSlash.name, capabilities: vm.capabilitiesGate
+            ) {
                 vm.transientHint = notice
                 scheduleTransientHintClear(snapshot: vm.transientHint)
             } else if let notice = RichChatViewModel.subFloorSlashNotice(
