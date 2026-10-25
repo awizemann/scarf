@@ -1835,16 +1835,12 @@ final class ChatViewModel {
             }
             if !isNonInterruptive { acpStatus = ACPPhase.agentWorking }
         }
-        // Gateway-backed ACP runs a mid-turn `/queue <text>` as its own
-        // admission and answers THIS `session/prompt` only when that queued
-        // prompt has run (acp_adapter/gateway_commands.py:286 →
-        // gateway_server.py:621-704 @ v0.22.5), while the running turn's own
-        // call returns first. Counted as a turn, the queue keeps the chat
-        // working (and its chip up) until the queued prompt is done;
-        // counted as non-interruptive, the running turn's return ended the
-        // busy period with the queued prompt still to run.
-        let queueHoldsTurn = parsed.name == "queue" && isNonInterruptive && wasAgentWorking
-            && richChatViewModel.capabilitiesGate.hasGatewayBackedACP
+        let queueHoldsTurn = Self.queuedPromptHoldsTurn(
+            name: parsed.name,
+            isNonInterruptive: isNonInterruptive,
+            wasAgentWorking: wasAgentWorking,
+            capabilities: richChatViewModel.capabilitiesGate
+        )
         launchPromptTask(
             client: client,
             sessionId: sessionId,
@@ -1853,6 +1849,38 @@ final class ChatViewModel {
             contextNotes: [],
             isNonInterruptive: isNonInterruptive && !queueHoldsTurn
         )
+    }
+
+    /// Whether a mid-turn `/queue <text>` counts as an interruptive turn.
+    ///
+    /// Gateway-backed ACP from v0.22.3 runs it as its own admission and
+    /// answers its `session/prompt` only when that queued prompt has run
+    /// (acp_adapter/gateway_commands.py:286 → gateway_server.py:621-704 @
+    /// v0.22.5), while the running turn's own call returns first. Counted
+    /// as a turn, the queue keeps the chat working (and its chip up) until
+    /// the queued prompt is done; counted as non-interruptive, the running
+    /// turn's return ended the busy period with the queued prompt still to
+    /// run. At v0.22.1 (the flag is on there too) the `/queue` prompt fails
+    /// at once with `unsupported_command` (gateway_server.py:434-440 @
+    /// v0.22.1): it then settles as a failed turn behind the running one,
+    /// and the running turn's return ends the busy period as before.
+    nonisolated static func queuedPromptHoldsTurn(
+        name: String?,
+        isNonInterruptive: Bool,
+        wasAgentWorking: Bool,
+        capabilities: HermesCapabilities
+    ) -> Bool {
+        name == "queue" && isNonInterruptive && wasAgentWorking && capabilities.hasGatewayBackedACP
+    }
+
+    /// The banner for a failed `session/set_model`, or nil when the user
+    /// declined gateway-backed ACP's guarded-model confirmation
+    /// (`model_switch_cancelled`, `set_session_model`,
+    /// acp_adapter/gateway_server.py:483-485 @ v0.22.5): nothing changed,
+    /// which is not an error.
+    nonisolated static func modelSwitchFailureBanner(_ error: Error) -> String? {
+        if ACPClientError.isGatewayRefusal(error, reason: "model_switch_cancelled") { return nil }
+        return "Couldn't switch model: \(error.localizedDescription)"
     }
 
     /// Run one `session/prompt` and fold its return into the transcript
@@ -2034,17 +2062,14 @@ final class ChatViewModel {
                     providerID: targetProviderID
                 )
                 self?.logger.info("mid-chat model switch to \(targetModelID) (provider: \(targetProviderID ?? "auto")) succeeded")
-            } catch where ACPClientError.isGatewayRefusal(error, reason: "model_switch_cancelled") {
-                // Gateway-backed ACP asked to confirm a guarded model and
-                // the user declined (`set_session_model`,
-                // acp_adapter/gateway_server.py:483-485 @ v0.22.5): nothing
-                // changed, which is not an error.
-                self?.logger.info("mid-chat model switch to \(targetModelID) declined at Hermes's confirmation")
-                self?.currentModelPreset = previous
             } catch {
-                self?.logger.warning("mid-chat model switch failed: \(error.localizedDescription)")
+                // Reverted either way; only a real failure gets a banner
+                // (`modelSwitchFailureBanner`).
+                self?.logger.warning("mid-chat model switch to \(targetModelID) not applied: \(error.localizedDescription)")
                 self?.currentModelPreset = previous
-                self?.acpError = "Couldn't switch model: \(error.localizedDescription)"
+                if let banner = Self.modelSwitchFailureBanner(error) {
+                    self?.acpError = banner
+                }
             }
         }
     }

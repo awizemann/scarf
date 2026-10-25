@@ -674,7 +674,16 @@ struct ChatView: View {
                 // pre-v0.15 the dialog renders exactly as it did before.
                 // `PermissionApprovalView` decides on its own whether the
                 // REQUEST is edit-shaped.
-                onAllowForSession: (viewModel.capabilitiesStore?.capabilities.hasSessionEditAutoApproval ?? false)
+                //
+                // Not on gateway-backed ACP: a card is always mid-turn, and
+                // there `session/set_mode` refuses until the session is idle
+                // (`_set_edit_policy`, acp_adapter/gateway_server.py:586-606
+                // @ v0.22.5; always refused at v0.22.1, :406-407). Nothing
+                // else gives the same effect: the owner's edit card offers
+                // only a one-use consent (`allow_session` / `allow_permanent`
+                // False, gateway/session_local_editor.py:46-49) and
+                // `edit_policy` is never deferred to the turn's end.
+                onAllowForSession: Self.offersAllowEditsForSession(viewModel.capabilitiesStore?.capabilities ?? .empty)
                     ? { optionId in
                         viewModel.respondToPermission(
                             requestId: permission.requestId,
@@ -754,6 +763,12 @@ struct ChatView: View {
     /// NEXT queued request without ever showing it. An Esc dismissal
     /// therefore re-presents the same sheet, which is the honest
     /// outcome: the agent is still blocked waiting for an answer.
+    /// Whether the permission card may offer "Allow edits for this
+    /// session" (see the call site in `body`).
+    nonisolated static func offersAllowEditsForSession(_ caps: HermesCapabilities) -> Bool {
+        caps.hasSessionEditAutoApproval && !caps.hasGatewayBackedACP
+    }
+
     private var permissionBinding: Binding<RichChatViewModel.PendingPermission?> {
         Binding(
             get: { viewModel.richChatViewModel.pendingPermission },

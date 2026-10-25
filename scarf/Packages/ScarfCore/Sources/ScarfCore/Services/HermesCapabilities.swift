@@ -496,14 +496,20 @@ public struct HermesCapabilities: Sendable, Equatable {
     // retirement note in the v0.13 group).
     //
     // "Not ACP" in this group means the in-process adapter. Gateway-backed
-    // ACP (``hasGatewayBackedACP``) advertises 14 commands
-    // (`COMMANDS`, acp_adapter/gateway_session_meta.py:26-41 @ v0.22.5),
-    // answers `/new` and `/clear` as the session's `reset`
-    // (`ROUTES`, acp_adapter/gateway_commands.py:281-295), and forwards
-    // every other registered command to the owner's `slash.exec`, which
-    // runs what it serves for the session and refuses the rest by name
-    // (`run_command`, :21-30) — never sent to the model as prompt text
-    // (`_slash_command`, gateway_server.py:25-43).
+    // ACP (``hasGatewayBackedACP``) never sends a registered command to the
+    // model as prompt text, but what it does instead differs:
+    // - v0.22.3+: advertises 14 commands (`COMMANDS`,
+    //   acp_adapter/gateway_session_meta.py:26-41 @ v0.22.5), answers `/new`
+    //   and `/clear` as the session's `reset` (`ROUTES`,
+    //   acp_adapter/gateway_commands.py:281-295), and forwards every other
+    //   registered command to the owner's `slash.exec`, which runs what it
+    //   serves for the session and refuses the rest by name (`run_command`,
+    //   :21-30; `_slash_command`, gateway_server.py:25-43).
+    // - v0.22.1: advertises none and runs only `/model` and `/compress`
+    //   (`slash_mutation`, hermes_cli/gateway_mutations.py:136-149 @
+    //   v0.22.1); `/branch` and every other registered command — `/new`,
+    //   `/queue`, `/goal` included — fail the prompt with
+    //   `unsupported_command` (gateway_server.py:434-440).
 
     /// `/subgoal` slash command — appends user-specified success criteria
     /// to the active `/goal` loop. Argument forms: `<text>`, `remove N`,

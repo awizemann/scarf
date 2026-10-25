@@ -1356,13 +1356,16 @@ public final class RichChatViewModel {
     /// The one-line notice for a name in ``acpUnhandledSlashNames``. `nil`
     /// for every other name, and on gateway-backed ACP
     /// (`HermesCapabilities.hasGatewayBackedACP`): there a registered
-    /// command is never prompt text (`_slash_command`,
-    /// acp_adapter/gateway_server.py:25-43 @ v0.22.5, and `goal` / `subgoal`
-    /// are registered, hermes_cli/commands.py:149,168). Neither is in
-    /// `ROUTES` (gateway_commands.py:281-295), so `run_command` (:21-30)
-    /// forwards it to the owner's `slash.exec` (`_forward`, :90-106), whose
-    /// report, notice or by-name refusal reaches the transcript as the
-    /// command's reply. The notice would then misstate what was sent.
+    /// command is never prompt text (`goal` / `subgoal` are registered,
+    /// hermes_cli/commands.py:149,168 @ v0.22.5), so the notice would
+    /// misstate what was sent. From v0.22.3 neither is in `ROUTES`
+    /// (acp_adapter/gateway_commands.py:281-295 @ v0.22.5), so
+    /// `run_command` (:21-30) forwards it to the owner's `slash.exec`
+    /// (`_forward`, :90-106), whose report, notice or by-name refusal
+    /// reaches the transcript as the command's reply. At v0.22.1 the prompt
+    /// fails with `unsupported_command` instead (`slash_mutation`,
+    /// hermes_cli/gateway_mutations.py:136-149; gateway_server.py:434-440
+    /// @ v0.22.1), which surfaces as the chat's error banner.
     /// Every in-process adapter tag answers the same (see above).
     public static func acpUnhandledSlashNotice(
         name: String?,
@@ -3336,11 +3339,14 @@ public final class RichChatViewModel {
         // completes nothing is left queued. Clear the whole mirror, not one
         // entry (S02-F3). A cancelled turn drains the same way.
         //
-        // Gateway-backed ACP runs a `/queue` prompt as its OWN admission
-        // (`ROUTES['queue']`, acp_adapter/gateway_commands.py:286 → `prompt`
-        // waits for that admission's terminal, gateway_server.py:621-704 @
-        // v0.22.5), so the running turn's `session/prompt` returns BEFORE
-        // the queued one runs. The Mac send path therefore counts that
+        // Gateway-backed ACP from v0.22.3 runs a `/queue` prompt as its OWN
+        // admission (`ROUTES['queue']`, acp_adapter/gateway_commands.py:286
+        // → `prompt` waits for that admission's terminal,
+        // gateway_server.py:621-704 @ v0.22.5), so the running turn's
+        // `session/prompt` returns BEFORE the queued one runs. (At v0.22.1
+        // the `/queue` prompt fails at once with `unsupported_command`,
+        // gateway_server.py:434-440 @ v0.22.1; the running turn ends this
+        // as usual.) The Mac send path therefore counts that
         // `/queue` as an interruptive turn (ScarfGo counts every turn), and
         // the running turn's return never reaches here while it is in
         // flight: this clear runs when the last queued prompt finished.

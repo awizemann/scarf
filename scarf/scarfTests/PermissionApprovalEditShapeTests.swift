@@ -216,4 +216,18 @@ import ScarfCore
         }
         #expect(reverted, "a refused session/set_mode left the chip claiming accept_edits")
     }
+
+    /// Gateway-backed ACP refuses `session/set_mode` while a turn runs, and
+    /// a card is always mid-turn, so the button is not offered there.
+    @Test func allowEditsForSessionIsHiddenOnGatewayBackedACP() {
+        let v0225 = HermesCapabilities.parseLine("Hermes Agent v0.22.5 (2026.9.24)")
+        let v0221 = HermesCapabilities.parseLine("Hermes Agent v0.22.1 (2026.9.24)")
+        let v0222 = HermesCapabilities.parseLine("Hermes Agent v0.22.2 (2026.9.24)")
+        let v0215 = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+        #expect(!ChatView.offersAllowEditsForSession(v0225))
+        #expect(!ChatView.offersAllowEditsForSession(v0221))
+        #expect(ChatView.offersAllowEditsForSession(v0222))
+        #expect(ChatView.offersAllowEditsForSession(v0215))
+        #expect(!ChatView.offersAllowEditsForSession(.empty))
+    }
 }
