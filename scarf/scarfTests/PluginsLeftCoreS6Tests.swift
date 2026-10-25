@@ -38,12 +38,14 @@ struct MemoryProviderPluginS6Tests {
 @MainActor
 struct SpotifyPluginLoginS6Tests {
     /// `hermes auth spotify` → `hermes spotify login`
-    /// (`hermes_cli/left_core_migration.py:247-252` @ v0.21.7). The plugin's
-    /// argparse is not in the Hermes repo, so no flag is passed (C5).
-    @Test func pluginLoginTakesNoUnverifiedFlags() {
+    /// (`hermes_cli/left_core_migration.py:247-252` @ v0.21.7); the plugin's
+    /// `spotify_cli.py:9-14` takes `--client-id` / `--no-browser` at every
+    /// pinned sha (682b22d0, a4e311e4, 4d492b1d).
+    @Test func pluginLoginCarriesTheClientIDOnlyWhenGiven() {
         #expect(SpotifyAuthFlow.argv(clientID: nil, pluginLogin: true) == ["spotify", "login"])
+        #expect(SpotifyAuthFlow.argv(clientID: "", pluginLogin: true) == ["spotify", "login"])
         #expect(SpotifyAuthFlow.argv(clientID: "0123456789abcdef0123456789abcdef", pluginLogin: true)
-            == ["spotify", "login"])
+            == ["spotify", "login", "--client-id=0123456789abcdef0123456789abcdef"])
         // Older hosts are unchanged.
         #expect(SpotifyAuthFlow.argv(clientID: "abc12345", pluginLogin: false)
             == ["auth", "spotify", "--client-id=abc12345"])
@@ -54,9 +56,8 @@ struct SpotifyPluginLoginS6Tests {
             id: UUID(), displayName: "box",
             kind: .ssh(SSHConfig(host: "box.example", user: "alan")))
         let line = SpotifyAuthFlow.remoteCommandLine(for: ctx, pluginLogin: true)
-        #expect(line.contains("'spotify' 'login'"), "\(line)")
+        #expect(line.contains("'spotify' 'login' '--no-browser'"), "\(line)")
         #expect(line.contains("'-L' '43827:127.0.0.1:43827'"))
-        #expect(!line.contains("--no-browser"))
         #expect(!line.contains("'auth' 'spotify'"))
         #expect(SpotifyAuthFlow.remoteCommandLine(for: ctx).contains("'auth' 'spotify' '--no-browser'"))
     }

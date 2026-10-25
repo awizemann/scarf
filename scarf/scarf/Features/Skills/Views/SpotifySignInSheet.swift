@@ -24,13 +24,34 @@ struct SpotifySignInSheet: View {
 
     var onSignedIn: () -> Void = {}
 
-    /// v0.21.7+: the login is the `spotify` plugin's `hermes spotify login`
-    /// (``SpotifyAuthFlow/argv(clientID:pluginLogin:)``), which takes no
-    /// verified `--client-id`, so a first-time setup runs its wizard in
-    /// Terminal instead of through the Client ID field.
+    @Environment(AppCoordinator.self) private var coordinator
+
+    /// v0.21.7+: the login is the `spotify` catalog plugin's
+    /// `hermes spotify login` (``SpotifyAuthFlow/argv(clientID:pluginLogin:)``),
+    /// which exists only once the plugin is installed — so the sheet offers
+    /// the install first (``Gate/needsPlugin``).
     private var pluginLogin: Bool {
         capabilitiesStore?.capabilities.hasSpotifyPluginLogin ?? false
     }
+
+    /// The Plugins pane's cached roster — the same data and install path
+    /// ``PluginRequiredNote`` uses.
+    private var pluginsViewModel: PluginsViewModel {
+        coordinator.featureViewModel(for: .plugins) { PluginsViewModel(context: serverContext) }
+    }
+
+    /// Whether the login command is available: always below the plugin
+    /// floor; on a plugin host, nil until the roster has landed, then whether
+    /// it lists `spotify`.
+    private var pluginReady: Bool? {
+        guard pluginLogin else { return true }
+        let viewModel = pluginsViewModel
+        guard viewModel.rosterLoaded else { return nil }
+        return viewModel.hasPlugin("spotify")
+    }
+
+    /// Read once by ``advance()``; nil until `loadSetup()` returns.
+    @State private var setup: SpotifyAuthFlow.Setup?
 
     @State private var flow: SpotifyAuthFlow?
     @State private var successDismissTask: Task<Void, Never>?
@@ -46,6 +67,8 @@ struct SpotifySignInSheet: View {
     /// callback from here at all, so it gets the command to run instead.
     enum Gate: Equatable {
         case checking
+        /// v0.21.7+ host without the `spotify` plugin.
+        case needsPlugin
         case needsClientID
         case remote
         case running
@@ -64,19 +87,14 @@ struct SpotifySignInSheet: View {
             guard flow == nil else { return }
             let f = SpotifyAuthFlow(context: serverContext)
             flow = f
-            let setup = await f.loadSetup()
-            redirectURI = setup.redirectURI
-            if serverContext.isRemote {
-                gate = .remote
-            } else if setup.clientIDKnown {
-                gate = .running
-                f.start()
-            } else if pluginLogin {
-                gate = .remote
-            } else {
-                gate = .needsClientID
-            }
+            let loaded = await f.loadSetup()
+            redirectURI = loaded.redirectURI
+            setup = loaded
+            if pluginLogin { pluginsViewModel.load() }
+            advance()
         }
+        // The roster landing, or the plugin installing from `.needsPlugin`.
+        .onChange(of: pluginReady) { _, _ in advance() }
         .onDisappear {
             successDismissTask?.cancel()
             flow?.cancel()
@@ -90,6 +108,26 @@ struct SpotifySignInSheet: View {
                     if !Task.isCancelled { dismiss() }
                 }
             }
+        }
+    }
+
+    /// Picks the first gate once both the setup and (on a plugin host) the
+    /// roster are known. Only moves out of `.checking` / `.needsPlugin`, so a
+    /// later roster reload never restarts a run.
+    private func advance() {
+        guard gate == .checking || gate == .needsPlugin, let setup, let flow else { return }
+        switch pluginReady {
+        case nil: return
+        case false?: gate = .needsPlugin; return
+        case true?: break
+        }
+        if serverContext.isRemote {
+            gate = .remote
+        } else if setup.clientIDKnown {
+            gate = .running
+            flow.start()
+        } else {
+            gate = .needsClientID
         }
     }
 
@@ -127,6 +165,12 @@ struct SpotifySignInSheet: View {
         switch gate {
         case .checking:
             ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+        case .needsPlugin:
+            VStack(alignment: .leading, spacing: 10) {
+                PluginRequiredNote(pluginID: "spotify", feature: "Spotify sign-in")
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         case .needsClientID:
             clientIDView
         case .remote:
@@ -196,20 +240,13 @@ struct SpotifySignInSheet: View {
     private var remoteView: some View {
         let line = SpotifyAuthFlow.remoteCommandLine(for: serverContext, redirectURI: redirectURI, pluginLogin: pluginLogin)
         return VStack(alignment: .leading, spacing: 10) {
-            if serverContext.isRemote {
-                Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort(of: redirectURI))) on that host, so Scarf can't complete it from this window.")
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("Run this in Terminal on this Mac. It connects with the callback port forwarded, then asks for a Client ID the first time and prints the sign-in link — open that link in your browser here.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            } else {
-                // Local first-time setup on the plugin login (v0.21.7+).
-                Text("First-time Spotify setup asks for the Client ID of your own Spotify developer app, which needs a terminal. Run this in Terminal; afterwards Scarf can sign in again on its own.")
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
+            Text("Spotify sign-in has to run on \(serverContext.displayName), where Hermes runs. Its browser callback goes to port \(String(SpotifyAuthFlow.callbackPort(of: redirectURI))) on that host, so Scarf can't complete it from this window.")
+                .font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            Text("Run this in Terminal on this Mac. It connects with the callback port forwarded, then asks for a Client ID the first time and prints the sign-in link — open that link in your browser here.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Text(verbatim: line)
                 .font(.system(.caption, design: .monospaced))
                 .textSelection(.enabled)

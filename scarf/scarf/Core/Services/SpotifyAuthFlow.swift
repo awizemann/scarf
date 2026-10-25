@@ -500,19 +500,24 @@ final class SpotifyAuthFlow {
     /// `hermes auth spotify` is gone and the login is the `spotify` catalog
     /// plugin's `hermes spotify login` (`hermes_cli/left_core_migration.py:247-252`
     /// @ v0.21.7 / v0.22.5). The plugin lives outside the Hermes repo
-    /// (`plugin-catalog/spotify.yaml`: NousResearch/hermes-official-plugins),
-    /// so its argparse is NOT in tagged source and no flag is passed (C5):
-    /// the tagged docs mention `--client-id` / `--no-browser`
-    /// (`website/docs/user-guide/features/spotify.md:257`,
-    /// `guides/oauth-over-ssh.md:24` @ v0.22.5), but docs are not the parser.
-    /// So `clientID` is ignored on this path — a first-time sign-in with no
-    /// client ID on the host still hits the plugin's wizard. Tokens still
-    /// land in `providers.spotify` of `auth.json` (`spotify.md:5`), which the
-    /// verdict reads.
+    /// (`plugin-catalog/spotify.yaml` pins NousResearch/hermes-official-plugins
+    /// `spotify/` at 682b22d0 @ v0.21.7, a4e311e4 @ v0.22.0, 4d492b1d @
+    /// v0.22.3-v0.22.5). At all three pins `spotify_cli.py:9-14` registers
+    /// `action {login,status,logout}` (default `login`), `--client-id`,
+    /// `--redirect-uri`, `--scope`, `--no-browser` and `--timeout`, so
+    /// `--client-id` is passed exactly where the core verb took it. The
+    /// plugin's `login` keeps the core contract Scarf judges by
+    /// (`spotify_auth.py` @ 4d492b1d): explicit `--client-id`, then
+    /// `HERMES_SPOTIFY_CLIENT_ID`/`SPOTIFY_CLIENT_ID`, then the stored
+    /// `client_id` (`:59-79`), else the `input()` wizard (`:388`, `:413-419`);
+    /// the `https://accounts.spotify.com/authorize?…` URL is printed (`:26`,
+    /// `:107`, `:433-436`); the callback waits 180 s and the exchange 20 s
+    /// (`:447`, `:459`); tokens land in `providers.spotify.access_token` of
+    /// `auth.json` (`:231`). No success line is parsed.
     nonisolated static func argv(clientID: String?, pluginLogin: Bool = false) -> [String] {
-        if pluginLogin { return ["spotify", "login"] }
-        guard let clientID, !clientID.isEmpty else { return ["auth", "spotify"] }
-        return ["auth", "spotify", "--client-id=\(clientID)"]
+        let base = pluginLogin ? ["spotify", "login"] : ["auth", "spotify"]
+        guard let clientID, !clientID.isEmpty else { return base }
+        return base + ["--client-id=\(clientID)"]
     }
 
     /// The login spelling for logs and failure text.
@@ -615,11 +620,9 @@ final class SpotifyAuthFlow {
     /// this Mac is redirected to this Mac's 127.0.0.1:43827, where nothing
     /// listens, and a first-time wizard needs a terminal (S07-F6).
     ///
-    /// `pluginLogin` (v0.21.7+): plain `hermes spotify login` — no
-    /// `--no-browser`, for the same C5 reason as ``argv(clientID:pluginLogin:)``.
-    /// Over ssh it is not needed: with `SSH_CLIENT`/`SSH_TTY` set the login
-    /// skips the browser open itself (`website/docs/user-guide/features/spotify.md:69`
-    /// @ v0.22.5).
+    /// `pluginLogin` (v0.21.7+): `hermes spotify login --no-browser`
+    /// (`spotify_cli.py:13` at every pinned plugin sha; see
+    /// ``argv(clientID:pluginLogin:)``).
     static func remoteCommandLine(
         for context: ServerContext,
         redirectURI: String = redirectURI,
@@ -628,7 +631,7 @@ final class SpotifyAuthFlow {
         let port = callbackPort(of: redirectURI)
         return GatewaySetupTerminalCommand.shellLine(
             for: context,
-            hermesArgs: pluginLogin ? ["spotify", "login"] : ["auth", "spotify", "--no-browser"],
+            hermesArgs: (pluginLogin ? ["spotify", "login"] : ["auth", "spotify"]) + ["--no-browser"],
             localForwards: ["\(port):127.0.0.1:\(port)"]
         )
     }
