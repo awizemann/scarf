@@ -89,7 +89,25 @@ def git(checkout, *args):
                           text=True, timeout=120, check=True).stdout
 
 
+# Hermes's two stable-tag schemes: the date tags up to v2026.9.24 (v0.21.5),
+# whose pyproject.toml carries the version, and the `vX.Y.Z` tags from v0.21.6,
+# whose pyproject.toml says "0.0.0" because the tag name IS the version. A
+# date tag's year is four digits, which keeps the two patterns apart. Release
+# candidates, canaries and abandoned tags (`rc.1-v0.22.5`,
+# `v0.22.5+canary.…`, `abandoned-rc.…`) match neither.
+DATE_TAG = re.compile(r"v\d{4}\.\d+\.\d+(\.\d+)?")
+SEMVER_TAG = re.compile(r"v(\d{1,3})\.(\d+)\.(\d+)")
+
+
+def stable_tags(tags):
+    """The stable release tags in `tags`, order kept (callers pass creator-date order)."""
+    return [t for t in tags if DATE_TAG.fullmatch(t) or SEMVER_TAG.fullmatch(t)]
+
+
 def version_of(checkout, tag):
+    semver = SEMVER_TAG.fullmatch(tag)
+    if semver:
+        return tuple(int(p) for p in semver.groups())
     text = git(checkout, "show", f"{tag}:pyproject.toml")
     match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)', text, re.M)
     if not match:
@@ -195,8 +213,7 @@ def main():
     ap.add_argument("--emit", action="store_true", help="print olderBands instead of checking")
     args = ap.parse_args()
 
-    tags = [t for t in git(args.checkout, "tag", "--sort=creatordate").split()
-            if re.fullmatch(r"v\d{4}\.\d+\.\d+(\.\d+)?", t)]
+    tags = stable_tags(git(args.checkout, "tag", "--sort=creatordate").split())
     if args.from_tag not in tags:
         sys.exit(f"error: {args.from_tag} is not a tag in {args.checkout}")
     tags = tags[tags.index(args.from_tag):]
