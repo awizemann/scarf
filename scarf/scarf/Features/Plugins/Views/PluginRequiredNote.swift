@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import ScarfCore
 import ScarfDesign
 
@@ -61,11 +62,19 @@ struct PluginRequiredNote: View {
                         startedAction = true
                         // A managed host refuses the enable's config write
                         // (P47), so install without asking for it there.
+                        // For a memory provider `--enable` is Hermes's own
+                        // selection path (`_select_memory_provider`:
+                        // prepare deps, lift `plugins.disabled`, set
+                        // `memory.provider`; `plugins_cmd_install.py:689-690`).
                         viewModel.install(pluginID, enable: !viewModel.isManagedHost, showReport: false)
                     }
                     .controlSize(.small)
                     .disabled(viewModel.isLoading)
                 } else if needsEnable {
+                    // For a memory provider this only lifts `plugins.disabled`
+                    // (`_apply_activation` moves the key out of it); the
+                    // selection itself is `memory.provider`, which the picker
+                    // already wrote.
                     Button("Enable Plugin") {
                         startedAction = true
                         viewModel.enable(named: pluginID)
@@ -75,6 +84,25 @@ struct PluginRequiredNote: View {
                     // the Plugins pane's own Enable button.
                     .disabled(viewModel.isLoading || viewModel.isManagedHost)
                     .help(viewModel.managedBannerText ?? "")
+                }
+            }
+            if activatesByConfig, viewModel.pendingMemorySetup == pluginID {
+                // A memory provider left inactive for want of dependency
+                // consent: Hermes's own next step, in Terminal
+                // (``PluginsViewModel/pendingMemorySetup``).
+                let line = viewModel.memorySetupCommand(pluginID)
+                HStack(spacing: ScarfSpace.s2) {
+                    Text(verbatim: "hermes memory setup \(pluginID)")
+                        .font(.system(.caption, design: .monospaced))
+                        .textSelection(.enabled)
+                    Spacer(minLength: 0)
+                    Button("Open in Terminal") {
+                        let script = NSAppleScript(source: GatewaySetupTerminalCommand.appleScript(forShellLine: line))
+                        var err: NSDictionary?
+                        script?.executeAndReturnError(&err)
+                        viewModel.pendingMemorySetup = nil
+                    }
+                    .controlSize(.small)
                 }
             }
             if startedAction {

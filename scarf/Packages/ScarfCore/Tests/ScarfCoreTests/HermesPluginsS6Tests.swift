@@ -88,6 +88,18 @@ struct HermesPluginsS6Tests {
         #expect(outcome.enableRefusedPlugin == "weather")
         #expect(outcome.needsDependencyConsent)
         #expect(!outcome.enabled)
+        #expect(!outcome.memoryProviderNotActive)
+    }
+
+    /// `_select_memory_provider(select=False)`, `plugins_cmd_install.py:729-730`.
+    @Test func memoryProviderInactiveLineIsParsed() {
+        let output = """
+        ✗ Cannot enable honcho: dependency install skipped (non-interactive)
+        Memory provider installed but not active. Run `hermes memory setup` (or set memory.provider: honcho) to use it.
+        """
+        let outcome = HermesPluginInstallOutcome.parse(output)
+        #expect(outcome.memoryProviderNotActive)
+        #expect(outcome.enableRefusedPlugin == "honcho")
     }
 
     @Test func otherEnableRefusalsDoNotOfferConsent() {

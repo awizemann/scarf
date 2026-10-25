@@ -290,6 +290,14 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
     /// (`installed_name`, `plugins_cmd_install.py:676` @ v0.22.5), which is
     /// what `plugins enable` takes; the install identifier may be a URL.
     public let enableRefusedPlugin: String?
+    /// The installed plugin is a memory provider left unselected:
+    /// `_select_memory_provider(select=False)` prints `Memory provider
+    /// installed but not active. Run \`hermes memory setup\` …`
+    /// (`plugins_cmd_install.py:729-730` @ v0.22.5, `:682-683` @ v0.21.6).
+    /// `cmd_install` takes that arm for every memory provider whose enable
+    /// did not happen (`:689-690`), so it tells the two follow-ups apart.
+    public let memoryProviderNotActive: Bool
+    public static let memoryProviderNotActiveMarker = "Memory provider installed but not active."
 
     /// `_ConsentRefusal("dependency install skipped (non-interactive)", …)`
     /// (`plugins_cmd_install.py:150` @ v0.21.6 and v0.22.5) — the refusal an
@@ -311,8 +319,10 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
         capabilitiesNotGranted: Bool = false,
         configWriteRefusal: String? = nil,
         enableRefusal: String? = nil,
-        enableRefusedPlugin: String? = nil
+        enableRefusedPlugin: String? = nil,
+        memoryProviderNotActive: Bool = false
     ) {
+        self.memoryProviderNotActive = memoryProviderNotActive
         self.enabled = enabled
         self.installedDisabled = installedDisabled
         self.missingEnvVars = missingEnvVars
@@ -375,7 +385,9 @@ public struct HermesPluginInstallOutcome: Sendable, Equatable {
             capabilitiesNotGranted: output.contains(HermesCLIMarkers.pluginsConsentRefusal),
             configWriteRefusal: refusal,
             enableRefusal: enableRefusal,
-            enableRefusedPlugin: enableRefusedPlugin
+            enableRefusedPlugin: enableRefusedPlugin,
+            memoryProviderNotActive: HermesCLIVerdict.significantLines(output)
+                .contains { HermesCLIVerdict.unglyphed($0).hasPrefix(Self.memoryProviderNotActiveMarker) }
         )
     }
 }

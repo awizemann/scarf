@@ -131,6 +131,46 @@ struct PluginDependencyConsentS6Tests {
         #expect(!vm.isPluginReady("mem0", activatesByConfig: true))
         #expect(vm.pluginActivation("mem0") == nil)
     }
+
+    /// The loader checks `plugins.disabled` before the exclusive arm
+    /// (`plugins_discovery.py:278` vs `:281` @ v0.22.5), so a parked memory
+    /// provider is not ready.
+    @Test func aDisabledMemoryProviderIsNotReady() {
+        let vm = PluginsViewModel(context: Self.context(primedAt: nil), cliRunner: { _, _ in ("", 0) })
+        vm.plugins = [
+            HermesPlugin(name: "honcho", source: "honcho", activation: .disabled,
+                         description: "", version: "", path: "", toolOverride: false),
+            HermesPlugin(name: "mem0", source: "mem0", activation: .enabled,
+                         description: "", version: "", path: "", toolOverride: false),
+        ]
+        #expect(!vm.isPluginReady("honcho", activatesByConfig: true))
+        #expect(vm.isPluginReady("mem0", activatesByConfig: true))
+    }
+
+    /// `plugins_cmd_install.py:675-683`, then `_select_memory_provider`'s
+    /// `select=False` arm (`:729-730`) @ v0.22.5.
+    private static let refusedMemoryInstall = """
+    honcho declares Python dependencies:
+      - honcho-ai>=1
+    Non-interactive install — skipping dependency install. Run `hermes plugins enable` when ready to prepare them.
+    ✗ Cannot enable honcho: dependency install skipped (non-interactive)
+    The plugin stays installed but disabled; re-enable after resolving the conflict.
+    Memory provider installed but not active. Run `hermes memory setup` (or set memory.provider: honcho) to use it.
+    """
+
+    /// "`plugins enable` cannot activate one" (`:726`): a memory provider
+    /// gets `hermes memory setup <name>` for Terminal, never the enable dialog.
+    @Test func aMemoryProviderGetsMemorySetupNotTheEnableDialog() async {
+        let vm = PluginsViewModel(context: Self.context(primedAt: caps(0, 22, 5)),
+                                  cliRunner: { _, _ in (Self.refusedMemoryInstall, 0) })
+        vm.install("honcho", enable: true)
+        let message = await Self.awaitMessage(on: vm)
+        #expect(vm.pendingDependencyConsent == nil)
+        #expect(vm.pendingMemorySetup == "honcho")
+        #expect(message?.contains("hermes memory setup honcho") == true)
+        #expect(vm.messageIsFailure)
+        #expect(vm.memorySetupCommand("honcho").hasSuffix("'memory' 'setup' 'honcho'"))
+    }
 }
 
 @Suite("S6 · Spotify login moved to the spotify plugin")

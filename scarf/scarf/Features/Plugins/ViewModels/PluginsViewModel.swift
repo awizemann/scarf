@@ -63,11 +63,15 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// and CLI commands do not exist (`hermes_cli/plugins_discovery.py` @
     /// v0.22.5). A memory provider is `kind: exclusive` and activates through
     /// `memory.provider` instead (`:281-285`; "the loader never reads
-    /// plugins.enabled", `plugins_cmd_install.py:652`), so for it installed
-    /// is enough — pass `activatesByConfig`.
+    /// plugins.enabled", `plugins_cmd_install.py:652`) — pass
+    /// `activatesByConfig` — but the `plugins.disabled` check runs FIRST
+    /// (`:278`), so a provider parked there is still refused ("The loader
+    /// refuses a provider parked in plugins.disabled",
+    /// `plugins_cmd_install.py:744` @ v0.22.5, `:697` @ v0.21.6). For it,
+    /// ready is installed and not disabled.
     func isPluginReady(_ id: String, activatesByConfig: Bool = false) -> Bool {
         guard let activation = pluginActivation(id) else { return false }
-        return activatesByConfig || activation == .enabled
+        return activatesByConfig ? activation != .disabled : activation == .enabled
     }
 
     /// `hermes plugins compat --json` (v0.21.1+). Nil means "no answer" —
@@ -272,6 +276,25 @@ final class PluginsViewModel: OutcomeMessageHosting {
     /// otherwise.
     var pendingDependencyConsent: String?
 
+    /// The MEMORY PROVIDER whose `install --enable` left it inactive for want
+    /// of dependency consent. It gets no `plugins enable` offer: "`plugins
+    /// enable` cannot activate one" (`_select_memory_provider`,
+    /// `plugins_cmd_install.py:726` @ v0.22.5, `:679` @ v0.21.6), and its
+    /// dependencies are prepared by `prepare_memory_provider_dependencies`,
+    /// not by the plugin-selection sync. Hermes's own next step is
+    /// `hermes memory setup` (`:729-730`), and `memory setup <name>`
+    /// (`subcommands/memory.py:22-25` @ v0.21.6 and v0.22.5) hands off to the
+    /// provider's own `post_setup` (`memory_setup.py:166-200` @ v0.22.5) —
+    /// plugin code outside the Hermes repo, so not provably non-interactive.
+    /// Scarf therefore offers it in Terminal (``memorySetupCommand(_:)``),
+    /// never as a background run.
+    var pendingMemorySetup: String?
+
+    /// `hermes memory setup <provider>` for Terminal.
+    func memorySetupCommand(_ provider: String) -> String {
+        GatewaySetupTerminalCommand.shellLine(for: context, hermesArgs: ["memory", "setup", provider])
+    }
+
     /// Finishes an install whose enable was refused for want of dependency
     /// consent by running `hermes plugins enable -- <name>` — the step Hermes
     /// itself names ("Run `hermes plugins enable` when ready to prepare
@@ -371,12 +394,24 @@ final class PluginsViewModel: OutcomeMessageHosting {
                     // often because the plugin declares Python dependencies
                     // and Hermes had no terminal to ask about them. Never
                     // "Installed and enabled"; the consent case offers the
-                    // `plugins enable` that prepares the dependencies.
-                    self.applySaveOutcome(.failure(
-                        String(localized: "Installed, but not enabled: \(reason)")
-                    ))
+                    // `plugins enable` that prepares the dependencies — or,
+                    // for a memory provider, `hermes memory setup <name>` in
+                    // Terminal (see ``pendingMemorySetup``).
+                    if outcome.memoryProviderNotActive, let name = outcome.enableRefusedPlugin {
+                        self.applySaveOutcome(.failure(
+                            String(localized: "Installed, but not active: \(reason). Run `hermes memory setup \(name)` in Terminal to prepare its dependencies and activate it.")
+                        ))
+                    } else {
+                        self.applySaveOutcome(.failure(
+                            String(localized: "Installed, but not enabled: \(reason)")
+                        ))
+                    }
                     if outcome.needsDependencyConsent, let name = outcome.enableRefusedPlugin {
-                        self.pendingDependencyConsent = name
+                        if outcome.memoryProviderNotActive {
+                            self.pendingMemorySetup = name
+                        } else {
+                            self.pendingDependencyConsent = name
+                        }
                     }
                 } else {
                     self.applySaveOutcome(
