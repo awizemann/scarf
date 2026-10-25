@@ -119,7 +119,9 @@ struct HermesRoutableProvidersB02Tests {
         let base = HermesRoutableProviders.providerIDs(for: HermesRoutableProviders.oldestBandVersion)
         #expect(base?.count == 56)
         #expect(HermesRoutableProviders.providerIDs(
-            for: .init(major: 0, minor: 21, patch: 5)) == HermesRoutableProviders.providerIDs)
+            for: .init(major: 0, minor: 21, patch: 6)) == HermesRoutableProviders.providerIDs)
+        #expect(HermesRoutableProviders.providerIDs(
+            for: .init(major: 0, minor: 22, patch: 5)) == HermesRoutableProviders.providerIDs)
     }
 
     /// Every overlay Scarf adds by hand must be a name Hermes routes, or the

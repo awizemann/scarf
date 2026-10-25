@@ -151,14 +151,19 @@ public struct OptionalMCPCatalogEntry: Identifiable, Sendable, Equatable {
     }
 }
 
-/// Static, verbatim-captured roster of Hermes's 65
-/// `optional-mcps/*/manifest.yaml` entries at v0.21.5 (tag `v2026.9.24`).
+/// Static, verbatim-captured roster of Hermes's 66
+/// `optional-mcps/*/manifest.yaml` entries at v0.22.5 (65 at v0.21.5, tag
+/// `v2026.9.24`).
 /// Name/description/transport/auth/tools were read directly from each
 /// manifest; `scripts/check-hermes-tables.py` lane 7 diffs this list
 /// against the tag. Hermes's own catalog can add/remove entries between
 /// releases; this list is a point-in-time snapshot, not a live fetch.
 /// Blender was removed from the upstream catalog before v0.20.4 and stays
 /// absent here.
+///
+/// `rentahuman` first ships at v0.22.3 (`optional-mcps/rentahuman/
+/// manifest.yaml` @ v0.22.5; absent from `optional-mcps/` @ v0.22.2), so a
+/// host below that gets the roster without it (``entries(for:)``).
 ///
 /// Two entries changed at v0.21.4 (tag `v2026.9.21`), and a host below
 /// that gets the v0.21.0 roster instead (``entries(for:)``), since its
@@ -574,6 +579,14 @@ public enum OptionalMCPCatalog {
             defaultExcludedTools: ["railway-agent"]
         ),
         OptionalMCPCatalogEntry(
+            name: "rentahuman",
+            description: "Find people and manage real-world work through RentAHuman.",
+            transport: .http,
+            authKind: .oauth,
+            url: "https://rentahuman.ai/api/mcp",
+            defaultEnabledTools: ["search_humans", "browse_taste_humans", "list_bounties", "search_bounties"]
+        ),
+        OptionalMCPCatalogEntry(
             name: "robinhood",
             description: "Robinhood agentic trading: portfolio, balances, and orders.",
             transport: .http,
@@ -709,9 +722,15 @@ public enum OptionalMCPCatalog {
         defaultEnabledTools: ["health", "list_workflows", "get_workflow", "find_workflows", "list_executions", "get_execution", "recent_failures", "export_workflow"]
     )
 
+    /// The v0.21.4 through v0.22.2 roster: `entries` without the v0.22.3
+    /// addition.
+    public static let preV0223Entries: [OptionalMCPCatalogEntry] = entries.filter {
+        $0.name != "rentahuman"
+    }
+
     /// The v0.21.0 roster, exactly as Scarf offered it before v0.21.4's
-    /// changes: `entries` with asana and n8n-official swapped back.
-    public static let preV0214Entries: [OptionalMCPCatalogEntry] = entries.map { entry in
+    /// changes: `preV0223Entries` with asana and n8n-official swapped back.
+    public static let preV0214Entries: [OptionalMCPCatalogEntry] = preV0223Entries.map { entry in
         switch entry.name {
         case "asana": return legacyAsana
         case "n8n-official": return legacyN8N
@@ -720,9 +739,11 @@ public enum OptionalMCPCatalog {
     }
 
     /// The roster a host's `hermes mcp install` knows (C1): the current
-    /// snapshot on v0.21.4+, the v0.21.0 one below it.
+    /// snapshot on v0.22.3+, the v0.21.4 one up to v0.22.2, the v0.21.0
+    /// one below that.
     public static func entries(for capabilities: HermesCapabilities) -> [OptionalMCPCatalogEntry] {
-        capabilities.isV0214OrLater ? entries : preV0214Entries
+        if capabilities.isV0223OrLater { return entries }
+        return capabilities.isV0214OrLater ? preV0223Entries : preV0214Entries
     }
 }
 

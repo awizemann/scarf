@@ -74,7 +74,11 @@ public enum HermesProviderCredentials {
     /// table (`resolve_provider`, `auth.py:1500-1501`) — so `provider: github`
     /// IS Copilot and a `GITHUB_TOKEN` counts for it. Aliases that land on
     /// other providers are left out on purpose: nothing here compares them.
-    /// Plugin-declared aliases are not modelled.
+    /// Plugin-declared aliases are not modelled. `local` → `custom` is a
+    /// literal row from v0.21.6 (`auth.py:1478` @ v0.22.5); below that the
+    /// bundled `custom` plugin declared the same alias
+    /// (`plugins/model-providers/custom/__init__.py:96` @ v2026.9.24), so it
+    /// resolves to `custom` on every host.
     static let providerAliases: [String: String] = [
         "github": "copilot", "github-copilot": "copilot",
         "github-models": "copilot", "github-model": "copilot",
@@ -82,7 +86,7 @@ public enum HermesProviderCredentials {
         "hf": "huggingface", "hugging-face": "huggingface", "huggingface-hub": "huggingface",
         "aws": "bedrock", "aws-bedrock": "bedrock", "amazon-bedrock": "bedrock", "amazon": "bedrock",
         "lm-studio": "lmstudio", "lm_studio": "lmstudio",
-        "ollama": "custom", "vllm": "custom", "llamacpp": "custom",
+        "local": "custom", "ollama": "custom", "vllm": "custom", "llamacpp": "custom",
         "llama.cpp": "custom", "llama-cpp": "custom",
     ]
 

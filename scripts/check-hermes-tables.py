@@ -357,6 +357,27 @@ PLUGIN_PROVIDER_SKIP_AUTH = {
 }
 
 
+def _registered_profile_kwargs(arg, assigned):
+    """Keyword arguments of the profile one `register_provider(<arg>)` call
+    registers, or {} when they can't be read statically.
+
+    Two shapes are readable: the module-level binding most bundled plugins use
+    (`p = XProfile(name=...)` then `register_provider(p)`), and the inline
+    construction several adopted at v0.21.6 (`register_provider(XProfile(
+    name=..., aliases=...))`, e.g. lmstudio / solstice / tencent-tokenhub).
+    Either way the keywords are read off the constructor call; a factory that
+    takes the name positionally (kimi-coding's `_kimi(...)`) yields no `name`
+    keyword, so the caller still reports it rather than guessing.
+    """
+    if isinstance(arg, ast.Name):
+        call = assigned.get(arg.id)
+    elif isinstance(arg, ast.Call):
+        call = arg
+    else:
+        call = None
+    return {kw.arg: kw.value for kw in call.keywords} if call else {}
+
+
 def parse_plugin_providers(src):
     """Provider ids registered by bundled model-provider plugins.
 
@@ -387,7 +408,7 @@ def parse_plugin_providers(src):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         assigned[target.id] = node.value
-        registered_vars = []
+        registered = []
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call) or not node.args:
                 continue
@@ -404,15 +425,11 @@ def parse_plugin_providers(src):
                     continue
             else:
                 continue
-            if isinstance(node.args[0], ast.Name):
-                registered_vars.append(node.args[0].id)
-            else:
-                # Inline construction — no module-level binding to read the
-                # name off. Report rather than drop it silently.
-                skipped.add(entry)
-        for var in registered_vars:
-            call = assigned.get(var)
-            kwargs = {kw.arg: kw.value for kw in call.keywords} if call else {}
+            registered.append(node.args[0])
+        for arg in registered:
+            # A bound or inline profile; anything else has no keywords to
+            # read the name off, so it is reported rather than dropped.
+            kwargs = _registered_profile_kwargs(arg, assigned)
             name_node = kwargs.get("name")
             if not isinstance(name_node, ast.Constant) or not isinstance(name_node.value, str):
                 skipped.add(entry)
@@ -604,8 +621,7 @@ def parse_provider_env_vars(src):
             fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
             if fname != "register_provider":
                 continue
-            call = assigned.get(getattr(node.args[0], "id", None))
-            kw = {k.arg: k.value for k in call.keywords} if call else {}
+            kw = _registered_profile_kwargs(node.args[0], assigned)
             name = kw.get("name")
             if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
                 warn_plugins.add(entry)
@@ -723,8 +739,7 @@ def parse_routable_providers(src, builtin_ids):
             fname = getattr(node.func, "id", None) or getattr(node.func, "attr", None)
             if fname != "register_provider":
                 continue
-            call = assigned.get(getattr(node.args[0], "id", None))
-            kw = {k.arg: k.value for k in call.keywords} if call else {}
+            kw = _registered_profile_kwargs(node.args[0], assigned)
             name = kw.get("name")
             if not (isinstance(name, ast.Constant) and isinstance(name.value, str)):
                 warn_plugins.add(entry)

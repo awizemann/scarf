@@ -21,11 +21,12 @@ import Foundation
 /// outside the synced blocks.
 ///
 /// Hard runtime constraints this table encodes:
-/// - Provider ID `local` is NEVER written. It exists only as a
-///   catalog-side alias target (providers.py); the runtime alias table
-///   (auth.py:1560-1564) maps vllm/llamacpp to `custom`, and
-///   `resolve_provider("local")` raises "Unknown provider" at request
-///   time.
+/// - Provider ID `local` is NEVER written. It is only another alias of
+///   `custom`, like vllm/llamacpp (`auth.py:1478` and
+///   `providers.py:141` @ v0.22.5; before v0.21.6 via the bundled custom
+///   plugin's aliases, `plugins/model-providers/custom/__init__.py:96` @
+///   v2026.9.24), so writing it would only obscure which server the row
+///   means.
 /// - Bare ollama/vllm/llamacpp have NO built-in endpoint and never read
 ///   OLLAMA_HOST. Without `model.base_url` the chat **silently falls
 ///   through to OpenRouter** (runtime_provider.py:970-976) — hence

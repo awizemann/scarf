@@ -23,10 +23,9 @@ import Foundation
     }
 
     @Test func providerIDLocalIsNeverUsed() {
-        // "local" is a catalog-side alias target only. At request time
-        // resolve_provider("local") raises "Unknown provider" — the
-        // runtime alias table maps vllm/llamacpp to "custom", never
-        // "local" (auth.py:1560-1564).
+        // "local" is only another alias of "custom" (auth.py:1478 @
+        // v0.22.5; the custom plugin's aliases before v0.21.6), so no row
+        // ever writes it.
         #expect(!LocalModelProvider.all.contains { $0.providerID == "local" })
         #expect(LocalModelProvider.descriptor(for: "local") == nil)
     }

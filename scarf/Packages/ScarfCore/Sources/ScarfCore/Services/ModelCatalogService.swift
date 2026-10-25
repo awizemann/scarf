@@ -933,6 +933,10 @@ public struct ModelCatalogService: Sendable {
     ///   (`plugins/image_gen/meta-ai/__init__.py:40-48`). It reads
     ///   `image_gen.model` through `resolve_static_model` (top-level
     ///   included). The plugin is absent at v2026.8.31, present at v2026.9.7.
+    /// - `krea-3`, the krea plugin's edit-capable tier
+    ///   (`plugins/image_gen/krea/__init__.py:37-42` @ v0.22.5): absent at
+    ///   v0.22.2, present at v0.22.3. `_MODELS` lists it first, but
+    ///   `DEFAULT_MODEL` is still krea-2-medium, so it follows the Krea 2 rows.
     ///
     /// Not added: xai's ids — that plugin reads only `image_gen.xai.model`
     /// (`plugins/image_gen/xai/__init__.py:3,146`), never the top-level key.
@@ -953,6 +957,11 @@ public struct ModelCatalogService: Sendable {
                 .init(modelID: "fal-ai/kling-image/v3/text-to-image", display: "Kling Image v3", providerHint: "fal"),
                 .init(modelID: "meta/muse-image/text-to-image", display: "Meta Muse Image", providerHint: "fal"),
             ], at: models.index(after: at))
+        }
+        if capabilities.isV0223OrLater,
+           let at = models.firstIndex(where: { $0.modelID == "krea-2-medium-turbo" }) {
+            models.insert(.init(modelID: "krea-3", display: "Krea 3  (Krea API)", providerHint: "krea"),
+                          at: models.index(after: at))
         }
         if capabilities.isV0211OrLater {
             models.append(.init(modelID: "muse-image-1.0", display: "Muse Image 1.0  (Meta API)", providerHint: "meta-ai"))
@@ -1199,7 +1208,9 @@ public struct ModelCatalogService: Sendable {
             docURL: nil
         ),
         // -- Plugin-registered providers (B7) ------------------------------
-        // These four are NOT in `HERMES_OVERLAYS`. They are bundled
+        // These four were NOT in `HERMES_OVERLAYS` when added (commandcode
+        // has been one since v0.22.3, providers.py:73-75 @ v0.22.5; its row
+        // stays here, a merge-if-absent fallback either way). They are bundled
         // `plugins/model-providers/<name>/` profiles that
         // `hermes_cli/models_catalog_static.py:353-368` auto-appends to
         // CANONICAL_PROVIDERS at import time (every registered provider whose
@@ -1396,14 +1407,25 @@ public struct ModelCatalogService: Sendable {
         "nebius-tf": "nebius-token-factory",
         "token-factory": "nebius-token-factory",
         "tokenfactory": "nebius-token-factory",
-        // Local server aliases → virtual "local" concept (resolved via user config)
+        // lmstudio
         "lm-studio": "lmstudio",
         "lm_studio": "lmstudio",
+        // Local OpenAI-compatible servers → the generic `custom` provider
+        // (`_ALIAS_GROUPS["custom"]`, providers.py:141 @ v0.22.5). Not
+        // version-gated: before v0.21.6 providers.py grouped vllm/llama.cpp
+        // under a `local` id, but that was never routable — auth.py sent
+        // vllm/llamacpp to `custom` at every tag, and `local` reached
+        // `custom` via the bundled custom plugin's aliases
+        // (plugins/model-providers/custom/__init__.py:96 @ v2026.9.24). So
+        // `custom` is what every host actually runs, and it keeps
+        // `ModelPreflight.detectMismatch` from flagging the `provider: vllm`
+        // configs Scarf itself writes.
         "ollama": "custom",  // bare "ollama" = local; use "ollama-cloud" for cloud
-        "vllm": "local",
-        "llamacpp": "local",
-        "llama.cpp": "local",
-        "llama-cpp": "local",
+        "local": "custom",
+        "vllm": "custom",
+        "llamacpp": "custom",
+        "llama.cpp": "custom",
+        "llama-cpp": "custom",
     ]
 
     /// `providerAliases` entries mirroring Hermes ALIASES spellings that

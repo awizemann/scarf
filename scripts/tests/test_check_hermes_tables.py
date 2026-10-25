@@ -738,6 +738,47 @@ class LaneEightRoutableProviders(unittest.TestCase):
             cht.parse_routable_providers(FakeSource({cht.AUTH_PY: self.AUTH}), {"nous"})
 
 
+class InlineRegistrationIsRead(unittest.TestCase):
+    """Lanes 4, 6 and 8 read a profile constructed inline in the
+    `register_provider(...)` call (lmstudio / solstice / tencent-tokenhub
+    at v0.22.5) exactly like a module-level binding, instead of WARN-skipping
+    the plugin; a positional factory (kimi-coding) is still reported."""
+
+    PLUGINS = {
+        "inlinekey": 'register_provider(KeyProfile(\n'
+                     '    name="inlinekey", aliases=("ik",), env_vars=("INLINE_API_KEY", "INLINE_BASE_URL"),\n'
+                     '))\n',
+        "inlineoauth": 'register_provider(OAuthProfile(\n'
+                       '    name="inlineoauth", aliases=("io",), auth_type="oauth_external", hidden=True,\n'
+                       '))\n',
+        "attrinline": 'ctx.register_provider(P(name="attrinline", env_vars=("ATTR_KEY",)))\n',
+        "kimi": 'register_provider(_kimi("kimi", (), ("KIMI_API_KEY",), "x"))\n',
+    }
+
+    def _src6(self):
+        return LaneSixProviderEnvVars()._src(plugins=self.PLUGINS)
+
+    def test_lane_four_reads_inline_names(self):
+        ids, skipped = cht.parse_plugin_providers(self._src6())
+        self.assertEqual(sorted(ids), ["attrinline", "inlinekey"])  # oauth_external is skipped
+        self.assertEqual(skipped, {"kimi"})
+
+    def test_lane_six_reads_inline_env_vars(self):
+        vars_, _, warn = cht.parse_provider_env_vars(self._src6())
+        self.assertIn("INLINE_API_KEY", vars_)
+        self.assertIn("ATTR_KEY", vars_)
+        self.assertNotIn("INLINE_BASE_URL", vars_)
+        self.assertEqual(warn, {"kimi"})
+
+    def test_lane_eight_reads_inline_names_and_aliases(self):
+        src = LaneEightRoutableProviders()._src(plugins=self.PLUGINS)
+        ids, warn = cht.parse_routable_providers(src, {"nous", "deepseek"})
+        for ok in ("inlinekey", "ik", "inlineoauth", "io", "attrinline"):
+            self.assertIn(ok, ids)
+        self.assertNotIn("kimi", ids)
+        self.assertEqual(warn, {"kimi"})
+
+
 class LaneEightCatchesDrift(unittest.TestCase):
     """End to end at the target tag: a name Hermes routes missing from the
     Swift table, or one it rejects added to it, must FAIL lane 8."""

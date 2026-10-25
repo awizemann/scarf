@@ -90,12 +90,12 @@ struct HermesMCPServerV0204Tests {
 }
 
 /// Roster integrity for the static optional-MCP catalog snapshot (v0.21.0:
-/// 65 entries, up from 20 at v0.20.4).
+/// 65 entries, up from 20 at v0.20.4; 66 from v0.22.3 with `rentahuman`).
 @Suite("OptionalMCPCatalog roster")
 struct OptionalMCPCatalogTests {
 
-    @Test func hasExactlySixtyFiveEntries() {
-        #expect(OptionalMCPCatalog.entries.count == 65)
+    @Test func hasExactlySixtySixEntries() {
+        #expect(OptionalMCPCatalog.entries.count == 66)
     }
 
     /// Blender was removed from the upstream catalog before v0.20.4 and
