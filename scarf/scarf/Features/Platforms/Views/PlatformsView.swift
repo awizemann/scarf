@@ -127,6 +127,11 @@ struct PlatformsView: View {
                 // S07-F3: a restart Hermes is holding for the current turn.
                 GatewayRestartDrainBanner(watcher: viewModel.drainWatcher)
             }
+            .gatewayInterruptConfirmation(
+                viewModel.pendingInterrupt,
+                onConfirm: { viewModel.confirmInterrupt($0) },
+                onCancel: { viewModel.pendingInterrupt = nil }
+            )
             .font(.caption)
             .padding(.horizontal, 12)
             .padding(.vertical, 8)

@@ -1584,15 +1584,19 @@ struct HermesFileService: Sendable {
     /// Waits as long as the Gateway view does (60 s). The v0.21.4+ hand-back
     /// to an external supervisor can still take longer (in-flight runs drain
     /// first); a timeout there is reported as still restarting, not failed.
+    ///
+    /// - Parameter interrupt: the user confirmed interrupting live sessions
+    ///   after a v0.22.3+ refusal (``interruptOffer(_:outcome:)``); adds
+    ///   `--yes`. Never set without that confirmation.
     @discardableResult
-    nonisolated func restartGateway() -> HermesCLIOutcome {
-        restartGatewayReport().outcome
+    nonisolated func restartGateway(interrupt: Bool = false) -> HermesCLIOutcome {
+        restartGatewayReport(interrupt: interrupt).outcome
     }
 
-    /// ``restartGateway()`` plus what a timed-out run left behind: when the
+    /// ``restartGateway(interrupt:)`` plus what a timed-out run left behind: when the
     /// gateway is draining (waiting for the current turn before it restarts,
     /// S07-F3), `drain` is the state-file snapshot a caller watches from.
-    nonisolated func restartGatewayReport() -> (
+    nonisolated func restartGatewayReport(interrupt: Bool = false) -> (
         outcome: HermesCLIOutcome, drain: HermesGatewayRestartDrain.Snapshot?, budgetSeconds: Int?
     ) {
         // Never into a gateway with no service behind it: Hermes would stop
@@ -1605,10 +1609,13 @@ struct HermesFileService: Sendable {
         }
         // 60 s, or longer on a pre-0.21 launchd host whose restart is the
         // CLI's own drain-then-kickstart (see `restartSpawnTimeout`).
+        let capabilities = HermesVersionCache.shared.capabilitiesSync(for: context)
         let timeout = HermesGatewayRestartDrain.restartSpawnTimeout(
-            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+            capabilities: capabilities,
             configYAML: readFileData(context.paths.configYAML).flatMap { String(data: $0, encoding: .utf8) })
-        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.restart), timeout: timeout)
+        let result = runHermesCLI(
+            args: HermesGatewayServiceVerdict.argv(.restart, capabilities: capabilities, interrupt: interrupt),
+            timeout: timeout)
         // Only a run Scarf's own timer ended is worth a second look: then the
         // gateway itself says whether it is draining.
         let drain = HermesGatewayRestartDrain.afterTimeout(
@@ -1622,6 +1629,18 @@ struct HermesFileService: Sendable {
         )
         guard outcome.confidence == .unconfirmed, let drain else { return (outcome, nil, nil) }
         return (outcome, drain.snapshot, drain.budgetSeconds)
+    }
+
+    /// The v0.22.3+ live-session refusal a `stop`/`restart` outcome carries,
+    /// when this host can be asked to override it (`--yes`). Spawns only on
+    /// a cold version cache — call it off the main actor.
+    nonisolated func interruptOffer(
+        _ verb: HermesGatewayServiceVerdict.Verb, outcome: HermesCLIOutcome
+    ) -> HermesGatewayServiceVerdict.LiveSessionRefusal? {
+        guard HermesGatewayServiceVerdict.liveSessionRefusal(verb: verb, outcome: outcome) != nil else { return nil }
+        return HermesGatewayServiceVerdict.interruptOffer(
+            verb: verb, outcome: outcome,
+            capabilities: HermesVersionCache.shared.capabilitiesSync(for: context))
     }
 
     // MARK: - MCP YAML: block extractor + parser
@@ -3248,11 +3267,26 @@ struct HermesFileService: Sendable {
     /// (`:5631-5634`). "Could not confirm" leaves the answer to the reload
     /// every caller already does; only ``HermesCLIOutcome/Confidence/failed``
     /// — a matched refusal marker, or a non-zero exit — earns the kill.
+    ///
+    /// **Except the v0.22.3+ live-session refusal**
+    /// (``HermesGatewayServiceVerdict/LiveSessionRefusal``): Hermes kept the
+    /// gateway up because it is running sessions, and a SIGTERM would end
+    /// exactly that work. It is returned as is, on every host.
+    ///
+    /// - Parameter interrupt: the user confirmed interrupting those sessions
+    ///   (``interruptOffer(_:outcome:)``); adds `--yes`. Never set without
+    ///   that confirmation.
     @discardableResult
-    nonisolated func stopHermes() -> HermesCLIOutcome {
+    nonisolated func stopHermes(interrupt: Bool = false) -> HermesCLIOutcome {
         // v0.9.0 fixed `hermes gateway stop` so it issues `launchctl bootout` and
         // waits for exit. Use the CLI to avoid racing launchd's KeepAlive respawn.
-        let result = runHermesCLI(args: HermesGatewayServiceVerdict.argv(.stop))
+        // The version is only consulted for a confirmed interrupt: `stop` has
+        // no other version-gated flag.
+        let args = interrupt
+            ? HermesGatewayServiceVerdict.argv(
+                .stop, capabilities: HermesVersionCache.shared.capabilitiesSync(for: context), interrupt: true)
+            : HermesGatewayServiceVerdict.argv(.stop)
+        let result = runHermesCLI(args: args)
         let outcome = HermesGatewayServiceVerdict.judge(
             verb: .stop, output: result.output, exitCode: result.exitCode
         )
@@ -3260,6 +3294,9 @@ struct HermesFileService: Sendable {
         // No positive failure signal ⇒ we do not know, and we must not guess
         // with a signal. See the doc above (s6).
         guard outcome.confidence == .failed else { return outcome }
+        // Hermes refused to interrupt live sessions: the gateway is up on
+        // purpose. Never the kill.
+        if HermesGatewayServiceVerdict.liveSessionRefusal(verb: .stop, outcome: outcome) != nil { return outcome }
         // The fallback SIGTERM is a real stop when it lands; when it does not,
         // Hermes's own refusal line is still the better message.
         func fallback(_ ok: Bool) -> HermesCLIOutcome {

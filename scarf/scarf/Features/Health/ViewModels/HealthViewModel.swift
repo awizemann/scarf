@@ -223,7 +223,11 @@ final class HealthViewModel {
             // default in `ServerContext+Mac.swift:21` is silent, so a site
             // that omits it cannot be read as having chosen anything. These
             // two are read-only probes behind a spinner.
-            async let statusProbe     = OffPool.run { ctx.runHermes(["status"], timeout: 60).output }
+            // `--all` from v0.21.6, where plain `status` became a summary
+            // with no `◆` sections for `parseOutputStatic` to read.
+            async let statusProbe     = OffPool.run {
+                ctx.runHermes(HermesStatusArgv.full(capabilities: caps), timeout: 60).output
+            }
             // `doctor` runs every `DOCTOR_CHECKS` entry plus optional live
             // network probes (`hermes_cli/doctor.py:166-188` @ v2026.9.24)
             // — slower than `status` and occasionally over the old 60s cap
@@ -541,16 +545,33 @@ final class HealthViewModel {
     /// for the length of a remote `gateway start`.
     private(set) var isControlBusy = false
 
-    func stopHermes() {
+    /// v0.22.3+: Hermes refused the last Stop/Restart because sessions are
+    /// live; `HealthView` asks whether to interrupt them. `nil` otherwise.
+    var pendingInterrupt: GatewayInterruptRequest?
+
+    /// The user said yes: re-run the same action with `--yes`.
+    func confirmInterrupt(_ request: GatewayInterruptRequest) {
+        pendingInterrupt = nil
+        switch request.verb {
+        case .stop: stopHermes(interrupt: true)
+        case .restart: restartHermes(interrupt: true)
+        case .start: break
+        }
+    }
+
+    /// - Parameter interrupt: only from ``confirmInterrupt(_:)``.
+    func stopHermes(interrupt: Bool = false) {
         guard !isControlBusy else { return }
         isControlBusy = true
+        pendingInterrupt = nil
         actionMessage = "Stopping…"
         let svc = fileService
+        let caps = capabilities
         Task { [weak self] in
             // `stopHermes()` signals a process (an SSH round-trip on remote);
             // it never belonged on the MainActor. Detached, matching the
             // `runDebugShare` / `runAudit` precedent below.
-            let outcome = await Task.detached { svc.stopHermes() }.value
+            let outcome = await Task.detached { svc.stopHermes(interrupt: interrupt) }.value
             guard let self else { return }
             self.isControlBusy = false
             // P40: `stopHermes()` returns the OUTPUT verdict now, so the
@@ -565,8 +586,25 @@ final class HealthViewModel {
                 failed: String(localized: "Stop failed"),
                 outcome: outcome
             )
+            if self.offerInterrupt(.stop, stop: outcome, capabilities: caps) { return }
             self.settleAndRefresh(after: 2)
         }
+    }
+
+    /// A v0.22.3+ live-session refusal on `stop`: keep Hermes's reason on
+    /// screen (no settle timer clears it) and, where the host has `--yes`,
+    /// ask. True when the stop was such a refusal.
+    private func offerInterrupt(
+        _ verb: HermesGatewayServiceVerdict.Verb, stop: HermesCLIOutcome, capabilities: HermesCapabilities
+    ) -> Bool {
+        guard let live = HermesGatewayServiceVerdict.liveSessionRefusal(verb: .stop, outcome: stop) else {
+            return false
+        }
+        if capabilities.hasGatewayLiveSessionGuard {
+            pendingInterrupt = GatewayInterruptRequest(verb: verb, refusal: live)
+        }
+        refreshProcessStatus()
+        return true
     }
 
     func startHermes() {
@@ -593,12 +631,16 @@ final class HealthViewModel {
         }
     }
 
-    func restartHermes() {
+    /// - Parameter interrupt: only from ``confirmInterrupt(_:)``; passed to
+    ///   the stop half, which is the half that interrupts sessions.
+    func restartHermes(interrupt: Bool = false) {
         guard !isControlBusy else { return }
         isControlBusy = true
+        pendingInterrupt = nil
         actionMessage = "Restarting…"
         let svc = fileService
         let ctx = context
+        let caps = capabilities
         Task { [weak self] in
             // Stop + start on a gateway run by hand kills it, and the start
             // can't bring it back (it drives a service manager, or installs a
@@ -613,7 +655,18 @@ final class HealthViewModel {
                 self.refreshProcessStatus()
                 return
             }
-            let stop = await Task.detached { svc.stopHermes() }.value
+            let stop = await Task.detached { svc.stopHermes(interrupt: interrupt) }.value
+            // v0.22.3+: Hermes kept the gateway up for its live sessions.
+            // The start must not run against it; ask instead.
+            if HermesGatewayServiceVerdict.liveSessionRefusal(verb: .stop, outcome: stop) != nil {
+                guard let self else { return }
+                self.isControlBusy = false
+                Self.recordControlAction(.restart, .failed)
+                self.actionMessage = Self.controlMessage(
+                    verb: .restart, done: "", failed: String(localized: "Restart failed"), outcome: stop)
+                _ = self.offerInterrupt(.restart, stop: stop, capabilities: caps)
+                return
+            }
             try? await Task.sleep(for: .seconds(2))
             let start = await Task.detached { Self.runGateway(.start, ctx) }.value
             guard let self else { return }

@@ -1759,6 +1759,7 @@ import Foundation
         ("hasCronInterpreter", \.hasCronInterpreter),
         ("hasCatalogMemoryProviders", \.hasCatalogMemoryProviders),
         ("hasCatalogHomeAssistant", \.hasCatalogHomeAssistant),
+        ("hasStatusSummaryDefault", \.hasStatusSummaryDefault),
         ("hasSpotifyPluginLogin", \.hasSpotifyPluginLogin),
         ("hasCatalogHolographicMemory", \.hasCatalogHolographicMemory),
         ("hasGatewayBackedACP", \.hasGatewayBackedACP),
@@ -1830,7 +1831,7 @@ import Foundation
         let v0216: [KeyPath<HermesCapabilities, Bool>] = [
             \.isV0216OrLater, \.hasStrictYAMLConfigLoader, \.hasPluginInstallDepsConsent,
             \.hasImportPartialExitNonZero, \.hasCronInterpreter,
-            \.hasCatalogMemoryProviders, \.hasCatalogHomeAssistant,
+            \.hasCatalogMemoryProviders, \.hasCatalogHomeAssistant, \.hasStatusSummaryDefault,
         ]
         for flag in v0216 {
             #expect(!before[keyPath: flag])

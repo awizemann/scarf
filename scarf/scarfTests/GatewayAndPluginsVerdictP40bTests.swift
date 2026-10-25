@@ -113,6 +113,32 @@ struct GatewayAndPluginsVerdictP40bTests {
         #expect(kill?.args.first == "-TERM")
     }
 
+    /// v0.22.3+: Hermes refused because sessions are live (exit 1, a matched
+    /// `Refusing to ` line). That is a positive failure signal, but the kill
+    /// fallback would end exactly the sessions Hermes protected — never.
+    @Test func aLiveSessionRefusalNeverReachesTheKillFallback() {
+        let transport = ScriptedTransport { exe, _ in
+            if exe.hasSuffix("hermes") {
+                return Self.result("""
+                ✗ Refusing to stop the gateway: 3 live session(s) would be interrupted.
+                  • telegram:42 — turn running 3m
+                  Let them finish, or interrupt them deliberately:
+                    hermes gateway stop --yes   # interrupts 3 live session(s)
+                """, 1)
+            }
+            if exe.contains("pgrep") { return Self.result("4812\n", 0) }
+            return Self.result("", 0)
+        }
+        let service = HermesFileService(context: Self.remoteContext(), transport: transport)
+        let outcome = service.stopHermes()
+
+        #expect(!outcome.succeeded)
+        #expect(outcome.detail == "Refusing to stop the gateway: 3 live session(s) would be interrupted.")
+        #expect(transport.calls.count == 1)
+        #expect(!transport.calls.contains { $0.exe.contains("pgrep") || $0.exe.contains("kill") })
+        #expect(!transport.calls.contains { $0.args.contains("--yes") }, "never --yes without the user's yes")
+    }
+
     /// A confirmed stop short-circuits before either probe, as before.
     @Test func aConfirmedStopRunsNothingElse() {
         let transport = ScriptedTransport { _, _ in Self.result("✓ Service stopped", 0) }

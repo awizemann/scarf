@@ -43,3 +43,38 @@ enum GatewayActionBanner {
         return detail.map { "\(stem) — \($0)" } ?? stem
     }
 }
+
+/// A v0.22.3+ live-session refusal the user may override: Hermes would not
+/// stop or restart the gateway while it runs sessions
+/// (``ScarfCore/HermesGatewayServiceVerdict/LiveSessionRefusal``). Every
+/// user-initiated Stop/Restart surface that meets one asks with this, and
+/// only a confirmed answer re-runs the verb with `--yes`.
+struct GatewayInterruptRequest: Equatable, Sendable {
+    /// What the USER asked for — Health and the menu bar restart by stop +
+    /// start, so their refusal comes from the stop but the question is
+    /// about the restart.
+    let verb: HermesGatewayServiceVerdict.Verb
+    let count: Int
+    /// Hermes's own first line.
+    let reason: String
+
+    init(verb: HermesGatewayServiceVerdict.Verb, refusal: HermesGatewayServiceVerdict.LiveSessionRefusal) {
+        self.verb = verb
+        self.count = refusal.count
+        self.reason = refusal.line
+    }
+
+    var title: String {
+        verb == .restart
+            ? String(localized: "Interrupt \(count) live sessions and restart the gateway?")
+            : String(localized: "Interrupt \(count) live sessions and stop the gateway?")
+    }
+
+    var confirmLabel: String {
+        verb == .restart ? String(localized: "Interrupt and Restart") : String(localized: "Interrupt and Stop")
+    }
+
+    var message: String {
+        reason + "\n\n" + String(localized: "Their current turns, cron jobs and background tasks end now. To let them finish, cancel and try again later.")
+    }
+}

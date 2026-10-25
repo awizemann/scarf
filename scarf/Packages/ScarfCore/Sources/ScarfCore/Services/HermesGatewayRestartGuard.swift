@@ -141,7 +141,12 @@ public enum HermesGatewayRestartGuard {
         } else if !lines.isEmpty, lines.allSatisfy(isParkedLine) {
             return .parkedProfile
         }
-        if text.contains(manualRunningMarker) { return .runningWithoutService }
+        // v0.22.1/v0.22.3+: an incompatible hand-run gateway prints its
+        // `✗ … but cannot serve this Hermes` line INSTEAD of the manual
+        // pair — still no service behind it.
+        if text.contains(manualRunningMarker) || HermesGatewayIncompatibleOwner.isHandRun(statusOutput: text) {
+            return .runningWithoutService
+        }
         if text.contains("✗ Gateway is not running"), text.contains(manualStoppedMarker) {
             return .stoppedWithoutService
         }
@@ -158,7 +163,9 @@ public enum HermesGatewayRestartGuard {
             .compactMap { Int($0.trimmingCharacters(in: .whitespaces)) }
     }
 
-    /// `hermes status`'s service-manager row under s6.
+    /// `hermes status`'s service-manager row under s6 — printed by the full
+    /// view only (`_render_gateway`), so the probe asks for it with
+    /// ``HermesStatusArgv/full(capabilities:)``.
     static let s6ManagerMarker = "s6 (container supervisor)"
 
     /// True when `hermes status` shows the s6 container supervisor.
@@ -205,7 +212,7 @@ public enum HermesGatewayRestartGuard {
         if mode == .parkedProfile {
             return .refuse(HermesCLIOutcome(succeeded: false, detail: parkedProfileNote))
         }
-        let manager = run(["status"], timeout)
+        let manager = run(HermesStatusArgv.full(capabilities: capabilities), timeout)
         // The external-supervisor hand-back is `gateway restart`'s own arm;
         // a stop + start never takes it, so there it proves nothing.
         return decision(
@@ -314,4 +321,18 @@ public enum HermesGatewayRestartGuard {
     public static let statusUnreadableNote = String(
         localized: "Scarf couldn't read the gateway's status, so it didn't restart it. A restart of a gateway that isn't a service would stop it for good."
     )
+}
+
+/// `hermes status`, asked for every section.
+///
+/// From v0.21.6 plain `hermes status` is a one-screen summary with no `◆`
+/// sections and no service-manager row (see
+/// ``HermesCapabilities/hasStatusSummaryDefault``), so Health's section
+/// parser and the restart guard's s6 probe both found nothing. `--all` is
+/// passed only there: below v0.21.6 the plain verb already prints every
+/// section, and on the oldest supported tags `--all` un-redacted API keys.
+public enum HermesStatusArgv {
+    public static func full(capabilities: HermesCapabilities) -> [String] {
+        capabilities.hasStatusSummaryDefault ? ["status", "--all"] : ["status"]
+    }
 }

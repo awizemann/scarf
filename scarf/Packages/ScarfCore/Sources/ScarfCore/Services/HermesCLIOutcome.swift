@@ -1101,7 +1101,34 @@ public enum HermesCLIMarkers {
         gatewayWindowsAlreadyRunning,
         gatewayDetachedFallbackStarted,
         gatewaySupervisorRelaunched,
+        gatewayDetachedRestartStarted,
     ]
+
+    /// v0.22.3+: `gateway restart --detach` with no installed service starts
+    /// the replacement in the background and prints
+    /// `✓ Started the gateway in the background`
+    /// (`start_detached_replacement`, `hermes_cli/gateway_runtime_start.py:96`
+    /// @ v0.22.3 and v0.22.5, reached from `start_restart_replacement`,
+    /// `hermes_cli/gateway_supervised_restart.py:148-150`). Its failure arm
+    /// is ``gatewayDetachedRestartFailed``. Neither module prints either line
+    /// below v0.22.3, so no gate is needed to judge them.
+    public static let gatewayDetachedRestartStarted = "Started the gateway in the background"
+
+    /// `✗ Could not start the gateway in the background: {exc}` — the
+    /// `--detach` arm's failure line (`gateway_runtime_start.py:94`, on
+    /// stderr, then exit 1). Listed so the banner quotes it, and so the
+    /// `Starting gateway...` line printed just before it
+    /// (`hermes_cli/gateway.py:5539` @ v0.22.5) can never be read as the
+    /// foreground arm.
+    public static let gatewayDetachedRestartFailed = "Could not start the gateway in the background"
+
+    /// v0.22.3+: the tail of the live-session refusal's first line,
+    /// `✗ Refusing to {verb} the gateway: {n} live session(s) would be
+    /// interrupted.` (`_work_lines`, `hermes_cli/gateway_lifecycle_guards.py:88`,
+    /// printed through `print_error` by `refuse_while_sessions_live`, `:126`,
+    /// before `sys.exit(1)`, `:129` @ v0.22.3 and v0.22.5). See
+    /// ``HermesGatewayServiceVerdict/liveSessionRefusal(verb:output:)``.
+    public static let gatewayLiveSessionRefusalClause = " live session(s) would be interrupted."
 
     /// v0.21.4+: `✓ Gateway relaunched by its supervisor (PID {n})`, the
     /// success line of the hand-back to an external supervisor
@@ -1205,6 +1232,7 @@ public enum HermesCLIMarkers {
         "Gateway start via",
         "Refusing to ",
         "Service start is not applicable inside a Docker container.",
+        gatewayDetachedRestartFailed,
     ]
 
     /// v0.21.5 parked-profile lifecycle (`hermes_cli/gateway_profile_lifecycle.py`
@@ -1843,6 +1871,79 @@ public enum HermesGatewayServiceVerdict {
     /// nothing here for a `--` to guard.
     public static func argv(_ verb: Verb) -> [String] { ["gateway", verb.rawValue] }
 
+    /// The argv with the flags this host supports for `verb`:
+    /// - `--detach` on `restart` where ``HermesCapabilities/hasGatewayRestartDetach``
+    ///   (`hermes_cli/subcommands/gateway.py:152-154` @ v0.22.3/v0.22.5): with
+    ///   no installed service the replacement starts in the background
+    ///   instead of inside Scarf's own spawn. Ignored when a service manager
+    ///   owns the restart.
+    /// - `--yes` on `stop`/`restart` ONLY when `interrupt` — the user
+    ///   confirmed interrupting live sessions after Hermes refused — and
+    ///   only where ``HermesCapabilities/hasGatewayLiveSessionGuard``
+    ///   (`-y`/`--yes`/`--interrupt`, `:144`, `:151`). Scarf never passes it
+    ///   on its own.
+    ///
+    /// A host below both floors gets exactly ``argv(_:)``.
+    public static func argv(_ verb: Verb, capabilities: HermesCapabilities, interrupt: Bool = false) -> [String] {
+        var args = argv(verb)
+        if verb == .restart, capabilities.hasGatewayRestartDetach { args.append("--detach") }
+        if interrupt, verb != .start, capabilities.hasGatewayLiveSessionGuard { args.append("--yes") }
+        return args
+    }
+
+    /// v0.22.3+: Hermes refused a `stop`/`restart` because the gateway is
+    /// running live sessions (`refuse_while_sessions_live`,
+    /// `hermes_cli/gateway_lifecycle_guards.py:97-129` @ v0.22.5). With no
+    /// terminal it prints `✗ Refusing to {verb} the gateway: {n} live
+    /// session(s) would be interrupted.`, one bullet per session, a
+    /// `hermes gateway {verb} --yes` hint, and exits 1.
+    ///
+    /// This is NOT a failure to act on: the gateway is up on purpose, and
+    /// a kill fallback would end exactly the work Hermes protected. The only
+    /// way past it is the user's own confirmation, re-run with
+    /// ``argv(_:capabilities:interrupt:)``.
+    public struct LiveSessionRefusal: Sendable, Equatable {
+        /// `{n}` from the line — `max(len(active_work), active_agents)`
+        /// (`gateway_lifecycle_guards.py:85`).
+        public let count: Int
+        /// Hermes's own first line, glyph removed — the reason to show.
+        public let line: String
+    }
+
+    /// The live-session refusal `output` carries for `verb`, or `nil`.
+    /// Matched on the whole first line, so the `--yes` warning
+    /// (`⚠ --yes: {verb} proceeds: …`, `:112`) and the gateway-process
+    /// refusal (`Refusing to {verb} the gateway from inside …`) never match.
+    /// Ungated: no host below v0.22.3 prints it.
+    public static func liveSessionRefusal(verb: Verb, output: String) -> LiveSessionRefusal? {
+        guard verb != .start else { return nil }
+        let prefix = "Refusing to \(verb.rawValue) the gateway: "
+        let clause = HermesCLIMarkers.gatewayLiveSessionRefusalClause
+        for line in HermesCLIVerdict.significantLines(output) {
+            let head = HermesCLIVerdict.unglyphed(line)
+            guard head.hasPrefix(prefix), head.hasSuffix(clause),
+                  let count = Int(head.dropFirst(prefix.count).dropLast(clause.count)) else { continue }
+            return LiveSessionRefusal(count: count, line: head)
+        }
+        return nil
+    }
+
+    /// The live-session refusal a judged `outcome` carries (``judge(verb:output:exitCode:externallySupervised:drainingAfterTimeout:)``
+    /// puts the line in `detail`), or `nil`.
+    public static func liveSessionRefusal(verb: Verb, outcome: HermesCLIOutcome) -> LiveSessionRefusal? {
+        guard !outcome.succeeded, let detail = outcome.detail else { return nil }
+        return liveSessionRefusal(verb: verb, output: detail)
+    }
+
+    /// The refusal a caller may OFFER to override: only where the host has
+    /// the `--yes` flag to override it with.
+    public static func interruptOffer(
+        verb: Verb, outcome: HermesCLIOutcome, capabilities: HermesCapabilities
+    ) -> LiveSessionRefusal? {
+        guard capabilities.hasGatewayLiveSessionGuard else { return nil }
+        return liveSessionRefusal(verb: verb, outcome: outcome)
+    }
+
     /// The neutral note decision 2 asks for on a Stop with nothing running.
     public static let nothingWasRunningNote = String(
         localized: "Nothing was running on this profile."
@@ -1955,6 +2056,11 @@ public enum HermesGatewayServiceVerdict {
             successAnchored: true
         )
         let lines = HermesCLIVerdict.significantLines(output)
+        // v0.22.3+ live-session refusal: Hermes's first line is the reason,
+        // never the `--yes` hint that ends the output.
+        if !verdict.succeeded, let live = liveSessionRefusal(verb: verb, output: output) {
+            return HermesCLIOutcome(succeeded: false, detail: live.line, warning: nil, confidence: .failed)
+        }
         if !verdict.succeeded,
            let lifecycle = profileLifecycleOutcome(verb: verb, lines: lines, exitCode: exitCode) {
             return lifecycle

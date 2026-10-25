@@ -2808,6 +2808,17 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `plugin-catalog/homeassistant.yaml` (new at v0.21.6).
     public var hasCatalogHomeAssistant: Bool { isV0216OrLater }
 
+    /// Plain `hermes status` prints a one-screen summary (`_render_summary`,
+    /// `hermes_cli/status.py:391-407`; `show_status` picks it unless
+    /// `--full`/`--deep`, `:417-424` @ v0.22.5) with no `◆` sections and no
+    /// service-manager row; `--full`, alias `--all`
+    /// (`hermes_cli/subcommands/status.py:13-15`), prints every section. At
+    /// v2026.9.24 `show_status` has no summary and `--all` is an ignored
+    /// flag; from v2026.3.30 through v2026.6.19 `--all` printed API keys
+    /// UNREDACTED (`status.py` `display = redact_key(value) if not show_all
+    /// else value`). So `--all` is passed only from here.
+    public var hasStatusSummaryDefault: Bool { isV0216OrLater }
+
     // MARK: v0.21.7 flags
     //
     // Each floor opened at v0.21.7 and at v0.21.6, the tag before it.

@@ -277,8 +277,20 @@ final class PlatformsViewModel: OutcomeMessageHosting {
     /// Follows a restart Hermes is holding for the current turn (S07-F3).
     @ObservationIgnored let drainWatcher: GatewayRestartDrainWatcher
 
-    func restartGateway() {
+    /// v0.22.3+: Hermes refused the last restart because sessions are live;
+    /// the view asks whether to interrupt them. `nil` otherwise.
+    var pendingInterrupt: GatewayInterruptRequest?
+
+    /// The user said yes: restart again with `--yes`.
+    func confirmInterrupt(_ request: GatewayInterruptRequest) {
+        pendingInterrupt = nil
+        restartGateway(interrupt: true)
+    }
+
+    /// - Parameter interrupt: only from ``confirmInterrupt(_:)``.
+    func restartGateway(interrupt: Bool = false) {
         drainWatcher.reset()
+        pendingInterrupt = nil
         restartInProgress = true
         // In-progress, not an outcome: shown in the success style because
         // nothing has failed yet, and replaced the moment the CLI returns.
@@ -293,11 +305,15 @@ final class PlatformsViewModel: OutcomeMessageHosting {
             // site — `_cmd_restart` has exit-0 refusal arms
             // (`hermes_cli/gateway.py:6047` @ v2026.9.7) and `cmd_gateway`
             // discards the return anyway (`hermes_cli/main.py:1736-1742`).
-            let report = fileService.restartGatewayReport()
+            let report = fileService.restartGatewayReport(interrupt: interrupt)
+            let offer = fileService.interruptOffer(.restart, outcome: report.outcome)
             await MainActor.run { [weak self] in
                 guard let self else { return }
                 self.restartInProgress = false
                 self.applySaveOutcome(Self.restartBanner(report.outcome))
+                // v0.22.3+: refused for live sessions — the banner above
+                // quotes Hermes's reason; ask whether to interrupt them.
+                self.pendingInterrupt = offer.map { GatewayInterruptRequest(verb: .restart, refusal: $0) }
                 // S07-F3: Hermes is waiting for the current turn before it
                 // restarts — follow it rather than leave a one-line guess.
                 if let drain = report.drain {

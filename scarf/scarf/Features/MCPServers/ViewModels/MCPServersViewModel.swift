@@ -690,12 +690,28 @@ final class MCPServersViewModel {
         return .failed(outcome.detail.map { "Restart failed: \($0)" } ?? "Restart failed")
     }
 
-    func restartGateway() {
+    /// v0.22.3+: Hermes refused the last restart because sessions are live;
+    /// the view asks whether to interrupt them. `nil` otherwise.
+    var pendingInterrupt: GatewayInterruptRequest?
+
+    /// The user said yes: restart again with `--yes`.
+    func confirmInterrupt(_ request: GatewayInterruptRequest) {
+        pendingInterrupt = nil
+        restartGateway(interrupt: true)
+    }
+
+    /// - Parameter interrupt: only from ``confirmInterrupt(_:)``.
+    func restartGateway(interrupt: Bool = false) {
         let fileService = self.fileService
+        pendingInterrupt = nil
         Task.detached { [weak self] in
-            let outcome = fileService.restartGateway()
+            let outcome = fileService.restartGateway(interrupt: interrupt)
+            let offer = fileService.interruptOffer(.restart, outcome: outcome)
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                // v0.22.3+: refused for live sessions — `activeError` below
+                // quotes Hermes's reason; ask whether to interrupt them.
+                self.pendingInterrupt = offer.map { GatewayInterruptRequest(verb: .restart, refusal: $0) }
                 switch Self.restartBanner(outcome) {
                 case .confirmed(let status):
                     self.flashStatus(status)

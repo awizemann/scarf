@@ -689,12 +689,20 @@ final class ServerLiveStatus: Identifiable {
         }
     }
 
-    func stopHermes() {
-        Task { [fileService] in
-            let outcome = await Task.detached { fileService.stopHermes() }.value
+    /// - Parameter interrupt: only after ``confirmInterrupt(_:)`` said yes.
+    func stopHermes(interrupt: Bool = false) {
+        Task { [weak self, fileService] in
+            let (outcome, offer) = await Task.detached {
+                let outcome = fileService.stopHermes(interrupt: interrupt)
+                return (outcome, fileService.interruptOffer(.stop, outcome: outcome))
+            }.value
             Analytics.record(.hermesControlAction(
                 action: .stop, source: .menuBar, outcome: .init(outcome.confidence)
             ))
+            // v0.22.3+: Hermes kept the gateway up for its live sessions.
+            if let offer, Self.confirmInterrupt(GatewayInterruptRequest(verb: .stop, refusal: offer)) {
+                self?.stopHermes(interrupt: true)
+            }
         }
         Task { [weak self] in
             try? await Task.sleep(nanoseconds: 2_000_000_000)
@@ -702,7 +710,26 @@ final class ServerLiveStatus: Identifiable {
         }
     }
 
-    func restartHermes() {
+    /// The menu bar has no pane to put a question in, so a v0.22.3+
+    /// live-session refusal is asked in an alert. True only on the user's
+    /// explicit yes — the one path to a `--yes` run from here.
+    private static func confirmInterrupt(_ request: GatewayInterruptRequest) -> Bool {
+        NSApplication.shared.activate()
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = request.title
+        alert.informativeText = request.message
+        alert.addButton(withTitle: String(localized: "Cancel"))
+        alert.addButton(withTitle: request.confirmLabel)
+        // Cancel is first (the default, Return) and the escape key: leaving
+        // the sessions alone is the safe answer.
+        alert.buttons.first?.keyEquivalent = "\u{1b}"
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    /// - Parameter interrupt: only after ``confirmInterrupt(_:)`` said yes;
+    ///   passed to the stop half, which is the half that interrupts.
+    func restartHermes(interrupt: Bool = false) {
         Task { [weak self, fileService, context] in
             // A gateway run by hand would be stopped for good: the start
             // below can't bring it back. Nothing is sent; the menu item
@@ -715,7 +742,21 @@ final class ServerLiveStatus: Identifiable {
                 self?.refresh()
                 return
             }
-            let stopped = await Task.detached { fileService.stopHermes() }.value
+            let (stopped, offer) = await Task.detached {
+                let stopped = fileService.stopHermes(interrupt: interrupt)
+                return (stopped, fileService.interruptOffer(.stop, outcome: stopped))
+            }.value
+            // v0.22.3+: Hermes kept the gateway up for its live sessions, so
+            // the start must not run against it.
+            if HermesGatewayServiceVerdict.liveSessionRefusal(verb: .stop, outcome: stopped) != nil {
+                Analytics.record(.hermesControlAction(action: .restart, source: .menuBar, outcome: .init(.failed)))
+                if let offer, Self.confirmInterrupt(GatewayInterruptRequest(verb: .restart, refusal: offer)) {
+                    self?.restartHermes(interrupt: true)
+                } else {
+                    self?.refresh()
+                }
+                return
+            }
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             let started = await Task.detached { Self.performStart(context) }.value
             // A restart only succeeded if both halves did; a stop that

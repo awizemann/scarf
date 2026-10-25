@@ -219,6 +219,11 @@ struct HealthView: View {
             viewModel.cancelLoad()
             viewModel.stopDashboardMonitoring()
         }
+        .gatewayInterruptConfirmation(
+            viewModel.pendingInterrupt,
+            onConfirm: { viewModel.confirmInterrupt($0) },
+            onCancel: { viewModel.pendingInterrupt = nil }
+        )
         .confirmationDialog("Upload debug report?", isPresented: $showShareConfirm) {
             Button("Upload", role: .destructive) {
                 viewModel.runDebugShare()

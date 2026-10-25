@@ -378,6 +378,11 @@ struct MCPServersView: View {
                     onRestart: { viewModel.restartGateway() },
                     onDismiss: { viewModel.showRestartBanner = false }
                 )
+                .gatewayInterruptConfirmation(
+                    viewModel.pendingInterrupt,
+                    onConfirm: { viewModel.confirmInterrupt($0) },
+                    onCancel: { viewModel.pendingInterrupt = nil }
+                )
             }
             if let status = viewModel.statusMessage {
                 Text(status)

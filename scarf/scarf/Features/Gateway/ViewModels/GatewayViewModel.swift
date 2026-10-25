@@ -60,6 +60,11 @@ struct MessagingGatewayInfo {
     /// and whenever the guard didn't fire, so this changes nothing for a
     /// pre-target host or a healthy multiplexer (charter C1).
     var standaloneWarning: HermesGatewayStandaloneWarning? = nil
+    /// v0.22.1/v0.22.3+: the gateway is running but this Hermes's clients
+    /// refuse it — `<reason>` of `… but cannot serve this Hermes
+    /// (incompatible: <reason>)` (``HermesGatewayIncompatibleOwner``). Only
+    /// ever set where ``HermesCapabilities/hasGatewayIncompatibleOwnerStatus``.
+    var incompatibleOwnerReason: String? = nil
 }
 
 struct PlatformInfo: Identifiable {
@@ -321,18 +326,31 @@ final class MessagingGatewayViewModel {
             )
         }
         let isLoaded = isServiceLoaded(pid: pid, statusOutput: statusOutput)
+        let incompatible = incompatibleOwnerReason(statusOutput: statusOutput, capabilities: capabilities)
 
         var info = MessagingGatewayInfo(
             pid: pid, state: state, exitReason: exitReason,
             startTime: startTime, updatedAt: updatedAt,
             platforms: platforms, isLoaded: isLoaded,
             isServedByMultiplexer: isServedByMultiplexer(statusOutput: statusOutput),
-            isRunning: isGatewayRunning(state: state, statusOutput: statusOutput)
+            // The incompatible line is a `✗`, but the gateway IS running.
+            isRunning: incompatible != nil || isGatewayRunning(state: state, statusOutput: statusOutput)
         )
+        info.incompatibleOwnerReason = incompatible
         if capabilities.hasGatewayStandaloneStatusBox {
             info.standaloneWarning = HermesGatewayStandaloneWarning.parse(statusOutput: statusOutput)
         }
         return info
+    }
+
+    /// The v0.22.1/v0.22.3+ incompatible-owner reason — see
+    /// `MessagingGatewayInfo.incompatibleOwnerReason`. Gated so an older
+    /// host renders exactly as before.
+    nonisolated static func incompatibleOwnerReason(
+        statusOutput: String, capabilities: HermesCapabilities
+    ) -> String? {
+        guard capabilities.hasGatewayIncompatibleOwnerStatus else { return nil }
+        return HermesGatewayIncompatibleOwner.reason(statusOutput: statusOutput)
     }
 
     /// v0.21.5 parked verdict — see `MessagingGatewayInfo.isParked` and
@@ -509,9 +527,29 @@ final class MessagingGatewayViewModel {
 
     func startGateway() { runServiceAction(.start, label: "start", settleSeconds: 2) }
 
-    func stopGateway() { runServiceAction(.stop, label: "stop", settleSeconds: 2) }
+    /// - Parameter interrupt: only from ``confirmInterrupt(_:)``.
+    func stopGateway(interrupt: Bool = false) {
+        runServiceAction(.stop, label: "stop", settleSeconds: 2, interrupt: interrupt)
+    }
 
-    func restartGateway() { runServiceAction(.restart, label: "restart", settleSeconds: 3) }
+    /// - Parameter interrupt: only from ``confirmInterrupt(_:)``.
+    func restartGateway(interrupt: Bool = false) {
+        runServiceAction(.restart, label: "restart", settleSeconds: 3, interrupt: interrupt)
+    }
+
+    /// v0.22.3+: Hermes refused the last Stop/Restart because sessions are
+    /// live; the view asks whether to interrupt them. `nil` otherwise.
+    var pendingInterrupt: GatewayInterruptRequest?
+
+    /// The user said yes: re-run the same verb with `--yes`.
+    func confirmInterrupt(_ request: GatewayInterruptRequest) {
+        pendingInterrupt = nil
+        switch request.verb {
+        case .stop: stopGateway(interrupt: true)
+        case .restart: restartGateway(interrupt: true)
+        case .start: break
+        }
+    }
 
     /// Generation token for the deferred settle-and-reload. Every service
     /// action bumps it; the pending block from an earlier action sees a
@@ -557,10 +595,12 @@ final class MessagingGatewayViewModel {
     /// and a Stop that found nothing running is a success carrying a neutral
     /// note rather than a lie in either direction.
     private func runServiceAction(
-        _ verb: HermesGatewayServiceVerdict.Verb, label: String, settleSeconds: Double
+        _ verb: HermesGatewayServiceVerdict.Verb, label: String, settleSeconds: Double,
+        interrupt: Bool = false
     ) {
         guard !isBusy else { return }
         isBusy = true
+        pendingInterrupt = nil
         // A new action owns the pane; an earlier restart's watch ends here.
         drainWatcher.reset()
         // Bump BOTH tokens before the CLI runs: `actionGeneration` cancels an
@@ -603,7 +643,8 @@ final class MessagingGatewayViewModel {
                         capabilities: caps,
                         configYAML: ctx.readData(ctx.paths.configYAML).flatMap { String(data: $0, encoding: .utf8) })
                     : Self.mutationTimeout
-                let result = run(HermesGatewayServiceVerdict.argv(verb), timeout)
+                let result = run(
+                    HermesGatewayServiceVerdict.argv(verb, capabilities: caps, interrupt: interrupt), timeout)
                 // S07-F3: a restart that outlived the timer while the gateway
                 // is draining is waiting for the current turn, not failed.
                 // The gateway's own state file says so (the CLI's buffered
@@ -684,6 +725,12 @@ final class MessagingGatewayViewModel {
                 self.actionMessage = outcome.detail
                     .map { String(localized: "Gateway \(label) failed: \($0)") }
                     ?? String(localized: "Gateway \(label) failed")
+                // v0.22.3+: refused because sessions are live — ask whether
+                // to interrupt them. The refusal line above stays as the why.
+                if let live = HermesGatewayServiceVerdict.interruptOffer(
+                    verb: verb, outcome: outcome, capabilities: caps) {
+                    self.pendingInterrupt = GatewayInterruptRequest(verb: verb, refusal: live)
+                }
                 // Reload anyway (the host may have moved), but never clear a
                 // failure message on a timer — the user dismisses it by taking
                 // the next action.

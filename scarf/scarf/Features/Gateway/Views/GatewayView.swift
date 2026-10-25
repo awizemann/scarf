@@ -159,6 +159,8 @@ struct GatewayView: View {
                     // host gateway, and says so.
                     label: viewModel.gateway.isParked
                         ? "parked"
+                        : viewModel.gateway.incompatibleOwnerReason != nil
+                        ? "running (incompatible)"
                         : viewModel.gateway.isServedByMultiplexer
                         ? "running"
                         : (viewModel.gateway.isRunning ? viewModel.gateway.state : "not running"),
@@ -222,7 +224,40 @@ struct GatewayView: View {
             if let warning = viewModel.gateway.standaloneWarning {
                 standaloneWarningBanner(warning)
             }
+
+            if let reason = viewModel.gateway.incompatibleOwnerReason {
+                incompatibleOwnerBanner(reason)
+            }
         }
+        .gatewayInterruptConfirmation(
+            viewModel.pendingInterrupt,
+            onConfirm: { viewModel.confirmInterrupt($0) },
+            onCancel: { viewModel.pendingInterrupt = nil }
+        )
+    }
+
+    /// v0.22.1/v0.22.3+: `gateway status` says the running gateway was
+    /// started by another Hermes version and this one's clients refuse it
+    /// (`hermes_cli/gateway_status_notes.py:26-30` @ v0.22.5). Hermes's own
+    /// fix is `hermes gateway restart`, so the banner offers Restart.
+    private func incompatibleOwnerBanner(_ reason: String) -> some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s2) {
+            Label("This gateway is running but can't serve this Hermes version.", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption.bold())
+                .foregroundStyle(ScarfColor.warning)
+            Text("It was started by another Hermes version; chat and other clients can't attach to it. Restart it to replace it with this version.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Why: incompatible: \(reason)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("Restart") { viewModel.restartGateway() }
+                .buttonStyle(ScarfSecondaryButton())
+                .controlSize(.small)
+                .disabled(viewModel.isBusy)
+        }
+        .padding(ScarfSpace.s3)
+        .background(ScarfColor.warningTint.opacity(0.56), in: RoundedRectangle(cornerRadius: 8))
     }
 
     /// v0.21.5's boxed `gateway status` warning (P7e, live finding on

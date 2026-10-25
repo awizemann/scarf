@@ -98,14 +98,14 @@ struct GatewayRestartGuardR18aTests {
     @Test func stopThenStartRestartsAskFirst() throws {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
         for (file, anchor) in [
-            ("scarf/Features/Health/ViewModels/HealthViewModel.swift", "func restartHermes() {"),
-            ("scarf/scarfApp.swift", "func restartHermes() {"),
+            ("scarf/Features/Health/ViewModels/HealthViewModel.swift", "func restartHermes(interrupt: Bool = false) {"),
+            ("scarf/scarfApp.swift", "func restartHermes(interrupt: Bool = false) {"),
         ] {
             let source = try String(contentsOf: root.appendingPathComponent(file), encoding: .utf8)
             let body = try #require(source.range(of: anchor), "\(file)")
             let rest = source[body.upperBound...]
             let guardCall = try #require(rest.range(of: "restartRefusal(stopThenStart: true)"), "\(file)")
-            let stop = try #require(rest.range(of: "stopHermes()"), "\(file)")
+            let stop = try #require(rest.range(of: "stopHermes(interrupt:"), "\(file)")
             #expect(guardCall.lowerBound < stop.lowerBound, "\(file)")
         }
     }
@@ -138,12 +138,12 @@ struct GatewayRestartGuardR18aTests {
                 .deletingLastPathComponent().deletingLastPathComponent()
                 .appendingPathComponent("scarf/Core/Services/HermesFileService.swift"),
             encoding: .utf8)
-        let body = try #require(source.range(of: "nonisolated func restartGateway() -> HermesCLIOutcome {"))
+        let body = try #require(source.range(of: "nonisolated func restartGateway(interrupt: Bool = false) -> HermesCLIOutcome {"))
         let rest = source[body.upperBound...]
         // R19: the decision (not just the refusal), so a supervised
         // hand-back's timeout can be judged "still restarting".
         let guardCall = try #require(rest.range(of: "restartDecision(stopThenStart: false)"))
-        let restart = try #require(rest.range(of: "HermesGatewayServiceVerdict.argv(.restart)"))
+        let restart = try #require(rest.range(of: "HermesGatewayServiceVerdict.argv(.restart, capabilities:"))
         #expect(guardCall.lowerBound < restart.lowerBound)
     }
 }
