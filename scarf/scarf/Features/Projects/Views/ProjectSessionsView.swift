@@ -155,7 +155,7 @@ private struct ProjectSessionRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: iconForSource(session.source))
+            Image(systemName: iconForSource(session.displaySource))
                 .foregroundStyle(.secondary)
                 .frame(width: 22)
                 .accessibilityHidden(true)
@@ -226,7 +226,10 @@ private struct ProjectSessionRow: View {
 
     private func iconForSource(_ source: String) -> String {
         switch source.lowercased() {
-        case "cli", "acp": return "terminal"
+        // `tui` and `desktop` are the v0.22.3+ surfaces a `local` row
+        // resolves to (`HermesSession.displaySource`).
+        case "cli", "tui", "acp": return "terminal"
+        case "desktop": return "desktopcomputer"
         case "telegram": return "paperplane"
         case "discord": return "bubble.left.and.bubble.right"
         default: return "message"

@@ -87,7 +87,7 @@ import ScarfCore
         let svm = SessionsViewModel(context: context)
         svm.sessionDeleteRunner = { _, sid in
             deletes.record(sid)
-            return exitCode
+            return (exitCode, "")
         }
         svm.deleteSessionId = sessionId
         svm.showDeleteConfirmation = true
@@ -373,7 +373,7 @@ import ScarfCore
         #expect(svm.sessions.map(\.id) == ["sess-X"])
 
         // A later success clears the banner and removes the row.
-        svm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 0 }
+        svm.sessionDeleteRunner = { _, sid in deletes.record(sid); return (0, "") }
         svm.deleteSessionId = "sess-X"
         svm.confirmDelete()
         await svm.inFlightDelete?.value

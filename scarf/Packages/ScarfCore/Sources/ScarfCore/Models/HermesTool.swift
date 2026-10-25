@@ -248,6 +248,11 @@ public enum KnownPlatforms {
     public static func icon(for platform: String) -> String {
         switch platform {
         case "cli": return "terminal"
+        // v0.22.3+: `gui` sessions surface as `desktop` (`created_source`,
+        // gateway/session_policy.py:85 @ v0.22.5). Icon only — `desktop`
+        // is an agent surface, not a gateway platform, so it stays out of
+        // `all` (the Platforms / Tools rosters).
+        case "desktop": return "desktopcomputer"
         case "telegram": return "paperplane"
         case "discord": return "bubble.left.and.bubble.right"
         case "slack": return "number"

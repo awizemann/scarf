@@ -363,7 +363,7 @@ struct DashboardView: View {
                     SessionBranchBadge_iOS(session: session)
                 }
                 HStack(spacing: 12) {
-                    Label(session.source, systemImage: session.sourceIcon)
+                    Label(session.displaySource, systemImage: session.sourceIcon)
                         .font(.caption)
                         .foregroundStyle(ScarfColor.foregroundMuted)
                     if let started = session.startedAt {

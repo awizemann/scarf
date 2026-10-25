@@ -3,6 +3,11 @@ import Foundation
 public struct HermesSession: Identifiable, Sendable {
     public let id: String
     public let source: String
+    /// The surface that created this session (`sessions.created_source`,
+    /// Hermes v0.21.6+). `nil` on older hosts and on rows Hermes never
+    /// stamped. Read by `displaySource` only — `source` stays the raw
+    /// stored routing label.
+    public let createdSource: String?
     public let userId: String?
     public let model: String?
     public let title: String?
@@ -134,10 +139,12 @@ public struct HermesSession: Identifiable, Sendable {
         lastActive: Date? = nil,
         lineageIds: [String] = [],
         isBranch: Bool = false,
-        branchParentTitle: String? = nil
+        branchParentTitle: String? = nil,
+        createdSource: String? = nil
     ) {
         self.id = id
         self.source = source
+        self.createdSource = createdSource
         self.userId = userId
         self.model = model
         self.title = title
@@ -235,7 +242,8 @@ public struct HermesSession: Identifiable, Sendable {
             lastActive: tip.lastActive,
             lineageIds: lineage,
             isBranch: isBranch,
-            branchParentTitle: branchParentTitle
+            branchParentTitle: branchParentTitle,
+            createdSource: createdSource
         )
     }
 
@@ -282,7 +290,8 @@ public struct HermesSession: Identifiable, Sendable {
             lastActive: lastActive,
             lineageIds: lineageIds,
             isBranch: isBranch,
-            branchParentTitle: branchParentTitle
+            branchParentTitle: branchParentTitle,
+            createdSource: createdSource
         )
     }
 
@@ -362,8 +371,34 @@ public struct HermesSession: Identifiable, Sendable {
         return id
     }
 
+    /// Where this chat was created, for badges, icons, counts and
+    /// "created on" filters.
+    ///
+    /// From v0.22.3 Hermes stores sessions created by cli/tui/gui/acp as
+    /// `source = 'local'` and keeps the real surface in `created_source`
+    /// (`SURFACES` / `created_surface`, gateway/session_policy.py:85-105
+    /// @ v0.22.5). Hermes's own readers resolve a `local` row the same way
+    /// (`_source_match_clause`, hermes_state_common.py:378-396;
+    /// agent/insights.py:83). `local`, `unknown`, `''` and NULL are not
+    /// surfaces (`_NOT_A_SURFACE`, :91), so such a row still shows
+    /// "local". `gui` and `desktop` name one surface (`SURFACE_GROUPS`,
+    /// :109); the agent-side name wins. Every non-`local` row, and every
+    /// row from a host without the column, returns `source` unchanged.
+    ///
+    /// Storage/routing logic (ACP resume, the CLI's `--source`, the
+    /// internal-listing filter) must keep reading `source`.
+    public var displaySource: String {
+        guard source == "local", let createdSource,
+              !Self.notASurface.contains(createdSource) else { return source }
+        return createdSource == "gui" ? "desktop" : createdSource
+    }
+
+    /// Hermes's `_NOT_A_SURFACE` minus `None`, which `createdSource`
+    /// models as `nil`.
+    private static let notASurface: Set<String> = ["", "local", "unknown"]
+
     public var sourceIcon: String {
-        KnownPlatforms.icon(for: source)
+        KnownPlatforms.icon(for: displaySource)
     }
 
     public func withTitle(_ newTitle: String) -> HermesSession {
@@ -386,7 +421,8 @@ public struct HermesSession: Identifiable, Sendable {
             lastActive: lastActive,
             lineageIds: lineageIds,
             isBranch: isBranch,
-            branchParentTitle: branchParentTitle
+            branchParentTitle: branchParentTitle,
+            createdSource: createdSource
         )
     }
 }

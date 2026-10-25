@@ -48,6 +48,7 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
     private(set) public var hasArchivedColumn = false
     private(set) public var hasDisplayKindColumn = false
     private(set) public var hasDisplayMetadataColumn = false
+    private(set) public var hasCreatedSourceColumn = false
     private(set) public var lastOpenError: String?
     private var isOpen = false
     /// Latched `true` once a strict `sqlite3 -readonly` invocation has been
@@ -376,6 +377,8 @@ public actor RemoteSQLiteBackend: HermesQueryBackend {
         hasDisplayKindColumn = messagesTable.contains("display_kind")
         hasDisplayMetadataColumn = messagesTable.contains("display_metadata")
         hasLastReadAtColumn = sessionsTable.contains("last_read_at")
+        // v0.21.6: creating surface of a `source='local'` row.
+        hasCreatedSourceColumn = sessionsTable.contains("created_source")
         // v0.20.4: Hermes's listable/ephemeral child predicates. Same
         // gate as the local backend — v0.20.4 marker columns, the
         // columns the predicates read, and a JSON1-capable SQLite. The

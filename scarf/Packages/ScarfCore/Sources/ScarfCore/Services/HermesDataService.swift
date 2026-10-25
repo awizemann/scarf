@@ -50,6 +50,7 @@ public actor HermesDataService {
     private var hasArchivedColumn = false
     private var hasDisplayKindColumn = false
     private var hasDisplayMetadataColumn = false
+    private var hasCreatedSourceColumn = false
 
     /// Cached `state_meta.fts_tool_full_content_high_water`, read once
     /// per open on the first search that needs it. `.some(nil)` means
@@ -142,6 +143,7 @@ public actor HermesDataService {
         hasArchivedColumn = await backend.hasArchivedColumn
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
         hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
+        hasCreatedSourceColumn = await backend.hasCreatedSourceColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -164,6 +166,7 @@ public actor HermesDataService {
         hasArchivedColumn = await backend.hasArchivedColumn
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
         hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
+        hasCreatedSourceColumn = await backend.hasCreatedSourceColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -298,6 +301,13 @@ public actor HermesDataService {
         if hasLastReadAtColumn {
             cols += ", last_read_at"
         }
+        // v0.21.6: the creating surface, which v0.22.3+ hosts need to
+        // tell a `source='local'` row's cli/tui/desktop/acp apart
+        // (`HermesSession.displaySource`). Appended last and read by
+        // column NAME; absent → identical SELECT shape to today.
+        if hasCreatedSourceColumn {
+            cols += ", created_source"
+        }
         return cols
     }
 
@@ -318,18 +328,35 @@ public actor HermesDataService {
     /// also keeps the emitted SQL byte-identical on pre-v0.20.4 hosts.
     /// Hermes pays exactly the same per-row cost in `list_sessions_rich`,
     /// and `messages.session_id` is indexed.
+    ///
+    /// **Epoch window.** Every term — heartbeat, message max, and the
+    /// `started_at` fallback — counts only inside Hermes's `coerce_epoch`
+    /// window (`_SQL_IN_WINDOW` / `_sql_in_window` / `_sql_freshest_of`,
+    /// hermes_state_common.py:250-271 @ v0.22.5, landed v0.21.6), so one
+    /// garbage cell salvaged from a damaged page can't pin a session's
+    /// recency (#91536); no trusted cell at all → NULL. Hermes's
+    /// `INDEXED BY idx_messages_session` hint is not ported: an INDEXED BY
+    /// naming a missing index is an error, and Scarf doesn't probe for it.
     private var sessionListColumns: String {
         guard hasLastReadAtColumn else { return sessionColumns + branchLineageColumns }
         let a = hasListableChildSupport ? "s" : "sessions"
-        let msgMax = "(SELECT MAX(_act_m.timestamp) FROM messages _act_m WHERE _act_m.session_id = \(a).id)"
+        let window = Self.sqlEpochWindow
+        let msgMax = "(SELECT MAX(_act_m.timestamp) FROM messages _act_m WHERE _act_m.session_id = \(a).id AND _act_m.timestamp \(window))"
         // The heartbeat column only exists from v0.20; without it the
         // expression degrades to MAX(messages.timestamp) ?? started_at,
-        // which is still the dominant term.
+        // which is still the dominant term. `msgMax` is already windowed.
         let freshest: String = hasSessionActivityColumns
-            ? "(SELECT MAX(_act_v.v) FROM (SELECT \(a).last_activity_at AS v UNION ALL SELECT \(msgMax)) _act_v)"
+            ? "(SELECT MAX(_act_v.v) FROM (SELECT \(a).last_activity_at AS v UNION ALL SELECT \(msgMax)) _act_v WHERE _act_v.v \(window))"
             : msgMax
-        return sessionColumns + branchLineageColumns + ", COALESCE(\(freshest), \(a).started_at) AS last_active"
+        let started = "(SELECT _win.v FROM (SELECT \(a).started_at AS v) _win WHERE _win.v \(window))"
+        return sessionColumns + branchLineageColumns + ", COALESCE(\(freshest), \(started)) AS last_active"
     }
+
+    /// Hermes's `_SQL_IN_WINDOW`: `BETWEEN EPOCH_MIN AND EPOCH_MAX`
+    /// (hermes_cli/timefmt.py:18-19 @ v0.22.5 — `0.0` and
+    /// `4_200_000_000.0`), spelled as Python's `repr` renders them.
+    static let sqlEpochWindow = "BETWEEN 0.0 AND 4200000000.0"
+
 
     // MARK: - Session list predicate (Hermes parity)
 
@@ -3034,6 +3061,13 @@ public actor HermesDataService {
             guard isBranch, let idx = row.columnIndex["branch_parent_title"] else { return nil }
             return row.optionalString(at: idx)
         }()
+        // v0.21.6 `created_source` — same by-NAME resolution; nil when
+        // the column is absent or the row was never stamped.
+        let createdSource: String? = {
+            guard hasCreatedSourceColumn,
+                  let idx = row.columnIndex["created_source"] else { return nil }
+            return row.optionalString(at: idx)
+        }()
         return HermesSession(
             id: row.string(at: 0),
             source: row.string(at: 1),
@@ -3071,7 +3105,8 @@ public actor HermesDataService {
             lastReadAt: lastReadAt,
             lastActive: lastActive,
             isBranch: isBranch,
-            branchParentTitle: branchParentTitle
+            branchParentTitle: branchParentTitle,
+            createdSource: createdSource
         )
     }
 

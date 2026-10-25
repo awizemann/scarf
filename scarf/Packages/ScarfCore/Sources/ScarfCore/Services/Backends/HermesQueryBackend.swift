@@ -150,6 +150,15 @@ public protocol HermesQueryBackend: Sendable {
     /// (`DISPLAY_VISIBLE_SQL`, hermes_state_messages.py:48-51 @ v2026.9.24).
     var hasDisplayMetadataColumn: Bool { get async }
 
+    /// True iff `sessions.created_source` exists (Hermes v0.21.6+,
+    /// hermes_state_common.py:385 @ v0.21.6). From v0.22.3 Hermes stores
+    /// cli/tui/gui/acp sessions as `source='local'` and records the
+    /// creating surface here (gateway/session_policy.py:85-105 @ v0.22.5).
+    /// When present it joins the session SELECT shape so the UI can show
+    /// where a chat was created (`HermesSession.displaySource`); absent →
+    /// the SELECT is byte-identical to the prior shape.
+    var hasCreatedSourceColumn: Bool { get async }
+
     /// User-presentable error from the most recent `open()` (or the
     /// most recent failed query for the remote backend's
     /// connectivity-loss codepath). `nil` means everything is healthy.

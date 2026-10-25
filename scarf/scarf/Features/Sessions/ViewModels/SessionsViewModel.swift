@@ -122,15 +122,18 @@ final class SessionsViewModel {
     }
 
     /// Runs the `hermes sessions delete --yes <id>` CLI for
-    /// `confirmDelete()` and returns its exit code. Production default
+    /// `confirmDelete()` and returns its exit code plus combined output —
+    /// the output carries Hermes's refusal (`SessionChainDelete
+    /// .failureReason(from:)`), which `deleteError` shows. Production default
     /// shells out through the context's transport (unchanged
     /// semantics); tests inject a stub so pinning the
     /// success-posts / failure-does-NOT-post `SessionDeletedSignal`
     /// contract (t-5f1d9008) doesn't spawn a real CLI process. Same
     /// seam shape as `ChatViewModel.sessionDeleteRunner` (t-01bd55ec).
     @ObservationIgnored
-    var sessionDeleteRunner: @Sendable (ServerContext, String) -> Int32 = { ctx, sessionId in
-        ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
+    var sessionDeleteRunner: @Sendable (ServerContext, String) -> (exitCode: Int32, output: String) = { ctx, sessionId in
+        let result = ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId))
+        return (result.exitCode, result.output)
     }
 
     /// Runs `hermes sessions export …` and hands back stdout bytes, stderr,
@@ -710,7 +713,7 @@ final class SessionsViewModel {
             // (OffPool, P60 — a blocking wait, not cooperative-pool work).
             // The injected `sessionDeleteRunner` seam is preserved exactly —
             // tests still stub it, they just await instead of returning.
-            let outcome = await OffPool.run { SessionChainDelete.run(ids) { runner(ctx, $0) } }
+            let outcome = await OffPool.run { SessionChainDelete.run(ids, deleteReporting: { runner(ctx, $0) }) }
             guard let self else { return }
             self.isDeleting = false
             let deleted = Set(outcome.deleted)
@@ -737,9 +740,13 @@ final class SessionsViewModel {
                 // dismissed, the row stayed, and nothing said why. The row
                 // staying put IS the correct outcome for a failed delete —
                 // it's the silence that made it read as a UI glitch.
-                self.deleteError = outcome.deleted.isEmpty
-                    ? "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(failed.exitCode))."
-                    : "Deleted \(outcome.deleted.count) of \(ids.count) linked segments on \(ctx.displayName); the rest couldn't be deleted (hermes sessions delete exited \(failed.exitCode))."
+                // Hermes's own line when it printed one (an active session,
+                // a queued/running or lost turn); the exit code otherwise.
+                self.deleteError = Self.deleteFailureMessage(
+                    host: ctx.displayName, deletedCount: outcome.deleted.count,
+                    segmentCount: ids.count, exitCode: failed.exitCode,
+                    reason: outcome.failureReason
+                )
                 if !outcome.deleted.isEmpty {
                     // The rest of the chain is still there, now listed
                     // under a new tip: reload so it shows.
@@ -750,6 +757,19 @@ final class SessionsViewModel {
             self.deleteSessionId = nil
             self.deleteLineageIds = []
         }
+    }
+
+    /// `deleteError` for a failed `confirmDelete()`. `reason` is
+    /// `SessionChainDelete.failureReason(from:)` — Hermes's refusal line,
+    /// or nil when the CLI printed nothing, which keeps the exit-code
+    /// wording rather than an empty explanation.
+    nonisolated static func deleteFailureMessage(
+        host: String, deletedCount: Int, segmentCount: Int, exitCode: Int32, reason: String?
+    ) -> String {
+        let why = reason.map { ": \($0)" } ?? " (hermes sessions delete exited \(exitCode))."
+        return deletedCount == 0
+            ? "Couldn't delete that session on \(host)\(why)"
+            : "Deleted \(deletedCount) of \(segmentCount) linked segments on \(host); the rest couldn't be deleted\(why)"
     }
 
     // MARK: - Export
@@ -1332,7 +1352,7 @@ final class SessionsViewModel {
 
         var platformCounts: [String: Int] = [:]
         for s in sessions {
-            platformCounts[s.source, default: 0] += 1
+            platformCounts[s.displaySource, default: 0] += 1
         }
         let sorted = platformCounts.sorted { $0.value > $1.value }.map { (platform: $0.key, count: $0.value) }
 

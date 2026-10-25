@@ -54,12 +54,12 @@ struct SessionDetailView: View {
                 }
             }
             HStack(spacing: 16) {
-                Label(session.source, systemImage: session.sourceIcon)
+                Label(session.displaySource, systemImage: session.sourceIcon)
                 if session.isSubagent {
                     Label("Subagent", systemImage: "arrow.triangle.branch")
                         .foregroundStyle(.orange)
                 }
-                if let userId = session.userId, !userId.isEmpty, session.source != "cli" {
+                if let userId = session.userId, !userId.isEmpty, session.displaySource != "cli" {
                     Label(userId, systemImage: "person")
                 }
                 Label(session.model ?? "unknown", systemImage: "cpu")

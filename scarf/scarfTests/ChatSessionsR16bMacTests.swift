@@ -104,7 +104,7 @@ import ScarfCore
         defer { home.cleanup() }
         let svm = SessionsViewModel(context: home.context)
         let deletes = Lifecycle.DeleteRecorder()
-        svm.sessionDeleteRunner = { _, id in deletes.record(id); return 0 }
+        svm.sessionDeleteRunner = { _, id in deletes.record(id); return (0, "") }
 
         svm.beginDelete(Self.row("chainTip", lineage: Self.chain))
         #expect(svm.deleteSegmentCount == 3)
@@ -116,7 +116,7 @@ import ScarfCore
 
         // Partial failure: reported, not silent.
         let partial = Lifecycle.DeleteRecorder()
-        svm.sessionDeleteRunner = { _, id in partial.record(id); return id == "chainMid" ? 2 : 0 }
+        svm.sessionDeleteRunner = { _, id in partial.record(id); return (id == "chainMid" ? 2 : 0, "") }
         svm.beginDelete(Self.row("chainTip", lineage: Self.chain))
         svm.confirmDelete()
         await svm.inFlightDelete?.value

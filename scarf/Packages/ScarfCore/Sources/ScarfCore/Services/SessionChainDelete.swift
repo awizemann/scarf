@@ -24,16 +24,22 @@ public enum SessionChainDelete {
         /// The id whose delete failed (and its exit code); nil when every
         /// segment was deleted.
         public let failed: (id: String, exitCode: Int32)?
+        /// Hermes's own explanation for the failed delete
+        /// (`failureReason(from:)`); nil when nothing failed or the CLI
+        /// printed nothing usable.
+        public let failureReason: String?
 
-        public init(deleted: [String], failed: (id: String, exitCode: Int32)?) {
+        public init(deleted: [String], failed: (id: String, exitCode: Int32)?, failureReason: String? = nil) {
             self.deleted = deleted
             self.failed = failed
+            self.failureReason = failureReason
         }
 
         public static func == (lhs: Outcome, rhs: Outcome) -> Bool {
             lhs.deleted == rhs.deleted
                 && lhs.failed?.id == rhs.failed?.id
                 && lhs.failed?.exitCode == rhs.failed?.exitCode
+                && lhs.failureReason == rhs.failureReason
         }
     }
 
@@ -49,12 +55,49 @@ public enum SessionChainDelete {
     /// exit code), stopping at the first failure. Blocking — call it off
     /// the main actor.
     public static func run(_ ids: [String], delete: (String) -> Int32) -> Outcome {
+        run(ids, deleteReporting: { (exitCode: delete($0), output: "") })
+    }
+
+    /// `run(_:delete:)` for a `delete` that also hands back the CLI's
+    /// combined output, so the failure carries Hermes's own reason
+    /// (`Outcome.failureReason`).
+    public static func run(
+        _ ids: [String],
+        deleteReporting delete: (String) -> (exitCode: Int32, output: String)
+    ) -> Outcome {
         var deleted: [String] = []
         for id in ids {
-            let code = delete(id)
-            guard code == 0 else { return Outcome(deleted: deleted, failed: (id, code)) }
+            let result = delete(id)
+            guard result.exitCode == 0 else {
+                return Outcome(
+                    deleted: deleted,
+                    failed: (id, result.exitCode),
+                    failureReason: failureReason(from: result.output)
+                )
+            }
             deleted.append(id)
         }
         return Outcome(deleted: deleted, failed: nil)
+    }
+
+    /// The line of a failed `hermes sessions delete`'s output worth showing.
+    ///
+    /// Hermes prints its refusals and exits 1 (`_cmd_delete`,
+    /// hermes_cli/sessions_cmd.py:645-660 @ v0.22.5):
+    /// `Cannot delete active session: …` (v0.21.6+),
+    /// `Cannot delete session '<id>': it has a queued or running turn. …` and
+    /// `Cannot delete session '<id>': a turn was lost across a gateway
+    /// restart. …` (v0.22.3+). That line wins when present — anything
+    /// printed before or after it (a pinned-session warning) is noise.
+    /// Otherwise the last non-empty line, which is how any host's failure
+    /// (an older host, a traceback's final line) gets shown. Nil when the
+    /// CLI said nothing, so the caller falls back to the exit code instead
+    /// of presenting an empty reason.
+    public static func failureReason(from output: String) -> String? {
+        let lines = output
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        return lines.last(where: { $0.hasPrefix("Cannot delete") }) ?? lines.last
     }
 }

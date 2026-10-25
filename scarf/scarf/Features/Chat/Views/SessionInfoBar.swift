@@ -334,7 +334,7 @@ struct SessionInfoBar: View {
 
                 Spacer()
 
-                Label(session.source, systemImage: session.sourceIcon)
+                Label(session.displaySource, systemImage: session.sourceIcon)
             } else {
                 Text("No active session")
                     .foregroundStyle(ScarfColor.foregroundFaint)
