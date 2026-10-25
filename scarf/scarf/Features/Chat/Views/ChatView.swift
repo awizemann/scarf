@@ -754,6 +754,12 @@ struct ChatView: View {
         )
     }
 
+    /// Whether the permission card may offer "Allow edits for this
+    /// session" (see the call site in `body`).
+    nonisolated static func offersAllowEditsForSession(_ caps: HermesCapabilities) -> Bool {
+        caps.hasSessionEditAutoApproval && !caps.hasGatewayBackedACP
+    }
+
     /// Presents the HEAD of the permission queue. The setter is
     /// deliberately inert: a permission request is resolved only by
     /// answering it (`respondToPermission`), which pops it by id. If we
@@ -763,12 +769,6 @@ struct ChatView: View {
     /// NEXT queued request without ever showing it. An Esc dismissal
     /// therefore re-presents the same sheet, which is the honest
     /// outcome: the agent is still blocked waiting for an answer.
-    /// Whether the permission card may offer "Allow edits for this
-    /// session" (see the call site in `body`).
-    nonisolated static func offersAllowEditsForSession(_ caps: HermesCapabilities) -> Bool {
-        caps.hasSessionEditAutoApproval && !caps.hasGatewayBackedACP
-    }
-
     private var permissionBinding: Binding<RichChatViewModel.PendingPermission?> {
         Binding(
             get: { viewModel.richChatViewModel.pendingPermission },

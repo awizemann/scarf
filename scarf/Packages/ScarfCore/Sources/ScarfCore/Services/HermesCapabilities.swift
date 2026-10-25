@@ -507,9 +507,10 @@ public struct HermesCapabilities: Sendable, Equatable {
     //   :21-30; `_slash_command`, gateway_server.py:25-43).
     // - v0.22.1: advertises none and runs only `/model` and `/compress`
     //   (`slash_mutation`, hermes_cli/gateway_mutations.py:136-149 @
-    //   v0.22.1); `/branch` and every other registered command — `/new`,
-    //   `/queue`, `/goal` included — fail the prompt with
-    //   `unsupported_command` (gateway_server.py:434-440).
+    //   v0.22.1); `/branch` is refused with `use_acp_fork_session`, and
+    //   every other registered command — `/new`, `/queue`, `/goal`
+    //   included — fails the prompt with `unsupported_command`
+    //   (gateway_server.py:434-440).
 
     /// `/subgoal` slash command — appends user-specified success criteria
     /// to the active `/goal` loop. Argument forms: `<text>`, `remove N`,
