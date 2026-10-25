@@ -432,8 +432,14 @@ struct HermesFileService: Sendable {
     /// identical scan logic — including the v0.11 frontmatter parsing
     /// that populates `HermesSkill.allowedTools` / `relatedSkills` /
     /// `dependencies`.
+    /// The `_org/` rule follows the host's version; read from the shared
+    /// cache only (never a probe from here), so an unprobed host keeps the
+    /// pre-v0.21.6 walk.
     nonisolated func loadSkills() -> [HermesSkillCategory] {
-        SkillsScanner.scan(context: context, transport: transport)
+        SkillsScanner.scan(
+            context: context, transport: transport,
+            capabilities: HermesVersionCache.shared.cached(for: context) ?? .empty
+        )
     }
     // (t-aud15) Removed dead `loadSkillContent`/`saveSkillContent`/
     // `isValidSkillPath` — zero callers; SkillsViewModel owns the live

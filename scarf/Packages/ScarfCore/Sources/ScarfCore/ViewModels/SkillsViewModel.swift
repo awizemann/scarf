@@ -202,6 +202,7 @@ public final class SkillsViewModel {
         }
         let pins = pinnedNames
         let essentialFloor = essentialHermesAgentSkill
+        let caps = capabilities
         // v2.8 — instrumented so future captures show how many SSH
         // RTTs the SkillsScanner walk costs on remote (it stats
         // every ~/.hermes/skills/* directory + reads SKILL.md per).
@@ -213,6 +214,7 @@ public final class SkillsViewModel {
                 return SkillsScanner.scan(
                     context: ctx,
                     transport: xport,
+                    capabilities: caps,
                     disabledNames: disabled,
                     pinnedNames: pinned
                 )
@@ -1025,7 +1027,7 @@ public final class SkillsViewModel {
     /// Every one of those rendered as "Installed <x>" until this judged the
     /// emitter's output instead (charter C5).
     nonisolated static func installOutcome(exitCode: Int32, output: String) -> HermesCLIOutcome {
-        HermesCLIVerdict.judge(
+        let outcome = HermesCLIVerdict.judge(
             output: output,
             exitCode: exitCode,
             successMarkers: HermesCLIMarkers.skillsInstallSuccess,
@@ -1037,6 +1039,15 @@ public final class SkillsViewModel {
             // substring let a skill's own text claim the install succeeded.
             successAnchored: true
         )
+        // v0.21.6+ built-in already present: the only line `_install_bundled`
+        // prints on that arm, so it is read only when nothing else decided
+        // (no success line, no refusal) — never over a real failure.
+        guard exitCode == 0, outcome.confidence == .unconfirmed else { return outcome }
+        let present = HermesCLIVerdict.significantLines(output).contains { line in
+            let head = HermesCLIVerdict.unglyphed(line)
+            return head.hasPrefix("'") && head.contains(HermesCLIMarkers.skillsInstallBuiltinPresent)
+        }
+        return present ? HermesCLIOutcome(succeeded: true, detail: nil) : outcome
     }
 
     /// Three branches, not two (the ``HermesMemoryResetVerdict/failureSummary``

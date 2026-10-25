@@ -565,7 +565,15 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     ) -> HermesCronJob {
         var carried = extra
         if capabilities.hasCronJobDefinitionFields {
-            carried = carried.filter { Self.authoredExtraKeys.contains($0.key) }
+            // v0.21.6 `interpreter` is authored (`create_job(interpreter=…)`,
+            // `cron/jobs.py:1813`, stored at `:1911` @ v0.22.5) but missing
+            // from `JOB_DEFINITION_FIELDS`, so it is allowed by name — a
+            // duplicated `.py` script job would otherwise run under Hermes's
+            // own Python instead of the user's venv.
+            let authored = capabilities.hasCronInterpreter
+                ? Self.authoredExtraKeys.union(["interpreter"])
+                : Self.authoredExtraKeys
+            carried = carried.filter { authored.contains($0.key) }
         }
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
                            "last_status", "last_dispatch", "last_delivery_unverified",
@@ -1126,6 +1134,13 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         if Self.nonEmptyString(extra["provider"]) != nil { out.append("provider") }
         if Self.nonEmptyString(extra["reasoning_effort"]) != nil { out.append("reasoning effort") }
         return out
+    }
+
+    /// v0.21.6 `interpreter` — the user's Python for a `.py` script
+    /// (`cron create --interpreter`, `hermes_cli/subcommands/cron.py:80` @
+    /// v0.21.6). Unmodeled, so it rides in `extra`; `nil` when unset.
+    public nonisolated var interpreter: String? {
+        Self.nonEmptyString(extra["interpreter"])
     }
 
     /// `extra[key]` as a trimmed non-empty string, or `nil`. Hermes writes

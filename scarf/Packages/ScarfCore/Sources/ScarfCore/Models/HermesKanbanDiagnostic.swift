@@ -154,9 +154,17 @@ public enum KanbanDiagnosticKind: String, Sendable, CaseIterable {
     case repeatedFailures = "repeated_failures"
     case repeatedCrashes = "repeated_crashes"
     case reviewDependencyDeadlock = "review_dependency_deadlock"
+    /// A `running` task with a parent that is not done
+    /// (`_rule_running_with_open_parents`, `kanban_diagnostics.py:560-581`
+    /// @ v2026.9.24) — a rule that predates this list's last refresh.
+    case runningWithOpenParents = "running_with_open_parents"
     case stuckInBlocked = "stuck_in_blocked"
     case blockUnblockCycling = "block_unblock_cycling"
     case strandedInReady = "stranded_in_ready"
+    /// v0.22.3: a `running` claim whose worker is gone
+    /// (`kanban_diagnostics.py:793` @ v0.22.5). Its `reclaim` action is not
+    /// modeled — `actions` is not decoded (see the type's doc).
+    case staleRunning = "stale_running"
     case unknown
 
     /// Map a wire string (case-insensitive) to a typed kind. Unknown
@@ -175,9 +183,11 @@ public enum KanbanDiagnosticKind: String, Sendable, CaseIterable {
         case .repeatedFailures:         return "exclamationmark.arrow.circlepath"
         case .repeatedCrashes:          return "bolt.trianglebadge.exclamationmark"
         case .reviewDependencyDeadlock: return "arrow.triangle.branch"
+        case .runningWithOpenParents:   return "arrow.triangle.merge"
         case .stuckInBlocked:           return "nosign"
         case .blockUnblockCycling:      return "arrow.triangle.2.circlepath"
         case .strandedInReady:          return "clock.badge.exclamationmark"
+        case .staleRunning:             return "hourglass"
         case .unknown:                  return "stethoscope"
         }
     }

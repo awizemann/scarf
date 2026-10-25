@@ -1535,11 +1535,20 @@ final class HealthViewModel {
     /// "Up to date" (banner.py:344-380, the `if not fetch_ok: … return None`
     /// path). That's a genuinely different state from "confirmed current"
     /// and must not collapse into it.
+    ///
+    /// v0.22.0 adds a fourth line for a checkout AHEAD of the stable tag:
+    /// `Newer than stable release vX — '<cmd>' moves back to it`
+    /// (`_startup_fast.py:231-232` @ v0.22.5, the `rollback` arm; absent at
+    /// v0.21.7). That host is confirmed current — nothing to install — so it
+    /// reads as known, not as "update status unknown".
     nonisolated static func parseUpdateStatus(lines: [String]) -> UpdateStatus {
         if let updateLine = lines.first(where: { $0.hasPrefix("Update available") }) {
             return UpdateStatus(updateInfo: updateLine.trimmingCharacters(in: .whitespaces), unknown: false)
         }
-        let confirmedUpToDate = lines.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "Up to date" })
+        let confirmedUpToDate = lines.contains(where: {
+            let line = $0.trimmingCharacters(in: .whitespaces)
+            return line == "Up to date" || line.hasPrefix("Newer than stable release v")
+        })
         return UpdateStatus(updateInfo: "", unknown: !confirmedUpToDate)
     }
 

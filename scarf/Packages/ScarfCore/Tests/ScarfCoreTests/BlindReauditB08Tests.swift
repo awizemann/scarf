@@ -125,7 +125,7 @@ struct BlindReauditB08Tests {
         try Self.put("skills/research/notes/skill.yaml", in: home, "required_config:\n  - legacy_key\n")
         let ctx = ServerContext.local(home: home)
         let skill = try #require(
-            SkillsScanner.scan(context: ctx, transport: LocalTransport())
+            SkillsScanner.scan(context: ctx, transport: LocalTransport(), capabilities: .empty)
                 .flatMap(\.skills).first { $0.name == "notes" })
         #expect(skill.requiredConfig == ["notes.dir", "notes.format"])
         #expect(skill.relatedSkills == ["arxiv", "pdf"])

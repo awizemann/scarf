@@ -625,7 +625,7 @@ struct AdvancedTab: View {
         .confirmationDialog("Restore from backup?", isPresented: $showRestoreConfirm) {
             Button("Restore", role: .destructive) {
                 if let path = pendingRestorePath {
-                    viewModel.runRestore(fromPath: path)
+                    viewModel.runRestore(fromPath: path, capabilities: capabilities)
                 }
                 pendingRestorePath = nil
             }

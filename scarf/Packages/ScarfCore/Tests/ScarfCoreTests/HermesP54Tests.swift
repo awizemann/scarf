@@ -303,20 +303,20 @@ struct HermesImportVerdictP54Tests {
     }
 
     @Test func aCleanRestoreConfirms() {
-        let outcome = HermesImportVerdict.judge(output: P54Fixtures.importComplete, exitCode: 0)
+        let outcome = HermesImportVerdict.judge(output: P54Fixtures.importComplete, exitCode: 0, capabilities: .empty)
         #expect(outcome.succeeded)
         #expect(outcome.warning == nil)
     }
 
     @Test func skippedFilesRideAlongAsAWarning() throws {
-        let outcome = HermesImportVerdict.judge(output: P54Fixtures.importWithWarnings, exitCode: 0)
+        let outcome = HermesImportVerdict.judge(output: P54Fixtures.importWithWarnings, exitCode: 0, capabilities: .empty)
         #expect(outcome.succeeded)
         #expect(try #require(outcome.warning) == HermesImportVerdict.skippedNote)
     }
 
     /// Silent data loss: the restore worked and threw away newer sessions.
     @Test func aShrunkSessionStoreIsNamed() throws {
-        let outcome = HermesImportVerdict.judge(output: P54Fixtures.importSessionsShrank, exitCode: 0)
+        let outcome = HermesImportVerdict.judge(output: P54Fixtures.importSessionsShrank, exitCode: 0, capabilities: .empty)
         #expect(outcome.succeeded)
         #expect(try #require(outcome.warning) == HermesImportVerdict.sessionsShrankNote)
     }
@@ -327,7 +327,7 @@ struct HermesImportVerdictP54Tests {
         let both = P54Fixtures.importWithWarnings + "\n"
             + "  ⚠ Session data replaced by older backup contents:\n"
             + "    sessions/state.db: 41 session(s) / 9210 message(s) -> 29 / 6114"
-        let warning = try #require(HermesImportVerdict.judge(output: both, exitCode: 0).warning)
+        let warning = try #require(HermesImportVerdict.judge(output: both, exitCode: 0, capabilities: .empty).warning)
         let shrink = try #require(warning.range(of: HermesImportVerdict.sessionsShrankNote))
         let skipped = try #require(warning.range(of: HermesImportVerdict.skippedNote))
         #expect(shrink.lowerBound < skipped.lowerBound)
@@ -338,7 +338,7 @@ struct HermesImportVerdictP54Tests {
     /// last line rather than a bare "Restore failed".
     @Test func theAbortedRunIsAFailureCarryingItsOwnLine() {
         let outcome = HermesImportVerdict.judge(
-            output: P54Fixtures.importAbortedNoForce, exitCode: 1
+            output: P54Fixtures.importAbortedNoForce, exitCode: 1, capabilities: .empty
         )
         #expect(!outcome.succeeded)
         #expect(outcome.confidence == .failed)
@@ -346,7 +346,7 @@ struct HermesImportVerdictP54Tests {
     }
 
     @Test func silenceIsUnconfirmed() {
-        let outcome = HermesImportVerdict.judge(output: "", exitCode: 0)
+        let outcome = HermesImportVerdict.judge(output: "", exitCode: 0, capabilities: .empty)
         #expect(!outcome.succeeded)
         #expect(outcome.confidence == .unconfirmed)
     }

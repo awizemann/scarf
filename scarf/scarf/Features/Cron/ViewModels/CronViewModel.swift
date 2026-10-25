@@ -1011,6 +1011,7 @@ final class CronViewModel {
         var noAgent = false
         var failureDeliver = false
         var modelPin = false
+        var interpreter = false
     }
 
     /// The editor's Create and Duplicate save. The capability stripping lives
@@ -1033,7 +1034,9 @@ final class CronViewModel {
             noAgent: support.noAgent ? form.noAgent : false,
             failureDeliver: support.failureDeliver ? form.failureDeliver : "",
             // v0.21.4 `--pin`; never on an older host or a no-agent job.
-            pinModel: support.modelPin && !form.noAgent && form.pinModel
+            pinModel: support.modelPin && !form.noAgent && form.pinModel,
+            // v0.21.6 `--interpreter`, carried by a duplicate only.
+            interpreter: support.interpreter ? form.interpreter : ""
         )
     }
 
@@ -1077,7 +1080,7 @@ final class CronViewModel {
         )
     }
 
-    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         // A8 (v0.21.1): Hermes rejects a one-shot whose `run_at` is past the
         // grace window with a non-zero exit. Say so before the round-trip —
         // and only on a host that would actually refuse (see `isV0211OrLater`).
@@ -1094,7 +1097,7 @@ final class CronViewModel {
                 schedule: schedule, prompt: prompt, name: name, deliver: deliver,
                 skills: skills, script: script, repeatCount: repeatCount,
                 workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver,
-                pinModel: pinModel
+                pinModel: pinModel, interpreter: interpreter
             ),
             success: "Job created",
             analytics: .created,
@@ -1116,7 +1119,7 @@ final class CronViewModel {
     /// that compose a create — and the tests that pin their composition —
     /// assert the PRODUCTION command line rather than a parallel builder that
     /// can drift from it.
-    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false) -> [String] {
+    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "") -> [String] {
         var args = ["cron", "create"]
         if !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
         if !deliver.isEmpty { args.append(HermesCLIOption.joined("--deliver", deliver)) }
@@ -1141,6 +1144,11 @@ final class CronViewModel {
         // (CronView) passes `false` on a host without `hasCronModelPin`, so
         // an older argparse never sees it.
         if pinModel { args.append("--pin") }
+        // v0.21.6 `--interpreter` (`hermes_cli/subcommands/cron.py:80` @
+        // v0.21.6, read by `_JOB_ARG_FIELDS` in `hermes_cli/cron.py:762`).
+        // Only a duplicate fills it, and the caller passes "" on a host
+        // without `hasCronInterpreter`, so an older argparse never sees it.
+        if !interpreter.isEmpty { args.append(HermesCLIOption.joined("--interpreter", interpreter)) }
         // End-of-options before the positionals (`schedule`, optional
         // `prompt`). A prompt that legitimately opens with a dash —
         // "--deliver isn't working, investigate" — is otherwise claimed by

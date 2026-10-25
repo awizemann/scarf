@@ -145,7 +145,7 @@ struct ThreeStateRenderingP54Tests {
     // MARK: import
 
     @Test func restoreUnconfirmedNamesSilence() {
-        let outcome = HermesImportVerdict.judge(output: "", exitCode: 0)
+        let outcome = HermesImportVerdict.judge(output: "", exitCode: 0, capabilities: .empty)
         let text = SettingsViewModel.restoreFailureSummary(outcome: outcome)
         #expect(text.contains("printed no result"))
         #expect(!text.contains("exit"))
@@ -154,14 +154,14 @@ struct ThreeStateRenderingP54Tests {
     /// The pre-`--force` failure, which is now unreachable but must still
     /// read as Hermes's own sentence if it somehow arrives.
     @Test func restoreFailedQuotesHermesOwnLine() {
-        let outcome = HermesImportVerdict.judge(output: "Aborted.", exitCode: 1)
+        let outcome = HermesImportVerdict.judge(output: "Aborted.", exitCode: 1, capabilities: .empty)
         #expect(SettingsViewModel.restoreFailureSummary(outcome: outcome) .contains("Aborted."))
     }
 
     @Test func restoreWarningRidesTheSuccessBanner() throws {
         let outcome = HermesImportVerdict.judge(
             output: "Import complete: 809 files restored in 4.1s\n  Warnings (3 files skipped):",
-            exitCode: 0)
+            exitCode: 0, capabilities: .empty)
         let banner = SettingsViewModel.withNote("Restore complete — restart Scarf", outcome.warning)
         #expect(banner.contains("Restore complete"))
         #expect(banner.contains(HermesImportVerdict.skippedNote))
@@ -301,7 +301,7 @@ struct UnconfirmedWithOutputP54Tests {
 
     @Test func importProgressIsNotARestoreFailure() {
         let outcome = HermesImportVerdict.judge(
-            output: "Backup contains 812 files\nImporting 812 files ...", exitCode: 0)
+            output: "Backup contains 812 files\nImporting 812 files ...", exitCode: 0, capabilities: .empty)
         #expect(outcome.confidence == .unconfirmed)
         let text = SettingsViewModel.restoreFailureSummary(outcome: outcome)
         #expect(text.contains("printed no result"))

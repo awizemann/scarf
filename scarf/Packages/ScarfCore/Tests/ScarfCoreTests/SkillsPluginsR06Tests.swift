@@ -28,10 +28,14 @@ struct SkillsPluginsR06Tests {
         "---\nname: \(name)\ndescription: test\n---\n# \(name)\n"
     }
 
-    private static func scan(_ home: URL, pinned: Set<String> = [], disabled: Set<String> = []) -> [HermesSkill] {
+    private static func scan(
+        _ home: URL, pinned: Set<String> = [], disabled: Set<String> = [],
+        capabilities: HermesCapabilities = .empty
+    ) -> [HermesSkill] {
         SkillsScanner.scan(
             context: .local(home: home),
             transport: LocalTransport(),
+            capabilities: capabilities,
             disabledNames: disabled,
             pinnedNames: pinned
         ).flatMap(\.skills)
@@ -80,7 +84,7 @@ struct SkillsPluginsR06Tests {
         try Self.put("skills/creative/a/SKILL.md", in: home, Self.skillMD("a"))
         try Self.put("skills/mlops/research/dspy/SKILL.md", in: home, Self.skillMD("dspy"))
 
-        let categories = SkillsScanner.scan(context: .local(home: home), transport: LocalTransport())
+        let categories = SkillsScanner.scan(context: .local(home: home), transport: LocalTransport(), capabilities: .empty)
         #expect(categories.map(\.name) == ["", "creative", "mlops/research"])
         #expect(categories[1].skills.map(\.name) == ["a", "b"])
     }
@@ -125,6 +129,25 @@ struct SkillsPluginsR06Tests {
 
         try Self.put("skills/_org/.active_org", in: home, "acme\n")
         #expect(Self.scan(home).map(\.id) == ["_org/acme/deploy"])
+        let v0215 = HermesCapabilities.parseLine("Hermes Agent v0.21.5 (2026.9.24)")
+        #expect(Self.scan(home, capabilities: v0215).map(\.id) == ["_org/acme/deploy"])
+    }
+
+    /// v0.21.6 removed the org mirror: `iter_skill_index_files` walks `_org/**`
+    /// like any directory (`agent/skill_utils.py:859-868` @ v0.22.5), marker
+    /// or not, so every org's skills are found.
+    @Test("v0.21.6+ walks _org like any directory")
+    func orgMirrorRemovedAtV0216() throws {
+        let home = try Self.scratchHome()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Self.put("skills/_org/acme/deploy/SKILL.md", in: home, Self.skillMD("deploy"))
+        try Self.put("skills/_org/other/leak/SKILL.md", in: home, Self.skillMD("leak"))
+        let v0216 = HermesCapabilities.parseLine("Hermes Agent v0.21.6 (2026.10.1)")
+        #expect(Self.scan(home, capabilities: v0216).map(\.id).sorted()
+                == ["_org/acme/deploy", "_org/other/leak"])
+        try Self.put("skills/_org/.active_org", in: home, "acme\n")
+        #expect(Self.scan(home, capabilities: v0216).map(\.id).sorted()
+                == ["_org/acme/deploy", "_org/other/leak"])
     }
 
     /// Hermes walks with `followlinks=True`; real hosts symlink skills in

@@ -298,7 +298,20 @@ public enum HermesCLIMarkers {
 
     /// `c.print(f"[bold green]Installed:[/] {…}")` — hermes_cli/skills_hub.py:720.
     /// (Same line, same prefix, at v2026.6.19:691 through v2026.8.31:799.)
-    public static let skillsInstallSuccess = ["Installed:"]
+    ///
+    /// `Restored built-in skill: {name} ({path})` — v0.21.6+, `_install_bundled`
+    /// (`hermes_cli/skills_hub.py:744` @ v0.22.5, rich markup only, so it
+    /// starts its line): a name Hermes ships is restored from the bundled
+    /// copy instead of fetched. Absent at v2026.9.24. `Installed:` stays
+    /// FIRST — ``HermesSkillsHubParser`` counts only that one.
+    public static let skillsInstallSuccess = ["Installed:", "Restored built-in skill:"]
+
+    /// `'{name}' is a built-in skill and is already available{ at path}.` —
+    /// v0.21.6+, `_install_bundled`'s `present` arm (`skills_hub.py:742` @
+    /// v0.22.5), exit 0: the skill IS available, so the install did what was
+    /// asked. The line opens with the quoted name, so this is matched after
+    /// a leading `'` rather than as a column-0 prefix.
+    public static let skillsInstallBuiltinPresent = "' is a built-in skill and is already available"
 
     /// Every refusal `do_install` can print, in source order:
     /// - `Error:` — `_print_error` (hermes_cli/skills_hub.py:134-135), reached from
@@ -2795,12 +2808,54 @@ public enum HermesImportVerdict {
             """
     )
 
-    public static func judge(output: String, exitCode: Int32) -> HermesCLIOutcome {
+    /// `Import incomplete: …` — v0.21.6+ (``HermesCapabilities/hasImportPartialExitNonZero``).
+    /// Printed twice on a partial restore: as the summary line in place of
+    /// `Import complete: ` (`hermes_cli/backup.py:811` @ v0.22.5) and as the
+    /// closing `Import incomplete: N file(s) were not restored (see Warnings
+    /// above). Fix the cause and re-run the import.` before `return 1`
+    /// (`:907-910`). The files that were restored stay restored.
+    static let incompletePrefix = "Import incomplete: "
+
+    /// `Import refused; no files restored: {exc}` (`backup.py:805` @ v0.22.5)
+    /// — a live gateway owns the target (`OwnershipConflict`), then
+    /// `sys.exit(1)`. Nothing was written.
+    static let refusedPrefix = "Import refused; no files restored:"
+
+    /// `capabilities` has no default: it is what tells a v0.21.6+ partial
+    /// restore (exit 1, files restored) from a real failure — the
+    /// ``HermesBackupVerdict/judge(output:exitCode:capabilities:)`` shape.
+    public static func judge(
+        output: String, exitCode: Int32, capabilities: HermesCapabilities
+    ) -> HermesCLIOutcome {
         let lines = HermesCLIVerdict.significantLines(output)
-        guard exitCode == 0 else {
-            return HermesCLIOutcome(succeeded: false, detail: lines.last)
-        }
         func head(_ line: String) -> String { HermesCLIVerdict.unglyphed(line) }
+        guard exitCode == 0 else {
+            // v0.21.6+: `run_import` returns 1 on an incomplete restore
+            // (`backup.py:907-910` @ v0.22.5, `forward_return=True` at
+            // `hermes_cli/main.py:1841`) — the same partial success the
+            // exit-0 arm below reports on older hosts. Both markers are
+            // required: `Warnings (` is printed only when files were skipped,
+            // which is the only case `Import incomplete: ` means.
+            if capabilities.hasImportPartialExitNonZero,
+               let incomplete = lines.first(where: { head($0).hasPrefix(incompletePrefix) }),
+               lines.contains(where: { head($0).hasPrefix(warningsPrefix) }) {
+                var notes: [String] = []
+                if lines.contains(where: { head($0).hasPrefix(sessionsShrankPrefix) }) {
+                    notes.append(sessionsShrankNote)
+                }
+                // The closing line carries Hermes's count and its remedy.
+                let closing = lines.last(where: { head($0).hasPrefix(incompletePrefix) }) ?? incomplete
+                notes.append("\(skippedNote) \(closing)")
+                return HermesCLIOutcome(
+                    succeeded: true, detail: incomplete, warning: notes.joined(separator: " ")
+                )
+            }
+            // `Import refused` (v0.22.1 and v0.22.3+; absent at v0.22.2) is
+            // the last line before its exit; naming it keeps the reason even
+            // if anything ever follows it. An older host never prints it.
+            let refused = lines.first { head($0).hasPrefix(refusedPrefix) }
+            return HermesCLIOutcome(succeeded: false, detail: refused ?? lines.last)
+        }
         guard lines.contains(where: { head($0).hasPrefix(successPrefix) }) else {
             return HermesCLIOutcome(
                 succeeded: false, detail: lines.last, warning: nil, confidence: .unconfirmed

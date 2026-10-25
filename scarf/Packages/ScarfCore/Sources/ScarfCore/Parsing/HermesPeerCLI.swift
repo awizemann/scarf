@@ -100,12 +100,18 @@ public enum HermesPeerCLI {
         "scarf-\(UUID().uuidString.lowercased())"
     }
 
+    /// `target` and `run_id` are the subparser's two positionals and
+    /// `--json` its only flag, unchanged from the verb's floor
+    /// (`hermes_cli/subcommands/peer.py:517-539` @ v2026.8.31, v0.21.0) to
+    /// the `_remote(…, run_id=True)` builder at `:459-474` @ v0.22.5 — so
+    /// `--` goes last for the same reason as in ``dmArgs(target:message:)``:
+    /// a dash-led run id can never be read as an option.
     public static func statusArgs(target: String, runID: String) -> [String] {
-        ["peer", "status", target, runID, "--json"]
+        ["peer", "status", "--json", "--", target, runID]
     }
 
     public static func stopArgs(target: String, runID: String) -> [String] {
-        ["peer", "stop", target, runID, "--json"]
+        ["peer", "stop", "--json", "--", target, runID]
     }
 
     /// `hermes peer list` — text only (no `--json`). Scarf reads the

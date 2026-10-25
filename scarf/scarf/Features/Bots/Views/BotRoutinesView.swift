@@ -30,6 +30,7 @@ struct BotRoutinesView: View {
     private var hasCronNoAgent: Bool { capabilitiesStore?.capabilities.hasCronNoAgent ?? false }
     private var hasCronDeliverAll: Bool { capabilitiesStore?.capabilities.hasCronDeliverAll ?? false }
     private var hasCronFailureDeliver: Bool { capabilitiesStore?.capabilities.hasCronFailureDeliver ?? false }
+    private var hasCronInterpreter: Bool { capabilitiesStore?.capabilities.hasCronInterpreter ?? false }
 
     var body: some View {
         VStack(alignment: .leading, spacing: ScarfSpace.s2) {
@@ -122,7 +123,8 @@ struct BotRoutinesView: View {
                     repeatCount: form.repeatCount,
                     workdir: hasCronWorkdir ? form.workdir : "",
                     noAgent: hasCronNoAgent ? form.noAgent : false,
-                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : ""
+                    failureDeliver: hasCronFailureDeliver ? form.failureDeliver : "",
+                    interpreter: hasCronInterpreter ? form.interpreter : ""
                 )
                 duplicating = nil
             } onCancel: {

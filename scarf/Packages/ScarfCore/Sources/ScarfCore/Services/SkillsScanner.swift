@@ -24,9 +24,10 @@ import os
 ///
 /// Pruning follows the same walk: `EXCLUDED_SKILL_DIRS` everywhere, the
 /// support folders (`references`, `templates`, `assets`, `scripts`) only
-/// inside a skill root, and the token-gated `_org/` mirror only for the
-/// org named in `_org/.active_org`. Hermes keeps walking below a skill
-/// root, so a skill nested inside another skill is found too.
+/// inside a skill root, and — through v0.21.5 only — the token-gated
+/// `_org/` mirror only for the org named in `_org/.active_org`. Hermes keeps
+/// walking below a skill root, so a skill nested inside another skill is
+/// found too.
 ///
 /// **Naming.** `id` is the path relative to `skills/` (`dspy`,
 /// `creative/pixel-art`, `mlops/research/dspy`) — `skill_view` and cron's
@@ -66,9 +67,16 @@ public enum SkillsScanner: Sendable {
     /// loop would spin forever over SSH, so stop well past any real layout.
     static let maxDepth = 12
 
+    /// `capabilities` decides the `_org/` rule and has no default: through
+    /// v0.21.5 the mirror is token-gated (``HermesCapabilities/hasSkillsOrgMirror``);
+    /// from v0.21.6 Hermes has no org logic and `iter_skill_index_files`
+    /// walks `_org/**` like any other directory (`agent/skill_utils.py:859-868`
+    /// @ v0.22.5, `_org` absent from `EXCLUDED_SKILL_DIRS` at `:24-28`).
+    /// Callers pass cached capabilities — this never probes.
     public static func scan(
         context: ServerContext,
         transport: any ServerTransport,
+        capabilities: HermesCapabilities,
         disabledNames: Set<String> = [],
         pinnedNames: Set<String> = []
     ) -> [HermesSkillCategory] {
@@ -76,9 +84,11 @@ public enum SkillsScanner: Sendable {
         // Fresh install: skills/ may not exist yet — return [] without
         // logging an error.
         guard transport.fileExists(root) else { return [] }
+        let gatesOrgMirror = capabilities.hasSkillsOrgMirror
 
         // `read_active_org_id`: the marker's trimmed text, or no org at all.
         let activeOrg: String? = {
+            guard gatesOrgMirror else { return nil }
             let marker = root + "/" + orgMirrorDir + "/" + orgActiveMarker
             guard let data = try? transport.readFile(marker),
                   let text = String(data: data, encoding: .utf8)
@@ -129,10 +139,13 @@ public enum SkillsScanner: Sendable {
             for entry in entries.sorted() where isDir(entry) {
                 if excludedDirs.contains(entry) { continue }
                 if hasSkillMD && supportDirs.contains(entry) { continue }
-                // Org mirrors are token-gated: `_org/` is walked only when a
-                // marker names an org, and then only that org's subdir.
-                if relative.isEmpty && entry == orgMirrorDir && activeOrg == nil { continue }
-                if relative == [orgMirrorDir] && entry != activeOrg { continue }
+                // Org mirrors are token-gated (through v0.21.5): `_org/` is
+                // walked only when a marker names an org, and then only that
+                // org's subdir.
+                if gatesOrgMirror {
+                    if relative.isEmpty && entry == orgMirrorDir && activeOrg == nil { continue }
+                    if relative == [orgMirrorDir] && entry != activeOrg { continue }
+                }
                 walk(dir + "/" + entry, relative: relative + [entry])
             }
         }

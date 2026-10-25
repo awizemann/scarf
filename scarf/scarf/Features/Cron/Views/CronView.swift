@@ -114,7 +114,8 @@ struct CronView: View {
     private var editorSupport: CronViewModel.EditorSupport {
         CronViewModel.EditorSupport(
             workdir: hasCronWorkdir, noAgent: hasCronNoAgent,
-            failureDeliver: hasCronFailureDeliver, modelPin: hasCronModelPin
+            failureDeliver: hasCronFailureDeliver, modelPin: hasCronModelPin,
+            interpreter: capabilitiesStore?.capabilities.hasCronInterpreter ?? false
         )
     }
     /// v0.21.1 — `last_dispatch` / `last_delivery_unverified` read-only
@@ -1420,6 +1421,10 @@ struct CronJobEditor: View {
         /// v0.21.4 model pin (`--pin` / `--unpin`). Seeded from
         /// `HermesCronJob.isModelPinned` on edit; `false` on create/duplicate.
         var pinModel: Bool = false
+        /// v0.21.6 `--interpreter`. No widget: seeded only on `.duplicate`
+        /// (from `HermesCronJob.interpreter`) so a copied `.py` script job
+        /// keeps the source's Python; empty on create and edit.
+        var interpreter: String = ""
     }
 
     let mode: Mode
@@ -1703,6 +1708,7 @@ struct CronJobEditor: View {
                 // model, not the source's pin, so a duplicate starts unpinned
                 // (its gaps line already names the model it can't carry).
                 if case .edit = mode { form.pinModel = job.isModelPinned }
+                if case .duplicate = mode { form.interpreter = job.interpreter ?? "" }
             }
         }
     }

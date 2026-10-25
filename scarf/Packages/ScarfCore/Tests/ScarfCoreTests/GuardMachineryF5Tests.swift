@@ -277,7 +277,7 @@ import Foundation
             try Data("x".utf8).write(to: skillDir.appendingPathComponent(name))
         }
 
-        let categories = SkillsScanner.scan(context: context, transport: LocalTransport())
+        let categories = SkillsScanner.scan(context: context, transport: LocalTransport(), capabilities: .empty)
         let skill = try #require(categories.first?.skills.first)
         #expect(skill.files == ["SKILL.md", "reference.md", "skill.yaml"])
     }

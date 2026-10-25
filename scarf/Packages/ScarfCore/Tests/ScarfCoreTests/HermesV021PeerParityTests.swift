@@ -92,9 +92,9 @@ import Foundation
         #expect(HermesPeerCLI.runArgs(target: "spark", message: "hi", idempotencyKey: "ticket-123")
             == ["peer", "run", "--idempotency-key", "ticket-123", "--json", "--", "spark", "hi"])
         #expect(HermesPeerCLI.statusArgs(target: "spark", runID: "run_abc")
-            == ["peer", "status", "spark", "run_abc", "--json"])
+            == ["peer", "status", "--json", "--", "spark", "run_abc"])
         #expect(HermesPeerCLI.stopArgs(target: "spark", runID: "run_abc")
-            == ["peer", "stop", "spark", "run_abc", "--json"])
+            == ["peer", "stop", "--json", "--", "spark", "run_abc"])
     }
 
 

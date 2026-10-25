@@ -124,12 +124,13 @@ final class BotRoutinesViewModel {
     func duplicate(
         schedule: String, prompt: String, name: String, deliver: String,
         skills: [String], script: String, repeatCount: String,
-        workdir: String, noAgent: Bool, failureDeliver: String
+        workdir: String, noAgent: Bool, failureDeliver: String, interpreter: String = ""
     ) {
         cron.createJob(
             schedule: schedule, prompt: prompt, name: name, deliver: deliver,
             skills: skills, script: script, repeatCount: repeatCount,
             workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver,
+            interpreter: interpreter,
             onOutcome: { succeeded in
                 Analytics.record(.botRoutineAction(action: .created, outcome: .init(succeeded: succeeded)))
             }

@@ -1600,7 +1600,9 @@ final class SettingsViewModel {
     /// `fileService.runHermesCLI`, which is transport-aware — for an SSH
     /// context the `hermes import <path>` command runs on the remote shell
     /// where `<path>` is a remote filesystem path.
-    func runRestore(fromPath path: String) {
+    /// `capabilities` tells a v0.21.6+ partial restore (exit 1, files kept)
+    /// from a failure; no default, because the parameter IS the fix.
+    func runRestore(fromPath path: String, capabilities: HermesCapabilities) {
         backupInProgress = true
         Task.detached { [fileService, self] in
             let result = await OffPool.run {
@@ -1609,7 +1611,7 @@ final class SettingsViewModel {
                 )
             }
             let outcome = HermesImportVerdict.judge(
-                output: result.output, exitCode: result.exitCode
+                output: result.output, exitCode: result.exitCode, capabilities: capabilities
             )
             await MainActor.run {
                 self.backupInProgress = false
