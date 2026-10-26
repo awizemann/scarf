@@ -2,7 +2,7 @@
 title: Release-Notes-Index
 type: note
 permalink: scarf-wiki/release-notes-index
-updated: 2026-10-05
+updated: 2026-10-26
 created: 2026-05-29
 ---
 
@@ -12,6 +12,7 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 
 | Version | Date | GitHub release | Notes file |
 |---|---|---|---|
+| **v3.7.0** | 2026-10-26 | [v3.7.0](https://github.com/awizemann/scarf/releases/tag/v3.7.0) | [`releases/v3.7.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.7.0/RELEASE_NOTES.md) |
 | **v3.6.0** | 2026-10-05 | [v3.6.0](https://github.com/awizemann/scarf/releases/tag/v3.6.0) | [`releases/v3.6.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.6.0/RELEASE_NOTES.md) |
 | **v3.5.0** | 2026-09-29 | [v3.5.0](https://github.com/awizemann/scarf/releases/tag/v3.5.0) | [`releases/v3.5.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.5.0/RELEASE_NOTES.md) |
 | **v3.4.0** | 2026-09-26 | [v3.4.0](https://github.com/awizemann/scarf/releases/tag/v3.4.0) | [`releases/v3.4.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.4.0/RELEASE_NOTES.md) |
@@ -129,4 +130,4 @@ When `scripts/release.sh <version>` completes a full (non-draft) release, this p
 This is one of the [wiki update triggers](Wiki-Maintenance) that future Claude Code sessions will follow automatically.
 
 ---
-_Last updated: 2026-08-13 — Scarf v2.19.2 (SSH circuit breaker: runaway reconnects behind Cloudflare Zero Trust no longer spawn browser tabs, gh#138)_
+_Last updated: 2026-10-26 — Scarf v3.7.0 (Hermes v0.22.5 support: gateway-backed chat, gateway live-session safety, strict config loading, features moved into Hermes plugins)_
