@@ -107,15 +107,31 @@
 
 ## Doing
 
+- [ ] v0.22.5 S8: live test, memory, wiki (id: t-b7aee9ae) (added: 2026-10-25) (priority: high)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 - [ ] gh-pages: backfill appcast minimum OS + fix privacy page link/colors (id: t-8af65c8f) (added: 2026-10-05) (priority: urgent)
-- [ ] Cut Scarf 3.6.0 + upload ScarfGo 3.6.0 (id: t-126e3304) (added: 2026-10-05) (priority: high)
+- [ ] Upload ScarfGo 3.6.0 (Mac 3.6.0 shipped) (id: t-126e3304) (added: 2026-10-05) (priority: high)
+- [ ] Release Scarf v3.7.0 (Hermes v0.22.5 parity) (id: t-c07fefca) (added: 2026-10-26) (priority: high)
 
 ## Done
 
+- [x] Check: ACP load of a CLI session from a different folder on Hermes 0.22.3+ (id: t-361f4f02) (added: 2026-10-26)
+- [x] Scarf UI gate in a Tart VM (dedicated scarf-ui) (id: t-cce54618) (added: 2026-10-25) (priority: high)
+- [x] VM UI runs: survive macOS low-disk purge kills (id: t-800af0b8) (added: 2026-10-26) (priority: high)
+- [x] Unblock ChatJourney ACP send UI test on v0.22.5 (id: t-c665d247) (added: 2026-10-26) (priority: high)
+- [x] Kanban inspector Block action missing on Hermes v0.22.5 (UI test) (id: t-d65dfc28) (added: 2026-10-26) (priority: high)
+- [x] v0.22.5 S9: live-test fixes and ACP-missing hint (id: t-7d936a4e) (added: 2026-10-25) (priority: high)
+- [x] v0.22.5 S1: gateway stop/restart safety and status (id: t-1301c677) (added: 2026-10-25) (priority: urgent)
+- [x] v0.22.5 S6: plugins and left-core features (id: t-0cf09691) (added: 2026-10-25) (priority: high)
+- [x] v0.22.5 S7: small CLI and data fixes (id: t-7e2da589) (added: 2026-10-25)
+- [x] v0.22.5 S4: ACP on the gateway daemon + resume (id: t-434180c7) (added: 2026-10-25) (priority: urgent)
+- [x] v0.22.5 S2: strict YAML loader and Tirith removal (id: t-69cf8a08) (added: 2026-10-25) (priority: urgent)
+- [x] v0.22.5 S5: session source display and session fixes (id: t-ba7bbc57) (added: 2026-10-25) (priority: high)
+- [x] v0.22.5 S3: providers, catalog, table checker (id: t-9b7739c1) (added: 2026-10-25) (priority: high)
+- [x] v0.22.5 P0: capability predicates and flags (id: t-5a840e26) (added: 2026-10-25) (priority: high)
 - [x] Analytics P3: new events + doc/policy updates (id: t-b1016f2a) (added: 2026-10-06)
 - [x] Analytics P2: tighten emissions (gating, dedupe, lifecycle, toggle) (id: t-27a18eaa) (added: 2026-10-06)
 - [x] Analytics P1: isolate dev/test/agent traffic from production identity (id: t-6984f5d5) (added: 2026-10-06)
