@@ -66,7 +66,10 @@
 # Results: build/ui-gate-vm/results/<stamp>/ — summary.md, one .xcresult and
 # one .log per plan, plus the setup and fixture logs. Exits non-zero when any
 # plan is not PASS. Verdicts are scripts/ui-gate.sh's (--classify): PASS, FAIL,
-# RUNNER-FAILED.
+# RUNNER-FAILED. A test that "crashed with signal kill" (in this VM, macOS's
+# low-disk purge terminating the test runner) is rerun ONCE, alone
+# (-only-testing:Class/test), and the rerun decides it; both attempts are in
+# summary.md (<plan>-rerunN.log / .xcresult). No other failure is ever rerun.
 #
 set -euo pipefail
 
@@ -114,7 +117,7 @@ while [[ $# -gt 0 ]]; do
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,69p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -221,7 +224,7 @@ cleanup() {
     # The guest helper stops the fixture's gateway and every process of this run,
     # removes the hermes shim, the run dir, the result bundles and test homes.
     gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' cleanup $GUEST_HAD_HERMES" >>"$RESULT/cleanup.log" 2>&1 \
-      || gbash "d=~/$GW; pkill -f \"\$d/\" ; rm -rf ~/$GW ~/$GUEST_RESULTS-* ; grep -q 'scarf-ui-gate-vm $STAMP' ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; true" >>"$RESULT/cleanup.log" 2>&1 || true
+      || gbash "d=~/$GW; pkill -f \"\$d/\" ; r=\$(cd \$d 2>/dev/null && pwd -P) && pkill -f \"\$r/\" ; rm -rf ~/$GW ~/$GUEST_RESULTS-* ; grep -q 'scarf-ui-gate-vm $STAMP' ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; true" >>"$RESULT/cleanup.log" 2>&1 || true
     verify_guest_clean || status=1
   fi
   [[ -z "$LOCK" ]] || rm -rf "$LOCK"
@@ -239,10 +242,10 @@ verify_guest_clean() {
   mins=$(( ( $(date +%s) - STARTED_AT ) / 60 + 5 ))
   found=""
   if [[ -s "$SCRATCH/secret-values" ]]; then
-    found="$(gssh_in "grep -rlsF -f /dev/stdin ~/work ~/results ~/.hermes ~/.local \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers 2>/dev/null | head -20; true" <"$SCRATCH/secret-values" || echo "(could not search)")"
+    found="$(gssh_in "grep -rlsF -f /dev/stdin ~/work/ ~/results/ ~/.hermes ~/.local \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers 2>/dev/null | head -20; true" <"$SCRATCH/secret-values" || echo "(could not search)")"
   fi
   local envs
-  envs="$(gssh "find ~ \"\$(getconf DARWIN_USER_TEMP_DIR)\" -mmin -$mins \( -name .env -o -name auth.json \) -not -path '*/Library/Caches/*' 2>/dev/null | head -20; true")"
+  envs="$(gssh "find ~ ~/work/ ~/results/ \"\$(getconf DARWIN_USER_TEMP_DIR)\" -mmin -$mins \( -name .env -o -name auth.json \) -not -path '*/Library/Caches/*' 2>/dev/null | head -20; true")"
   {
     echo "leftover paths: ${left:-none}"
     echo "files holding a copied credential: ${found:-none}"
@@ -390,8 +393,15 @@ STAMP="${W##*/scarf-}"
 export DEVELOPER_DIR="/Volumes/My Shared Files/xcode/Contents/Developer"
 # No Homebrew, no CLT in the guest: git comes from the shared Xcode.
 export PATH="$W/venv/bin:$DEVELOPER_DIR/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Everything uv, pip, xcodebuild and Hermes cache, install or put in TMPDIR
+# stays under the run dir, so it is removed with it and kept off the boot
+# volume when ~/work lives on another disk (see the README). What can't move:
+# the test runner's container (its per-test copies of the fixture home).
 export UV_CACHE_DIR="$W/uv/cache" UV_PYTHON_INSTALL_DIR="$W/uv/python" UV_PYTHON_BIN_DIR="$W/uv/bin" \
-       UV_TOOL_DIR="$W/uv/tools" UV_NO_CONFIG=1 UV_PYTHON_PREFERENCE=only-managed
+       UV_TOOL_DIR="$W/uv/tools" UV_NO_CONFIG=1 UV_PYTHON_PREFERENCE=only-managed \
+       PIP_CACHE_DIR="$W/pip-cache" XDG_CACHE_HOME="$W/xdg/cache" XDG_DATA_HOME="$W/xdg/data" \
+       XDG_STATE_HOME="$W/xdg/state" TMPDIR="$W/tmp"
+mkdir -p "$TMPDIR"
 UV="$W/bin/uv"; HB="$W/venv/bin/hermes"; FIXTURE="$W/fixture/fixture-home"
 SHIM="$HOME/.local/bin/hermes"; SHIM_MARK="scarf-ui-gate-vm $STAMP"
 case "$CMD" in
@@ -419,6 +429,8 @@ setup)
 # $SHIM_MARK — removed when the run ends
 DEVELOPER_DIR="$DEVELOPER_DIR"; export DEVELOPER_DIR
 PATH="$W/venv/bin:\$DEVELOPER_DIR/usr/bin:\$PATH"; export PATH
+XDG_CACHE_HOME="$W/xdg/cache"; XDG_DATA_HOME="$W/xdg/data"; XDG_STATE_HOME="$W/xdg/state"
+PIP_CACHE_DIR="$W/pip-cache"; TMPDIR="$W/tmp"; export XDG_CACHE_HOME XDG_DATA_HOME XDG_STATE_HOME PIP_CACHE_DIR TMPDIR
 exec "$HB" "\$@"
 EOF
   chmod 755 "$SHIM"
@@ -435,6 +447,7 @@ plan)
     -xctestrun "$W/Products/$xctestrun" \
     -destination 'platform=macOS,arch=arm64' \
     -resultBundlePath "$bundle" \
+    -derivedDataPath "$W/derived" \
     -parallel-testing-enabled NO \
     -test-timeouts-enabled YES \
     -default-test-execution-time-allowance "$per_test" \
@@ -449,11 +462,15 @@ cleanup)
   fi
   # Everything this run started: hermes (gateways included) runs from $W/venv,
   # the app and the runner from $W/Products.
-  pkill -f "$W/venv/" 2>/dev/null || true
-  pkill -f "$W/Products/" 2>/dev/null || true
-  sleep 2
-  pkill -9 -f "$W/venv/" 2>/dev/null || true
-  pkill -9 -f "$W/Products/" 2>/dev/null || true
+  # ~/work may be a symlink to another disk: match the resolved path too.
+  RW="$(cd "$W" 2>/dev/null && pwd -P || echo "$W")"
+  for sig in TERM KILL; do
+    for d in "$W" "$RW"; do
+      pkill -"$sig" -f "$d/venv/" 2>/dev/null || true
+      pkill -"$sig" -f "$d/Products/" 2>/dev/null || true
+    done
+    [ "$sig" = KILL ] || sleep 2
+  done
   if [ -f "$SHIM" ] && grep -q "$SHIM_MARK" "$SHIM"; then rm -f "$SHIM"; fi
   rmdir "$HOME/.local/bin" "$HOME/.local" 2>/dev/null || true
   # The tests' throwaway homes (copies of the fixture, credentials included).
@@ -493,7 +510,7 @@ GUEST_HOME="$(gssh 'echo $HOME')"
 # can hold copied credentials). Only Scarf's own folders: ~/work/* belongs to
 # every project that uses the clone. Xcode's system-log archives go too, as
 # ScarfRack's run does.
-gbash "for d in ~/work/scarf-*; do [ -d \"\$d\" ] || continue; pkill -f \"\$d/\" ; rm -rf \"\$d\"; done; rm -rf ~/results/scarf-* /var/tmp/test-session-systemlogs-*; grep -q scarf-ui-gate-vm ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; true" >/dev/null 2>&1 || true
+gbash "for d in ~/work/scarf-*; do [ -d \"\$d\" ] || continue; pkill -f \"\$d/\" ; r=\$(cd \"\$d\" && pwd -P) && pkill -f \"\$r/\" ; rm -rf \"\$d\"; done; rm -rf ~/results/scarf-* /var/tmp/test-session-systemlogs-*; grep -q scarf-ui-gate-vm ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; true" >/dev/null 2>&1 || true
 GUEST_HAD_HERMES="$(gssh '[ -e ~/.hermes ] && echo 1 || echo 0')"
 # The UI tests pin Scarf's window at {{40, 140}, {1800, 1300}} and fail any
 # test whose window comes up under 1500 × 1200 pt (ScarfUITestCase
@@ -516,15 +533,24 @@ if [[ "$SCREEN" =~ ^[0-9.]+\ [0-9.]+\ [0-9.]+\ [0-9.]+$ ]]; then
 else
   warn "could not read $REUSE's screen size; running anyway"
 fi
-FREE_GB="$(gssh "df -g / | awk 'NR == 2 { print \$4 }'" 2>/dev/null || true)"
-case "$FREE_GB" in ''|*[!0-9]*) die "could not read the free space in $REUSE" ;; esac
-[[ $FREE_GB -ge 5 ]] || die "$REUSE has $FREE_GB GB free, under the 5 GB a run needs"
-# Under roughly 15 GB free, macOS runs its critical cache purge every few
-# minutes, and that purge TERMINATES the sandboxed test runner to empty its
-# container caches (runningboardd: "CacheDeleteAppContainerCaches requesting
-# termination assertion for com.scarfUITests.xctrunner"): the test in flight
-# reports "Test crashed with signal kill" and the next one starts in a new runner.
-[[ $FREE_GB -ge 15 ]] || warn "$REUSE has $FREE_GB GB free: under ~15 GB macOS's critical cache purge kills the test runner mid-test (\"Test crashed with signal kill\"); give the clone a larger disk"
+# Free space where the run's files go (~/work may be a symlink to another
+# disk), and on the boot volume, which holds what the run can't move: the test
+# runner's container (its copies of the fixture home) and Xcode's logs.
+gb_free() { gssh "mkdir -p $1 && df -g \"\$(cd $1 && pwd -P)\" | awk 'NR == 2 { print \$4 }'" 2>/dev/null || true; }
+FREE_GB="$(gb_free '~/work')"
+BOOT_GB="$(gb_free '/')"
+case "$FREE_GB$BOOT_GB" in ''|*[!0-9]*) die "could not read the free space in $REUSE" ;; esac
+echo "free: ${FREE_GB} GB where ~/work lives, ${BOOT_GB} GB on the boot volume" | tee "$RESULT/guest-disk.txt" >&2
+[[ $FREE_GB -ge 5 ]] || die "$REUSE has $FREE_GB GB free where ~/work lives, under the 5 GB a run needs"
+# Under its low-disk threshold (10 GiB free on scarf-ui's 44 GB boot container:
+# deleted logs "lowDiskThreshold: 10737418240"), macOS purges caches every time
+# APFS reports low disk, and that purge TERMINATES the sandboxed test runner to
+# empty its container caches (runningboardd: "CacheDeleteAppContainerCaches
+# requesting termination assertion for com.scarfUITests.xctrunner"): the test in
+# flight reports "Test crashed with signal kill" and the next one starts in a new
+# runner. Such tests are rerun once, alone (step 6). df -g counts GiB and
+# rounds down, so 11 means at least 1 GiB above the threshold.
+[[ $BOOT_GB -ge 11 ]] || warn "$REUSE's boot volume has $BOOT_GB GB free: near or under its 10 GB low-disk threshold, macOS's purge kills the test runner mid-test (\"Test crashed with signal kill\"; such tests get one rerun) — free space in the guest (see scripts/ui-fixture/README.md)"
 
 # ---------- 4. copy in ----------
 log "copying the products, uv, Hermes and the sanitized home into $REUSE:~/$GW"
@@ -569,7 +595,74 @@ if [[ ${#ONLY[@]} -gt 0 ]]; then
 fi
 plan_limit_min() { case "$1" in Smoke) echo 20 ;; Full) echo 90 ;; Live) echo 45 ;; esac; }
 GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-declare -a ROWS=() FAILURES=()
+
+# One xcodebuild run in the guest, bounded. Sets STATUS, WALL and TIMED_OUT.
+# $1 plan, $2 .xctestrun, $3 guest bundle path, $4 host log, $5 bound (s), $6… -only-testing args
+run_in_guest() {
+  local plan="$1" xctestrun="$2" bundle="$3" logf="$4" limit="$5" tests watch t0; shift 5
+  t0=$SECONDS; STATUS=0; TIMED_OUT=0
+  gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' plan '$plan' '$xctestrun' '$bundle' $PER_TEST $PER_TEST_MAX $*" >"$logf" 2>&1 &
+  tests=$!
+  ( sleep "$limit" && kill "$tests" ) >/dev/null 2>&1 & watch=$!
+  wait "$tests" || STATUS=$?
+  WALL=$((SECONDS - t0))
+  if kill -0 "$watch" 2>/dev/null; then pkill -P "$watch" 2>/dev/null || true; kill "$watch" 2>/dev/null || true
+  else
+    warn "$plan passed its $((limit / 60))-minute bound and was stopped"
+    # The guest's processes show the resolved path (~/work may be a symlink).
+    gbash "d=~/$GW; pkill -f \"\$d/Products/\"; r=\$(cd \$d 2>/dev/null && pwd -P) && pkill -f \"\$r/Products/\"; true" >/dev/null 2>&1 || true
+    STATUS=1; TIMED_OUT=1
+  fi
+}
+# Reads a result bundle's summary. Sets COUNTS, FAILED_NAMES (markdown lines),
+# KILLED (tests whose every failure is "crashed with signal kill", as
+# Class/test) and OTHER_FAILED (how many tests failed any other way).
+# $1 host .xcresult, $2 summary.json to write
+read_results() {
+  COUNTS="no result bundle"; FAILED_NAMES=""; KILLED=(); OTHER_FAILED=0
+  [[ -d "$1" ]] || return 0
+  xcrun xcresulttool get test-results summary --path "$1" >"$2" 2>/dev/null || true
+  local parsed
+  parsed="$(/usr/bin/python3 -I -c '
+import json, sys
+try:
+    s = json.load(open(sys.argv[1]))
+except Exception:
+    print("C\tsummary unreadable"); sys.exit()
+print("C\t%s executed / %s passed / %s failed / %s skipped" % (s.get("totalTestCount", "?"), s.get("passedTests", "?"),
+      s.get("failedTests", "?"), s.get("skippedTests", "?")))
+kinds = {}
+for f in s.get("testFailures", []):
+    n = f.get("testIdentifierString") or f.get("testName", "?")
+    text = (f.get("failureText") or "").splitlines()
+    text = text[0][:200] if text else ""
+    if n not in kinds:
+        kinds[n] = []
+        print("F\t  - %s: %s" % (n, text))
+    kinds[n].append("crashed with signal kill" in text)
+for n, k in kinds.items():
+    # Only a test that failed by the kill alone is retried; a parenthesized
+    # identifier is the Class/test() XCTest reports.
+    if all(k) and "/" in n:
+        print("K\t%s" % n.replace("()", ""))
+    else:
+        print("O\t%s" % n)
+' "$2")"
+  COUNTS="$(printf '%s\n' "$parsed" | sed -n 's/^C	//p')"
+  FAILED_NAMES="$(printf '%s\n' "$parsed" | sed -n 's/^F	//p')"
+  while IFS= read -r k; do [[ -z "$k" ]] || KILLED+=("$k"); done < <(printf '%s\n' "$parsed" | sed -n 's/^K	//p')
+  OTHER_FAILED="$(printf '%s\n' "$parsed" | grep -c '^O	' || true)"
+}
+gb_boot() { gssh "df -k / | awk 'NR == 2 { printf \"%.1f\", \$4 / 1048576 }'" 2>/dev/null || echo "?"; }
+# macOS's low-disk purge in the guest since $1 (guest clock): how often it
+# fired, and how many times it terminated the test runner. Raw lines → $2.
+purge_report() {
+  gbash "log show --start '$1' --style compact --predicate '(process == \"deleted\" AND eventMessage CONTAINS \"processLowDiskVolume\") OR (process == \"runningboardd\" AND eventMessage CONTAINS \"scarfUITests.xctrunner\" AND (eventMessage CONTAINS \"CacheDelete\" OR eventMessage CONTAINS \"Terminating with context\"))' 2>/dev/null | grep '^20'; true" >"$2" 2>/dev/null || true
+  PURGES="$(grep -c 'CD_LOWDISK_EVENT' "$2" || true)"
+  RUNNER_KILLS="$(grep -c 'Terminating with context' "$2" || true)"
+}
+
+declare -a ROWS=() FAILURES=() NOTES_OUT=()
 OVERALL=0; SAW_RUNNER=0; SAW_FAIL=0
 for plan in "${PLANS[@]}"; do
   clear_banners
@@ -577,62 +670,64 @@ for plan in "${PLANS[@]}"; do
   BUNDLE_GUEST="$GUEST_HOME/$GUEST_RESULTS-$plan.xcresult"
   PLAN_LOG="$RESULT/$plan.log"
   LIMIT=$(( $(plan_limit_min "$plan") * 60 ))
+  BOOT_BEFORE="$(gb_boot)"; GUEST_T0="$(guest_now 2>/dev/null || true)"
   log "running $plan in $REUSE (bound $((LIMIT / 60)) min; log: $PLAN_LOG)"
-  T0=$SECONDS; STATUS=0
-  gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' plan '$plan' '$XCTESTRUN' '$BUNDLE_GUEST' $PER_TEST $PER_TEST_MAX $ONLY_ARGS" >"$PLAN_LOG" 2>&1 &
-  TESTS=$!
-  ( sleep "$LIMIT" && kill "$TESTS" ) >/dev/null 2>&1 & WATCH=$!
-  wait "$TESTS" || STATUS=$?
-  WALL=$((SECONDS - T0))
-  if kill -0 "$WATCH" 2>/dev/null; then pkill -P "$WATCH" 2>/dev/null || true; kill "$WATCH" 2>/dev/null || true
-  else
-    warn "$plan passed its $((LIMIT / 60))-minute bound and was stopped"
-    gssh "pkill -f '$GUEST_HOME/$GW/Products/'" >/dev/null 2>&1 || true
-    STATUS=1
-  fi
+  # shellcheck disable=SC2086
+  run_in_guest "$plan" "$XCTESTRUN" "$BUNDLE_GUEST" "$PLAN_LOG" "$LIMIT" $ONLY_ARGS
+  PLAN_WALL=$WALL; PLAN_TIMED_OUT=$TIMED_OUT
   [[ $WALL -le $((LIMIT / 2)) ]] || warn "$plan took $((WALL / 60)) minutes, past half its bound"
   gscp_out "$BUNDLE_GUEST" "$RESULT/$plan.xcresult" || warn "no result bundle came back for $plan"
 
   VERDICT="$("$REPO_ROOT/scripts/ui-gate.sh" --classify "$PLAN_LOG" "$STATUS" 2>/dev/null || true)"
   [[ -n "$VERDICT" ]] || VERDICT=FAIL
-  COUNTS="no result bundle"; FAILED_NAMES=""
-  if [[ -d "$RESULT/$plan.xcresult" ]]; then
-    xcrun xcresulttool get test-results summary --path "$RESULT/$plan.xcresult" >"$RESULT/$plan.summary.json" 2>/dev/null || true
-    COUNTS="$(/usr/bin/python3 -I -c '
-import json, sys
-try:
-    s = json.load(open(sys.argv[1]))
-except Exception:
-    print("summary unreadable"); sys.exit()
-print("%s executed / %s passed / %s failed / %s skipped" % (s.get("totalTestCount", "?"), s.get("passedTests", "?"),
-      s.get("failedTests", "?"), s.get("skippedTests", "?")))
-' "$RESULT/$plan.summary.json")"
-    FAILED_NAMES="$(/usr/bin/python3 -I -c '
-import json, sys
-try:
-    s = json.load(open(sys.argv[1]))
-except Exception:
-    sys.exit()
-seen = []
-for f in s.get("testFailures", []):
-    n = f.get("testIdentifierString") or f.get("testName", "?")
-    if n not in seen:
-        seen.append(n)
-        print("  - %s: %s" % (n, (f.get("failureText") or "").splitlines()[0][:200] if f.get("failureText") else ""))
-' "$RESULT/$plan.summary.json")"
+  read_results "$RESULT/$plan.xcresult" "$RESULT/$plan.summary.json"
+  RESULT_CELL="$VERDICT"
+
+  # A test "crashed with signal kill" is, in this VM, almost always macOS's
+  # low-disk purge terminating the runner (runningboardd:
+  # "CacheDeleteAppContainerCaches requesting termination assertion for
+  # com.scarfUITests.xctrunner"), not the test. Each such test runs ONCE more,
+  # alone, and its verdict is the rerun's. Any other failure is never rerun.
+  RERUN_LINES=""; RECOVERED=0
+  if [[ ${#KILLED[@]} -gt 0 ]]; then
+    i=0
+    for t in "${KILLED[@]}"; do
+      i=$((i + 1))
+      clear_banners
+      RB_GUEST="$GUEST_HOME/$GUEST_RESULTS-$plan-rerun$i.xcresult"; RB="$RESULT/$plan-rerun$i.xcresult"
+      log "rerunning $t alone ($plan; it crashed with signal kill; log: $RESULT/$plan-rerun$i.log)"
+      run_in_guest "$plan" "$XCTESTRUN" "$RB_GUEST" "$RESULT/$plan-rerun$i.log" $((PER_TEST_MAX + 300)) "-only-testing:scarfUITests/$t"
+      gscp_out "$RB_GUEST" "$RB" >/dev/null 2>&1 || true
+      SAVED=("$COUNTS" "$FAILED_NAMES" "$OTHER_FAILED"); SAVED_KILLED=("${KILLED[@]}")
+      read_results "$RB" "$RESULT/$plan-rerun$i.summary.json"
+      # A pass counts only when the test really ran (an identifier XCTest can't
+      # match runs nothing and still exits 0).
+      if [[ $STATUS -eq 0 && "$COUNTS" =~ /\ [1-9][0-9]*\ passed\ /\ 0\ failed ]]; then
+        RECOVERED=$((RECOVERED + 1)); outcome="PASS"
+      else
+        outcome="FAIL — $(printf '%s\n' "$FAILED_NAMES" | head -1 | sed 's/^[^:]*: //')"
+        [[ -n "$FAILED_NAMES" ]] || outcome="FAIL (exit $STATUS, $COUNTS)"
+      fi
+      RERUN_LINES="$RERUN_LINES
+  - $t(): run 1 crashed with signal kill; run 2, alone: $outcome (${WALL}s, $plan-rerun$i.log)"
+      COUNTS="${SAVED[0]}"; FAILED_NAMES="${SAVED[1]}"; OTHER_FAILED="${SAVED[2]}"; KILLED=("${SAVED_KILLED[@]}")
+    done
+    # The plan passes on its reruns only when the kills were its ONLY failures,
+    # every one passed alone, and nothing else stopped the run.
+    if [[ "$VERDICT" == FAIL && $OTHER_FAILED -eq 0 && $RECOVERED -eq ${#KILLED[@]} && $PLAN_TIMED_OUT -eq 0 ]]; then
+      VERDICT=PASS; RESULT_CELL="PASS (on rerun: ${#KILLED[@]} killed)"
+    fi
   fi
   if [[ "$VERDICT" != PASS ]]; then
     OVERALL=1
     if [[ "$VERDICT" == RUNNER-FAILED ]]; then SAW_RUNNER=1; else SAW_FAIL=1; fi
   fi
-  ROWS+=("| $plan | $VERDICT | $COUNTS | ${WALL}s |")
-  KILLS="$(printf '%s\n' "$FAILED_NAMES" | grep -c 'crashed with signal kill' || true)"
-  if [[ "$KILLS" -gt 0 ]]; then
-    FAILED_NAMES="$FAILED_NAMES
-  ($KILLS of these are \"crashed with signal kill\": check the guest's log for runningboardd \"CacheDeleteAppContainerCaches\" — macOS's low-disk purge killing the runner — before blaming the test)"
-  fi
-  [[ -z "$FAILED_NAMES" ]] || FAILURES+=("$(printf '**%s failures**\n\n%s\n' "$plan" "$FAILED_NAMES")")
-  log "$plan: $VERDICT — $COUNTS (${WALL}s)"
+  purge_report "$GUEST_T0" "$RESULT/$plan.guest-purge.log"
+  NOTES_OUT+=("- $plan: boot volume ${BOOT_BEFORE} GB free before, $(gb_boot) GB after; macOS low-disk purges: ${PURGES:-?}, runner terminations by the purge: ${RUNNER_KILLS:-?} ($plan.guest-purge.log)")
+  ROWS+=("| $plan | $RESULT_CELL | $COUNTS | ${PLAN_WALL}s |")
+  [[ -z "$FAILED_NAMES" ]] || FAILURES+=("$(printf '**%s failures (first run)**\n\n%s\n' "$plan" "$FAILED_NAMES")")
+  [[ -z "$RERUN_LINES" ]] || FAILURES+=("$(printf '**%s reruns** (\"crashed with signal kill\" only — the guest'"'"'s low-disk purge terminating the runner; each test once, alone; the rerun decides)\n%s\n' "$plan" "$RERUN_LINES")")
+  log "$plan: $RESULT_CELL — $COUNTS (${PLAN_WALL}s)"
 done
 
 {
@@ -644,11 +739,15 @@ done
   echo "- Scope: $([[ $UI_ONLY -eq 1 ]] && echo "UI tests only (-only-testing:scarfUITests)" || echo "whole plans, unit tests included")"
   echo "- Hermes: $HERMES_TAG ($(grep '^hermes --version' "$RESULT/guest-setup.log" | sed 's/^hermes --version: //'), Python $GUEST_PY)"
   echo
-  echo "| Plan | Result | Tests | Wall time |"
+  echo "| Plan | Result | Tests (first run) | Wall time |"
   echo "| --- | --- | --- | --- |"
   for row in "${ROWS[@]}"; do printf '%s\n' "$row"; done
   echo
   for f in ${FAILURES[@]+"${FAILURES[@]}"}; do printf '%s\n\n' "$f"; done
+  echo "Guest disk:"
+  echo
+  for n in ${NOTES_OUT[@]+"${NOTES_OUT[@]}"}; do printf '%s\n' "$n"; done
+  echo
   if [[ $OVERALL -eq 0 ]]; then echo "Overall: PASS"
   elif [[ $SAW_RUNNER -eq 1 && $SAW_FAIL -eq 0 ]]; then echo "Overall: RUNNER-FAILED"
   else echo "Overall: FAIL"; fi

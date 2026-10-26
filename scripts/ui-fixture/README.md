@@ -156,24 +156,38 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
 - The guest is a long-lived, already-running clone of ScarfRack's UI-test image
   (`--reuse scarf-ui` by default); the script never starts or stops a VM. It takes
   the clone's lock exactly as ScarfRack's `tools/ui-test/run.sh` does and waits up
-  to 20 minutes for another run to finish.
+  to 20 minutes for another run to finish. It needs ScarfRack's
+  `tools/fresh-mac-rig/lib.sh` (`SCARF_VM_RIG_LIB`), which holds the VM's
+  login — none of it is in this repo.
 - **The clone's display must be tall enough.** The tests pin Scarf's window at
   1800 × 1300 pt and fail any test whose window is under 1500 × 1200, and AppKit
   keeps a window inside the screen less the menu bar and the Dock. A 1920x1200
   display leaves 1920 × 1080, so the script checks the guest's visible frame first
   and stops before copying anything in. Give the clone at least 1920x1440 while it
   is stopped (`tart set scarf-ui --display 1920x1440`).
-- **…and its disk roomy enough.** Under roughly 15 GB free, macOS runs its critical
-  cache purge every few minutes, and the purge terminates the sandboxed test runner
-  to empty its container caches (runningboardd: `CacheDeleteAppContainerCaches
-  requesting termination assertion for com.scarfUITests.xctrunner`). The test in
-  flight then reports **"Test crashed with signal kill"**. The script warns under
-  15 GB, and the summary flags such failures; read them as environment, not code.
+- **…and room on its boot volume.** Under its low-disk threshold — 10 GiB free
+  on `scarf-ui`'s 44 GB boot container (`deleted` logs `lowDiskThreshold:
+  10737418240`) — macOS purges caches each time APFS reports low disk, and the
+  purge terminates the sandboxed test runner to empty its container caches
+  (runningboardd: `CacheDeleteAppContainerCaches requesting termination
+  assertion for com.scarfUITests.xctrunner`). The test in flight then reports
+  **"Test crashed with signal kill"**. The script reruns each such test **once,
+  alone** (`-only-testing:scarfUITests/Class/test`), and the rerun decides it:
+  `summary.md` lists both attempts (`<plan>-rerunN.log` / `.xcresult`), and a plan
+  whose only failures were kills that passed alone reads `PASS (on rerun: N
+  killed)`. No other failure is ever rerun. The summary also records the boot
+  volume's free space before and after each plan, how often the purge fired, and
+  how many times it terminated the runner (`<plan>.guest-purge.log`).
+- The boot container can't grow (its recovery partition sits after it), so
+  `scarf-ui` gets a second disk for the run's files, below. Everything the run
+  installs or writes that can move — uv, its Python, the venv, uv/pip/XDG caches,
+  `TMPDIR`, DerivedData and logs, result bundles — lives under `~/work` and
+  `~/results` on that disk. Only the runner's container (its per-test copies of
+  the fixture home) stays on the boot volume. The script needs 5 GB free where
+  `~/work` lives and warns when the boot volume has under 11 GB.
 - Only the `scarfUITests` target of each plan runs by default (`--ui-only`); Full's
   unit tests run headless on the host. `--with-unit-tests` runs the plans whole, and
-  `--only Class[/test]` (repeatable) narrows a run to one class or test. It needs ScarfRack's
-  `tools/fresh-mac-rig/lib.sh` (`SCARF_VM_RIG_LIB`), which holds the VM's
-  login — none of it is in this repo.
+  `--only Class[/test]` (repeatable) narrows a run to one class or test.
 - **Hermes in the guest**: the host's `uv` is copied in, installs a managed
   Python the tag allows, and installs Hermes from the tag's `uv.lock` (`uv sync
   --frozen --extra acp`, editable) from a depth-1 clone
@@ -191,5 +205,49 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   copied key values to prove none is left.
 
 Results land in `build/ui-gate-vm/results/<stamp>/`: `summary.md` (verdicts as
-`ui-gate.sh --classify` gives them: PASS / FAIL / RUNNER-FAILED), one `.xcresult`
-and `.log` per plan, and the setup, fixture and cleanup logs.
+`ui-gate.sh --classify` gives them: PASS / FAIL / RUNNER-FAILED, plus reruns of
+killed tests), one `.xcresult` and `.log` per plan and per rerun, the guest's
+purge log per plan, and the setup, fixture and cleanup logs.
+
+### Setting up `scarf-ui` (one time)
+
+```bash
+# Host: clone ScarfRack's UI-test image, give it a tall display and a work disk.
+tart clone scarfrack-uitest-27 scarf-ui
+tart set scarf-ui --display 1920x1440 --no-display-refit
+mkdir -p ~/.tart/scarf-ui-logs && mkfile -n 40g ~/.tart/scarf-ui-logs/scarf-work.img
+# Boot it headless with the host's Xcode shared read-only and the work disk attached:
+tart run scarf-ui --no-graphics --no-audio \
+  --dir=xcode:/Applications/Xcode-beta.app:ro \
+  --disk="$HOME/.tart/scarf-ui-logs/scarf-work.img" &
+
+# Guest (over SSH, once): format the extra disk and move ~/work and ~/results onto it.
+diskutil list external                       # find the 40 GB disk, e.g. disk8
+diskutil eraseDisk APFS ScarfWork disk8
+mkdir -p /Volumes/ScarfWork/work /Volumes/ScarfWork/results
+rm -rf ~/work ~/results
+ln -s /Volumes/ScarfWork/work ~/work
+ln -s /Volumes/ScarfWork/results ~/results
+```
+
+Every later boot needs the same `--disk=` flag, or `~/work` points at nothing.
+
+Then give the boot volume headroom (in the guest, once; it went from 9.6 to
+11.9 GB free). Its big items can't go with SIP on: the Preboot volume's Rosetta
+cryptex (7.7 GB) and the mobile assets under `/System/Library/AssetsV2` (3.5 GB)
+are SIP-restricted.
+
+```bash
+sudo mdutil -a -i off                       # no Spotlight indexing of any volume
+sudo rm -rf /System/Volumes/Data/.Spotlight-V100/Store-V2 ~/Library/Metadata/CoreSpotlight/*
+SU=/Library/Preferences/com.apple.SoftwareUpdate   # no background update downloads
+for k in AutomaticCheckEnabled AutomaticDownload AutomaticallyInstallMacOSUpdates \
+         ConfigDataInstall CriticalUpdateInstall; do sudo defaults write $SU $k -bool false; done
+sudo defaults write /Library/Preferences/com.apple.commerce AutoUpdate -bool false
+sudo log erase --all                        # old unified logs
+sudo rm -rf /Library/Caches/com.apple.iconservices.store ~/Library/Caches/* \
+  /Library/Logs/DiagnosticReports/* ~/Library/Developer/Xcode/DerivedData/scarf-*
+# Let macOS purge what it can: briefly fill the disk, then delete the file.
+dd if=/dev/zero of=/private/var/tmp/fill bs=1m count=8800; sleep 120; rm /private/var/tmp/fill
+```
+
