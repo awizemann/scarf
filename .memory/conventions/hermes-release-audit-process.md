@@ -4,7 +4,7 @@ type: note
 permalink: scarf/conventions/hermes-release-audit-process
 tags: [hermes, process, audit, versioning, capability-gating]
 created: 2026-06-21
-updated: 2026-09-08
+updated: 2026-10-24
 reviewed: 2026-09-08
 reviewed_by: claude-opus-5
 ---
@@ -30,3 +30,9 @@ The repeatable process for auditing a new Hermes release against Scarf. Canonica
 - relates_to [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes Version Management]]
 - relates_to [[Hermes v0.21.1 Audit Findings]]
+
+
+## v0.22 cycle learnings (2026-10-24)
+- [gotcha] **Hermes changed its tag scheme after v2026.9.24.** Releases are now tagged `vX.Y.Z` (v0.21.6 … v0.22.5); `pyproject.toml` says `0.0.0` and the version comes from git tags or an install stamp (`hermes_cli/version_info.py@v0.22.5`). The date in `hermes --version` is FROZEN at `2026.9.24` (`hermes_cli/__init__.py:5`): v0.22.5 prints `Hermes Agent v0.22.5 (2026.9.24) · stable · local <sha>`. Scarf gates on semver only, so detection survives — never gate on the date. Fetch with `git fetch --tags origin` and read the semver from the tag name, not pyproject. #verify #versioning
+- [gotcha] **A patch can be a revert.** v0.22.1 shipped gateway-backed ACP, runtime tables and `gateway ensure`; v0.22.2 removed them; v0.22.3 restored them. A floor found by "first tag containing X" lands on 0.22.1 and is wrong — open the file at EVERY intermediate tag. #gating
+- [method] **Building a tag binary for safe probes**: `git worktree add --detach ~/.hermes/hermes-agent-<ver>-audit <tag>`, then `uv venv --python 3.14 .venv && VIRTUAL_ENV=$PWD/.venv uv pip install -e .` inside it (v0.22.x needs Python 3.14). Leaves the PATH `hermes` shim alone. #source

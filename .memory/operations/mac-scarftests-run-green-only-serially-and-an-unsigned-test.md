@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantS
 source_paths_inferred: false
 source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
 created: 2026-09-18
-updated: 2026-09-29
+updated: 2026-10-26
 reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
@@ -56,3 +56,12 @@ Measured 2026-09-18 while making feat/voice pass the Mac suite (t-30667749), wit
 
 
 - [gotcha] `ChatSessionsR16bMacTests/secondSendDuringAutostartWaitsForTheReplayToDrain()` flakes on main as well as on feature branches, even run alone and serially (2026-09-29, #142 P6: 5 isolated `test-without-building -only-testing` runs each; main@2b1f8da3 4/5 pass, feat/142-environment-hint 3/5; every failure at ChatSessionsR16bMacTests.swift:254 `promptTexts == ["first", "second"]`). Not a branch regression. `SessionDeletedSignalTests/sessionsTabDeleteOfAttachedSessionMidTurnTearsDownChatClient()` passed 5/5 on both trees #testing #flake
+
+
+- [gotcha] **`pgrep -f "[x]codebuild.* test"` still deadlocks agent wait loops (2026-10-25).** The bracket trick only stops the pattern matching itself; an agent's `zsh -c '… while pgrep …; do sleep; done; xcodebuild test …'` command line contains the LATER `xcodebuild test` it plans to run, so every waiter matches every other waiter (and itself) forever. It also matches another project's `ssh rig@<vm> … xcodebuild test-without-building`, which runs on a VM and doesn't touch this Mac's testmanagerd. Wait with `while pgrep -x xcodebuild >/dev/null; do sleep 20; done` — exact process name, real local xcodebuild only. #testing
+
+
+- [fact] (2026-10-25) The `HermesP38SourceSweepTests.noTestSleepsAFixedHalfSecondOrMore` failure noted above is gone: PushToTalkControllerTests.swift:119 now parks on an AsyncStream. The v0.22.5 parity integration run had 1996 scarfTests in 291 suites green serially (`-only-testing:scarfTests -parallel-testing-enabled NO`). #testing
+
+
+- [gotcha] **WindowServer crashes on this shared Mac (2026-10-25/26) were another project's Playwright, not Scarf.** WindowServer aborted in `runCapturePass` with ~54k IOSurfaces (304 GB reserved) after ~10 h; capture size 1280×720 = Playwright's default viewport. BitDibs ran `playwright test --workers=3` with WebKit and `video: retain-on-failure` (records every test), and Playwright-WebKit log volume jumped to 600–740k lines/hour right before each crash. Scarf's Tart VM runs are headless (`tart run --no-graphics`, tests inside the guest) and don't capture the host screen. When the screen dies, check `ioreg -r -c IOSurfaceRootUserClient -k IOUserClientCreator -d 1` for capture-heavy clients and `log show --predicate 'process == "Playwright"'` per hour #shared-mac
