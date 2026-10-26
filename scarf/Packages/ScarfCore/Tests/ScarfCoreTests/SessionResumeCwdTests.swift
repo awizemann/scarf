@@ -74,7 +74,7 @@ import Foundation
         #expect(await calls.cwds == [Self.cliFolder, Self.home])
     }
 
-    @Test func secondMissingFolderPropagatesAndIsNotRestorable() async {
+    @Test func secondMissingFolderSurfacesAsAnError() async {
         let calls = Calls()
         do {
             _ = try await SessionResume.loadInSessionFolder(
@@ -83,7 +83,8 @@ import Foundation
                 load: { cwd -> String in await calls.load(cwd); throw Self.missingFolder })
             Issue.record("expected a throw")
         } catch {
-            #expect(SessionResume.isNotRestorable(error, gatewayBacked: true))
+            #expect(SessionResume.isMissingFolderRefusal(error))
+            #expect(!SessionResume.isNotRestorable(error, gatewayBacked: true))
         }
         #expect(await calls.cwds == [Self.cliFolder, Self.home])
     }
@@ -137,25 +138,54 @@ import Foundation
         #expect(await calls.cwds == [Self.home])
     }
 
-    @Test func invalidParamsIsNotRestorableOnlyOnGatewayHosts() {
-        #expect(SessionResume.isNotRestorable(Self.missingFolder, gatewayBacked: true))
+    @Test func invalidParamsIsNeverNotRestorable() {
+        // Hermes raises it for other causes too (no model), so it must
+        // never become a silent new chat — on any host.
+        #expect(!SessionResume.isNotRestorable(Self.missingFolder, gatewayBacked: true))
         #expect(!SessionResume.isNotRestorable(Self.missingFolder))
         #expect(!SessionResume.isNotRestorable(
             ACPClientError.rpcError(code: -32602, message: "Invalid params", details: "invalid_params"),
             gatewayBacked: true))
     }
 
-    @Test func resolveContinuesAsNewWhenBothFoldersAreRefused() async throws {
-        let outcome = try await SessionResume.resolve(
-            sessionId: "s1", source: "cli", gatewayBacked: true,
-            load: { id in
-                try await SessionResume.loadInSessionFolder(
-                    defaultCwd: Self.home, projectPath: nil, gatewayBacked: true,
-                    sessionCwd: { Self.cliFolder },
-                    load: { _ -> (String, String?) in throw Self.missingFolder })
-            },
-            newSession: { "new" })
-        #expect(outcome == .continuedAsNew(sessionId: "new", reason: .notRestorable))
+    @Test func resolveSurfacesInvalidParamsAfterTheRetry() async throws {
+        let calls = Calls()
+        await #expect(throws: ACPClientError.self) {
+            _ = try await SessionResume.resolve(
+                sessionId: "s1", source: "cli", gatewayBacked: true,
+                load: { id in
+                    try await SessionResume.loadInSessionFolder(
+                        defaultCwd: Self.home, projectPath: nil, gatewayBacked: true,
+                        sessionCwd: { Self.cliFolder },
+                        load: { cwd -> (String, String?) in await calls.load(cwd); throw Self.missingFolder })
+                },
+                newSession: { Issue.record("must not create"); return "new" })
+        }
+        #expect(await calls.cwds == [Self.cliFolder, Self.home])
+
+        // A project chat's refusal surfaces too, without a retry.
+        let project = Calls()
+        await #expect(throws: ACPClientError.self) {
+            _ = try await SessionResume.resolve(
+                sessionId: "s1", source: "cli", gatewayBacked: true,
+                load: { id in
+                    try await SessionResume.loadInSessionFolder(
+                        defaultCwd: Self.project, projectPath: Self.project, gatewayBacked: true,
+                        sessionCwd: { Self.cliFolder },
+                        load: { cwd -> (String, String?) in await project.load(cwd); throw Self.missingFolder })
+                },
+                newSession: { Issue.record("must not create"); return "new" })
+        }
+        #expect(await project.cwds == [Self.project])
+    }
+
+    @Test func invalidParamsGetsAReadableHint() {
+        let hint = ACPErrorHint.classify(errorMessage: Self.missingFolder.localizedDescription, stderrTail: "")
+        #expect(hint?.hint.contains("working folder") == true)
+        // Another reason code keeps its own (or no) hint.
+        let other = ACPClientError.rpcError(code: -32603, message: "Internal error", details: "permission_denied")
+        #expect(ACPErrorHint.classify(errorMessage: other.localizedDescription, stderrTail: "")?
+            .hint.contains("working folder") != true)
     }
 
     // MARK: - sessions.cwd read

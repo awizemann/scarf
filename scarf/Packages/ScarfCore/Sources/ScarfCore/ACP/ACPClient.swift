@@ -1301,6 +1301,15 @@ public enum ACPErrorHint {
         if errorMessage.contains("acp_policy_unavailable") {
             return Classification(hint: "The Hermes gateway that is running is older than this Hermes and can't serve chats. Restart it (`hermes gateway restart`), then try again.")
         }
+        // `invalid_params`: the gateway refused to reopen a session as
+        // asked — its working folder is missing on the host (the load cwd,
+        // gateway/session_mutation_policy.py:46-50 @ v0.22.5) or it can't
+        // build the session's policy (e.g. no model for the profile or the
+        // session, gateway/session_local_migration.py:294-296). Only the bare
+        // reason code; the specifics are in the gateway's log.
+        if errorMessage.contains("invalid_params (ACP error -32603)") {
+            return Classification(hint: "Hermes refused to reopen this session as it was saved — for example its working folder no longer exists, or no model is set for it. The Hermes gateway log names the reason.")
+        }
         if errorMessage.contains("profile_mismatch") {
             return Classification(hint: "The Hermes gateway that answered belongs to a different profile than this chat. Check which gateway is running (`hermes gateway status`) and restart this profile's gateway.")
         }

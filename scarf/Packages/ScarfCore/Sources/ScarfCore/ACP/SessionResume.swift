@@ -107,12 +107,10 @@ public enum SessionResume {
     public static func isNotRestorable(_ error: Error, gatewayBacked: Bool = false) -> Bool {
         if case ACPClientError.sessionNotRestorable = error { return true }
         if gatewayBacked, ACPClientError.isGatewayRefusal(error, reason: "not_found") { return true }
-        // The gateway can't reopen the session as asked — a folder missing
-        // on the host even after ``loadInSessionFolder``'s retry, or a row
-        // it can't build a policy for (live v0.22.5: "the profile names no
-        // model and the saved session has none"): continue as new rather
-        // than fail the chat. Exact `invalid_params` only.
-        if gatewayBacked, isMissingFolderRefusal(error) { return true }
+        // NOT `invalid_params`: Hermes raises it for more than a missing
+        // folder (e.g. "the profile names no model and the saved session
+        // has none", gateway/session_local_migration.py:294-296 @ v0.22.5), and a
+        // silent new chat would drop the conversation. It surfaces.
         return false
     }
 
@@ -143,15 +141,19 @@ public enum SessionResume {
     /// `prepare_workspace` raises `RuntimeStoreError('invalid_params')`
     /// (gateway/session_mutation_policy.py:46-50 @ v0.22.5), which reaches
     /// the wire as `-32603` with `data.details` exactly `invalid_params`.
+    /// The same code has other causes, so it only drives the one retry in
+    /// ``loadInSessionFolder`` — never a new-session fallback.
     public static func isMissingFolderRefusal(_ error: Error) -> Bool {
         ACPClientError.isGatewayRefusal(error, reason: "invalid_params")
     }
 
     /// Run a `session/load` in the session's own folder (``loadCwd``),
     /// retrying ONCE with `defaultCwd` when the gateway refuses that folder
-    /// (``isMissingFolderRefusal``). `sessionCwd` (a state.db read) is
-    /// consulted only for a gateway-backed, non-project load; otherwise this
-    /// is exactly `load(defaultCwd)`.
+    /// (``isMissingFolderRefusal``). A refusal of the retry (or of a
+    /// project / default-cwd load) is rethrown and surfaces as an error.
+    /// `sessionCwd` (a state.db read) is consulted only for a
+    /// gateway-backed, non-project load; otherwise this is exactly
+    /// `load(defaultCwd)`.
     public static func loadInSessionFolder<T>(
         defaultCwd: String,
         projectPath: String?,
@@ -167,7 +169,7 @@ public enum SessionResume {
             return try await load(cwd)
         } catch where cwd != defaultCwd && isMissingFolderRefusal(error) {
             #if canImport(os)
-            logger.info("session/load refused the session's own folder — retrying in the default cwd")
+            logger.info("session/load refused the session's own folder \(cwd, privacy: .private) — \(error.localizedDescription, privacy: .public); retrying in the default cwd")
             #endif
             return try await load(defaultCwd)
         }
