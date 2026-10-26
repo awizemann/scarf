@@ -174,7 +174,8 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   **"Test crashed with signal kill"**. The script reruns each such test **once,
   alone** (`-only-testing:scarfUITests/Class/test`), and the rerun decides it:
   `summary.md` lists both attempts (`<plan>-rerunN.log` / `.xcresult`), and a plan
-  whose only failures were kills that passed alone reads `PASS (on rerun: N
+  whose only failures were kills that passed alone — and whose first run
+  executed its tests to XCTest's closing totals — reads `PASS (on rerun: N
   killed)`. No other failure is ever rerun. The summary also records the boot
   volume's free space before and after each plan, how often the purge fired, and
   how many times it terminated the runner (`<plan>.guest-purge.log`).
@@ -194,15 +195,34 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   of the tag shipped with its `.git` (Hermes derives its version from git tags).
   The script checks `hermes --version` reports the tag's version, and puts a
   `~/.local/bin/hermes` shim in the guest for the run.
-- **Credentials**: a sanitized copy of `~/.hermes`'s `config.yaml`, `.env` and
-  `auth.json` goes in — model-provider keys only. Every messaging-platform /
-  gateway variable (names taken from the tag's own source) and every platform
-  section is dropped first. The fixture is then seeded in the guest with
-  `make-ui-fixture.sh`.
+- **Credentials — an allow-list, the active model provider's key only.** The
+  guest's `config.yaml` is written from scratch with just `model.provider`,
+  `default`/`model`, `base_url` and `api_mode` (no `api_key`, MCP servers,
+  auxiliary/delegation/TTS settings, custom providers or platforms). Its `.env`
+  holds only the key variable(s) the tag's provider registry
+  (`hermes_cli/auth.py`, plus OpenRouter's own rung) names for the **active**
+  provider — from `~/.hermes/.env`, or from an API-key entry in `auth.json`'s
+  credential pool — and any names you list in `SCARF_VM_EXTRA_ENV`.
+  `GITHUB_TOKEN`, `GH_TOKEN`, `HF_TOKEN` and `AWS_*` never go in. `auth.json`
+  never goes in: if the active provider signs in with OAuth the run stops,
+  because a guest holding the refresh token can rotate it and sign this Mac out;
+  `--allow-oauth-provider` copies that one provider's entry anyway, with a
+  warning. `sanitize.txt` in the results lists the NAMES that went in. The
+  fixture is then seeded in the guest with `make-ui-fixture.sh`.
 - **Cleanup on every exit**: the fixture's gateway is stopped, the run's
-  processes, guest folders, shim and test homes are removed, the lock is
-  released, the host scratch copy is deleted, and the guest is searched for the
-  copied key values to prove none is left.
+  processes (an interrupted plan's ssh and bound watcher included), guest
+  folders and shim are removed, the lock is released, the host scratch copy is
+  deleted, and the guest is searched for every copied key value to prove none
+  is left. Every run — at its start, in its normal cleanup and in the fallback
+  cleanup — also sweeps the tests' per-test homes (`scarf-uitest-home-*`, copies
+  of the fixture home, keys included) from the runner's temp dirs, and removes a
+  `~/.hermes` that a run created: when the guest has none, the run creates it
+  with a `.scarf-ui-gate-vm-created` marker inside, and only a marked one is
+  ever deleted.
+- **Lock**: ScarfRack's `$RIG_HOME/locks/<clone>.lock`, made with `mkdir` and
+  given its pid at once. A dead holder's lock, or a pid-less one older than
+  60 s, is taken over by renaming it to a unique name (atomic, so only one
+  contender wins) before it is deleted.
 
 Results land in `build/ui-gate-vm/results/<stamp>/`: `summary.md` (verdicts as
 `ui-gate.sh --classify` gives them: PASS / FAIL / RUNNER-FAILED, plus reruns of

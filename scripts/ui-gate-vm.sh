@@ -15,7 +15,7 @@
 #   scripts/ui-gate-vm.sh --hermes-tag <tag> [--plans Smoke,Full,Live]
 #                         [--reuse scarf-ui] [--no-build] [--keep-results]
 #                         [--with-unit-tests] [--skip-display-check]
-#                         [--only Class[/test]]…
+#                         [--only Class[/test]]… [--allow-oauth-provider]
 #
 #   --hermes-tag TAG   Hermes tag to install in the guest (v0.22.5, v2026.9.24, …).
 #                      Must exist in the Hermes checkout ($SCARF_VM_HERMES_SRC,
@@ -37,6 +37,8 @@
 #   --skip-display-check  Run even when the guest's screen is smaller than the
 #                      window the UI tests pin (every UI test then fails its
 #                      window-size check; useful only to exercise the script).
+#   --allow-oauth-provider  When the active provider signs in with OAuth, copy
+#                      its one auth.json entry in (otherwise the run stops).
 #
 # Environment:
 #   SCARF_VM_RIG_LIB      ScarfRack's tools/fresh-mac-rig/lib.sh (gssh, wait_ssh,
@@ -48,20 +50,27 @@
 #                         (default ~/.hermes).
 #   SCARF_VM_UV           uv binary copied into the guest (default: `command -v uv`).
 #   SCARF_VM_SSH_WAIT     seconds to wait for the clone to answer over SSH (default 600).
+#   SCARF_VM_EXTRA_ENV    extra .env variable names to copy in (space/comma list),
+#                         on top of the active provider's key.
 #
-# Credentials: a SANITIZED copy of the source home's config.yaml / .env /
-# auth.json is built in a private host scratch dir: every messaging-platform /
-# gateway variable (names derived from the tag's own Hermes source) is dropped
-# from .env, and so is every other credential-looking variable the tag's model
-# provider registry (hermes_cli/auth.py) doesn't name; top-level platform sections and `platforms` blocks are
-# removed from config.yaml, and gateway.multiplex_profiles is set false. Only
-# model-provider credentials enter the guest, and they are deleted on every
-# exit, pass or fail, then searched for in the guest to prove it. Only NAMES are
-# ever printed.
+# Credentials: an ALLOW-LIST, built in a private host scratch dir. The guest's
+# config.yaml is written from scratch with only model.provider / default /
+# model / base_url / api_mode (no api_key, MCP servers, auxiliary, delegation,
+# TTS, custom providers or platforms) and gateway.multiplex_profiles false. Its
+# .env holds only the key variable(s) the tag's provider registry
+# (hermes_cli/auth.py _REGISTRY_ROWS; OpenRouter's own rung) names for the
+# ACTIVE provider — taken from .env, or from an API-key entry in auth.json's
+# credential pool — plus any names in SCARF_VM_EXTRA_ENV. GITHUB_TOKEN,
+# GH_TOKEN, HF_TOKEN and AWS_* never go in. auth.json never goes in: an OAuth
+# provider stops the run unless --allow-oauth-provider, which copies that one
+# provider's entry (a guest refresh can rotate the token and sign this Mac out).
+# Every copied value is deleted on every exit, pass or fail, then searched for
+# in the guest to prove it. Only NAMES are ever printed.
 #
 # Sharing the clone: the same lock as ScarfRack's tools/ui-test/run.sh
-# ($RIG_HOME/locks/<clone>.lock, made with mkdir; a dead holder's lock is taken
-# over; give up after 20 minutes). Only this run's own guest folders are removed.
+# ($RIG_HOME/locks/<clone>.lock, made with mkdir, pid written at once; a dead
+# holder's lock, or a pid-less one older than 60 s, is taken over by an atomic
+# rename; give up after 20 minutes). Only this run's own guest folders are removed.
 #
 # Results: build/ui-gate-vm/results/<stamp>/ — summary.md, one .xcresult and
 # one .log per plan, plus the setup and fixture logs. Exits non-zero when any
@@ -103,6 +112,7 @@ BUILD=1
 KEEP_RESULTS=0
 UI_ONLY=1
 DISPLAY_CHECK=1
+ALLOW_OAUTH=0
 ONLY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -114,10 +124,11 @@ while [[ $# -gt 0 ]]; do
     --ui-only) UI_ONLY=1; shift ;;
     --with-unit-tests) UI_ONLY=0; shift ;;
     --skip-display-check) DISPLAY_CHECK=0; shift ;;
+    --allow-oauth-provider) ALLOW_OAUTH=1; shift ;;
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,73p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,81p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -138,7 +149,7 @@ command -v xcodebuild >/dev/null || die "xcodebuild not found"
 [[ -x "$UV_BIN" ]] || die "uv not found (set SCARF_VM_UV)"
 git -C "$HERMES_SRC" rev-parse -q --verify "refs/tags/$HERMES_TAG" >/dev/null \
   || die "tag $HERMES_TAG not found in $HERMES_SRC (set SCARF_VM_HERMES_SRC)"
-for f in config.yaml .env auth.json; do
+for f in config.yaml .env; do
   [[ -f "$SOURCE_HOME/$f" ]] || die "$SOURCE_HOME/$f is missing (set SCARF_VM_SOURCE_HOME)"
 done
 need_tart
@@ -208,7 +219,7 @@ GW="work/scarf-$STAMP"          # the guest run dir, relative to the guest's $HO
 GUEST_RESULTS="results/scarf-$STAMP"
 
 # ---------- cleanup on every exit ----------
-LOCK=""; GUEST_UP=0; GUEST_HOME=""; GUEST_HAD_HERMES=1; STARTED_AT="$(date +%s)"
+LOCK=""; GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
 gssh_in() {   # gssh with this process's stdin (lib.sh's gssh reads /dev/null)
   SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=none \
     ssh "${SSH_OPTS[@]}" "$GUEST_USER@$VM_IP" "$@"
@@ -216,15 +227,29 @@ gssh_in() {   # gssh with this process's stdin (lib.sh's gssh reads /dev/null)
 # A guest command run by bash, not the login shell: the guest's zsh aborts a
 # whole command line on a glob that matches nothing.
 gbash() { gssh_in "bash -s" <<<"$1"; }
+# Guest bash that removes what any Scarf run leaves holding credential copies:
+# the tests' per-test homes (copies of the fixture home, keys included) in the
+# runner's temp dirs, and a ~/.hermes a run created (marked inside, see step 3).
+# guest.sh's cleanup runs the same lines.
+HERMES_MARK=".scarf-ui-gate-vm-created"
+SWEEP='for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do [ -d "$d" ] && find "$d" -maxdepth 1 -name "scarf-uitest-home-*" -exec rm -rf {} + 2>/dev/null; done; [ -f "$HOME/.hermes/'"$HERMES_MARK"'" ] && rm -rf "$HOME/.hermes"; true'
 cleanup() {
   local status=$?
   trap '' INT TERM
+  # An interrupted plan: stop its bound watcher and the ssh running the tests
+  # (and their children) before the guest is cleaned under them.
+  local p
+  for p in $WATCH_PID $TESTS_PID; do
+    pkill -P "$p" 2>/dev/null || true; kill "$p" 2>/dev/null || true
+  done
   if [[ $GUEST_UP -eq 1 ]]; then
     log "cleaning $REUSE"
     # The guest helper stops the fixture's gateway and every process of this run,
     # removes the hermes shim, the run dir, the result bundles and test homes.
-    gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' cleanup $GUEST_HAD_HERMES" >>"$RESULT/cleanup.log" 2>&1 \
-      || gbash "d=~/$GW; pkill -f \"\$d/\" ; r=\$(cd \$d 2>/dev/null && pwd -P) && pkill -f \"\$r/\" ; rm -rf ~/$GW ~/$GUEST_RESULTS-* ; grep -q 'scarf-ui-gate-vm $STAMP' ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; true" >>"$RESULT/cleanup.log" 2>&1 || true
+    gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' cleanup" >>"$RESULT/cleanup.log" 2>&1 \
+      || gbash "d=~/$GW; pkill -f \"\$d/\" ; r=\$(cd \$d 2>/dev/null && pwd -P) && pkill -f \"\$r/\" ; rm -rf ~/$GW ~/$GUEST_RESULTS-* ; grep -q 'scarf-ui-gate-vm $STAMP' ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; $SWEEP" >>"$RESULT/cleanup.log" 2>&1 || true
+    # Belt and braces: the sweep again, whichever path ran above.
+    gbash "$SWEEP" >>"$RESULT/cleanup.log" 2>&1 || true
     verify_guest_clean || status=1
   fi
   [[ -z "$LOCK" ]] || rm -rf "$LOCK"
@@ -238,7 +263,7 @@ cleanup() {
 # only matching FILE NAMES come back).
 verify_guest_clean() {
   local left mins found
-  left="$(gbash "ls -d ~/$GW ~/$GUEST_RESULTS-* 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; true")"
+  left="$(gbash "ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
   mins=$(( ( $(date +%s) - STARTED_AT ) / 60 + 5 ))
   found=""
   if [[ -s "$SCRATCH/secret-values" ]]; then
@@ -294,93 +319,157 @@ mkdir -p "$STAGE/hermes"; mv "$SCRATCH/hermes/.git" "$STAGE/hermes/.git"
 cp "$UV_BIN" "$STAGE/bin/uv"
 cp "$REPO_ROOT/scripts/ui-fixture/make-ui-fixture.sh" "$STAGE/make-ui-fixture.sh"
 
-log "sanitizing a copy of $SOURCE_HOME's credentials"
+log "building the guest's credentials from $SOURCE_HOME: the active model provider's key only"
 cat >"$SCRATCH/sanitize.py" <<'PY'
-# sanitize.py <hermes-src> <source-home> <dest> <secret-values-out>
-# Prints NAMES only. Never prints a value.
-import json, pathlib, re, shutil, sys, yaml
+# sanitize.py <hermes-src> <source-home> <dest> <secret-values-out> <allow-oauth 0|1> <extra-env-names>
+# An ALLOW-LIST: the guest gets a config.yaml written from scratch with only the
+# model selection, a .env with only the active provider's key variable(s) (as
+# the tag's provider registry names them) plus SCARF_VM_EXTRA_ENV, and no
+# auth.json unless --allow-oauth-provider. Prints NAMES only, never a value.
+import ast, json, pathlib, re, sys, yaml
 src, home, dst, values_out = map(pathlib.Path, sys.argv[1:5])
-dst.mkdir(parents=True, exist_ok=True)
-# Every env var name the tag's gateway / platform code reads.
-code = [src / "gateway/config_env.py", src / "gateway/platform_env.py"]
-for root in (src / "plugins/platforms", src / "gateway/platforms"):
-    if root.is_dir():
-        code += sorted(p for p in root.rglob("*") if p.suffix in (".py", ".yaml", ".yml"))
-names = set()
-pat = re.compile(r"""["']([A-Z][A-Z0-9]*_[A-Z0-9_]+)["']""")
-for f in code:
-    try:
-        names |= set(pat.findall(f.read_text(errors="ignore")))
-    except OSError:
-        pass
-plats = set()
-for root in (src / "plugins/platforms", src / "gateway/platforms"):
-    if root.is_dir():
-        plats |= {p.stem for p in root.iterdir() if (p.is_dir() or p.suffix == ".py") and not p.stem.startswith("_")}
-plats |= {"slack", "discord", "telegram", "mattermost", "matrix", "whatsapp", "signal", "email", "sms",
-          "homeassistant", "home_assistant", "bluebubbles", "imessage", "teams", "feishu", "dingtalk",
-          "wecom", "weixin", "qqbot", "line", "irc", "google_chat", "webhook", "webhooks", "api_server"}
-prefixes = {p.upper() for p in plats} | {"GATEWAY", "API_SERVER", "WEBHOOK", "MSGRAPH", "HASS", "TWILIO",
-                                         "IMAP", "SMTP", "QQ", "WHATSAPP", "HOMEASSISTANT"}
-# Model-provider credential names: the ones the tag's provider registry reads.
-provider_names = set()
-try:
-    provider_names = set(pat.findall((src / "hermes_cli/auth.py").read_text(errors="ignore")))
-except OSError:
-    pass
-secretish = re.compile(r"KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIAL|AUTH|COOKIE|SESSION")
-# config.yaml: top-level platform sections and every `platforms` block go.
+allow_oauth = sys.argv[5] == "1"
+extra = [n for n in re.split(r"[\s,]+", sys.argv[6]) if n]
+def die(msg):
+    print("sanitize: " + msg, file=sys.stderr); sys.exit(1)
+# Never copied, whatever the provider or the opt-in list says: broad tokens
+# (GitHub, Hugging Face) and cloud credentials.
+FORBIDDEN = re.compile(r"^(GITHUB_TOKEN|GH_TOKEN|HF_TOKEN|AWS_.*)$")
+
 cfg = yaml.safe_load((home / "config.yaml").read_text()) or {}
-removed = [k for k in list(cfg) if k in plats or k == "platforms"]
-for k in removed:
-    del cfg[k]
-gw = cfg.get("gateway")
-if not isinstance(gw, dict):
-    gw = cfg["gateway"] = {}
-if "platforms" in gw:
-    del gw["platforms"]; removed.append("gateway.platforms")
-gw["multiplex_profiles"] = False
-(dst / "config.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
-# .env: platform / gateway variables go; of the credential-looking rest, only
-# model-provider keys stay (tool keys, passwords and the like never go in).
-keep_lines, dropped, kept, values, not_model = [], [], [], [], []
+model = cfg.get("model")
+if isinstance(model, str):
+    model = {"default": model}
+if not isinstance(model, dict):
+    die("config.yaml has no model section")
+provider = str(model.get("provider") or "").strip().lower()
+if not provider:
+    die("config.yaml sets no model.provider: the guest can't be given just one provider's key")
+
+# The tag's provider registry, read from source (never imported): each
+# _REGISTRY_ROWS entry is a tuple (id, name, base_url, env_vars[, base_url_env[, auth_type]])
+# or a ProviderConfig(id, name, auth_type, …, api_key_env_vars=…) call.
+tree = ast.parse((src / "hermes_cli/auth.py").read_text())
+rows = None
+for node in ast.walk(tree):
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []
+    if any(isinstance(t, ast.Name) and t.id == "_REGISTRY_ROWS" for t in targets) and isinstance(node.value, ast.Tuple):
+        rows = node.value.elts
+if rows is None:
+    die("could not find _REGISTRY_ROWS in the tag's hermes_cli/auth.py")
+def lit(n):
+    try:
+        return ast.literal_eval(n)
+    except Exception:
+        return None
+registry = {}
+for r in rows:
+    if isinstance(r, ast.Tuple):
+        v = [lit(e) for e in r.elts]
+        registry[v[0]] = {"auth": v[5] if len(v) > 5 else "api_key", "env": tuple(v[3] or ())}
+    elif isinstance(r, ast.Call):
+        args = [lit(a) for a in r.args]; kw = {k.arg: lit(k.value) for k in r.keywords}
+        registry[args[0]] = {"auth": kw.get("auth_type", args[2] if len(args) > 2 else None),
+                             "env": tuple(kw.get("api_key_env_vars") or ())}
+# OpenRouter has no registry row on purpose (its own rung in resolve_provider):
+# its key variable is the one auth.py's _openrouter_auto_detected reads.
+auth_src = (src / "hermes_cli/auth.py").read_text()
+if "openrouter" not in registry and 'scoped_key_env("OPENROUTER_API_KEY")' in auth_src:
+    registry["openrouter"] = {"auth": "api_key", "env": ("OPENROUTER_API_KEY",)}
+
+entry = registry.get(provider)
+oauth = False
+if entry is None:
+    if not extra:
+        die(f"model.provider {provider!r} is not in {src.name}'s provider registry; name its key variable(s) in SCARF_VM_EXTRA_ENV")
+    wanted = []
+elif entry["auth"] == "api_key":
+    wanted = [n for n in entry["env"] if n]
+elif str(entry["auth"]).startswith("oauth"):
+    if not allow_oauth:
+        die(f"model.provider {provider!r} signs in with OAuth ({entry['auth']}): its credentials live in auth.json, "
+            "and a guest holding the refresh token can rotate it and sign this Mac out. Switch the source home "
+            "(SCARF_VM_SOURCE_HOME) to an API-key provider, or pass --allow-oauth-provider to copy that one entry anyway")
+    oauth = True; wanted = []
+else:
+    die(f"model.provider {provider!r} authenticates via {entry['auth']}, which the VM run doesn't support")
+
+# config.yaml from scratch: only what picks the model. No api_key, no
+# mcp_servers / auxiliary / delegation / tts / custom_providers / platforms.
+new_model = {k: model[k] for k in ("provider", "default", "model", "base_url", "api_mode") if model.get(k)}
+dst.mkdir(parents=True, exist_ok=True)
+(dst / "config.yaml").write_text(yaml.safe_dump({"model": new_model, "gateway": {"multiplex_profiles": False}}, sort_keys=False))
+
+env = {}
 for line in (home / ".env").read_text().splitlines():
     m = re.match(r"\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)", line)
     if m:
-        name = m.group(1)
-        if name in names or any(name.startswith(p + "_") for p in prefixes):
-            dropped.append(name); continue
-        if secretish.search(name) and name not in provider_names:
-            not_model.append(name); continue
-        kept.append(name)
-        v = m.group(2).strip().strip("'\"")
-        if len(v) >= 12:
-            values.append(v)
-    keep_lines.append(line)
-(dst / ".env").write_text("\n".join(keep_lines) + "\n")
-shutil.copy2(home / "auth.json", dst / "auth.json")
-def leaves(o):
-    if isinstance(o, dict):
-        for v in o.values(): yield from leaves(v)
-    elif isinstance(o, list):
-        for v in o: yield from leaves(v)
-    elif isinstance(o, str):
-        yield o
-try:
-    values += [s for s in leaves(json.loads((home / "auth.json").read_text())) if len(s) >= 24 and " " not in s]
-except ValueError:
-    pass
-for f in ("config.yaml", ".env", "auth.json"):
-    (dst / f).chmod(0o600)
-values_out.write_text("".join(v + "\n" for v in sorted(set(values))))
+        env[m.group(1)] = (line, m.group(2).strip().strip("'\""))
+copied, refused, missing, values = [], [], [], []
+for name in wanted + [n for n in extra if n not in wanted]:
+    if FORBIDDEN.match(name):
+        refused.append(name); continue
+    if name not in env or not env[name][1]:
+        missing.append(name); continue
+    copied.append(name); values.append(env[name][1])
+# A key added with `hermes auth add <provider>` sits in auth.json's credential
+# pool, not .env: an API-KEY pool entry (never an OAuth one) is written to the
+# provider's first key variable instead, so auth.json itself stays home.
+pooled = ""
+if not oauth and wanted and not any(n in copied for n in wanted) and (home / "auth.json").is_file():
+    try:
+        pool = (json.loads((home / "auth.json").read_text()).get("credential_pool") or {}).get(provider) or []
+    except ValueError:
+        pool = []
+    keys = [e for e in pool if isinstance(e, dict) and e.get("auth_type") == "api_key" and e.get("access_token")]
+    keys.sort(key=lambda e: e.get("priority", 0) if isinstance(e.get("priority"), int) else 0)
+    name = next((n for n in wanted if not FORBIDDEN.match(n)), None)
+    if keys and name:
+        env[name] = (f"{name}={keys[0]['access_token']}", keys[0]["access_token"])
+        missing = [n for n in missing if n != name]
+        copied.append(name); values.append(keys[0]["access_token"]); pooled = name
+if not oauth and not any(n in copied for n in wanted) and entry is not None:
+    die(f"none of {provider!r}'s key variables ({', '.join(wanted) or 'none'}) is set in {home}/.env"
+        + (f" (never copied: {', '.join(refused)})" if refused else ""))
+(dst / ".env").write_text("".join(env[n][0] + "\n" for n in copied))
+
+auth_note = "not copied"
+if oauth:
+    store = json.loads((home / "auth.json").read_text())
+    one = {"version": store.get("version"), "active_provider": provider, "providers": {}, "credential_pool": {}}
+    for sect in ("providers", "credential_pool"):
+        if isinstance(store.get(sect), dict) and provider in store[sect]:
+            one[sect][provider] = store[sect][provider]
+    if not one["providers"] and not one["credential_pool"]:
+        die(f"auth.json holds no entry for {provider!r}")
+    (dst / "auth.json").write_text(json.dumps(one, indent=2))
+    def leaves(o):
+        if isinstance(o, dict):
+            for v in o.values(): yield from leaves(v)
+        elif isinstance(o, list):
+            for v in o: yield from leaves(v)
+        elif isinstance(o, str):
+            yield o
+    # Every string in the copied entry is searched for after the run; very
+    # short ones (ids like "oauth") would match everything.
+    values += [s for s in leaves(one) if len(s) >= 6]
+    auth_note = f"{provider!r} entry only (OAuth: the guest could rotate this Mac's refresh token)"
+for f in dst.iterdir():
+    f.chmod(0o600)
+# Every copied value, whatever its length, is searched for in the guest after the run.
+values_out.write_text("".join(v + "\n" for v in sorted(set(v for v in values if v))))
 values_out.chmod(0o600)
-print("config.yaml removed:", ", ".join(removed) or "nothing", "| gateway.multiplex_profiles: false")
-print(".env dropped (platform/gateway):", " ".join(dropped) or "nothing")
-print(".env dropped (credential, not a model provider):", " ".join(not_model) or "nothing")
-print(".env kept:", " ".join(kept) or "nothing")
+print(f"provider: {provider} ({entry['auth'] if entry else 'not in the registry'})")
+print("config.yaml: model." + ", model.".join(new_model) + " | gateway.multiplex_profiles: false")
+print(".env copied:", " ".join(copied) or "nothing",
+      f"({pooled} from auth.json's {provider} API-key pool entry)" if pooled else "")
+if missing: print(".env not set:", " ".join(missing))
+if refused: print(".env never copied:", " ".join(refused))
+print("auth.json:", auth_note)
 PY
 "$PY" -B "$SCRATCH/sanitize.py" "$SCRATCH/hermes" "$SOURCE_HOME" "$STAGE/source-home" "$SCRATCH/secret-values" \
-  | tee "$RESULT/sanitize.txt" >&2 || die "could not sanitize $SOURCE_HOME"
+  "$ALLOW_OAUTH" "${SCARF_VM_EXTRA_ENV:-}" | tee "$RESULT/sanitize.txt" >&2 || die "could not build the guest's credentials from $SOURCE_HOME"
+[[ $ALLOW_OAUTH -eq 0 ]] || warn "--allow-oauth-provider: the guest holds an OAuth credential; a refresh there can rotate the token and sign this Mac out"
 rm -rf "$SCRATCH/hermes"
 
 # The guest-side helper. One file, subcommands; run with bash in the guest.
@@ -454,7 +543,6 @@ plan)
     -maximum-test-execution-time-allowance "$per_test_max" "$@"
   ;;
 cleanup)
-  had_hermes="${1:-1}"
   if [ -x "$HB" ] && [ -d "$FIXTURE" ]; then
     argv=(gateway stop)
     case "$("$HB" gateway stop --help 2>&1 || true)" in *"--yes"*) argv+=(--yes) ;; esac
@@ -478,7 +566,8 @@ cleanup)
     [ -d "$d" ] && find "$d" -maxdepth 1 -name 'scarf-uitest-home-*' -exec rm -rf {} + 2>/dev/null || true
   done
   # A ~/.hermes this run's app or CLI created (the guest had none before).
-  [ "$had_hermes" = 1 ] || rm -rf "$HOME/.hermes"
+  # A ~/.hermes this or an earlier run created (ui-gate-vm.sh marks it inside).
+  [ -f "$HOME/.hermes/.scarf-ui-gate-vm-created" ] && rm -rf "$HOME/.hermes"
   rm -rf "$W" "$HOME/results/scarf-$STAMP"-*
   echo "cleaned scarf-$STAMP"
   ;;
@@ -490,15 +579,36 @@ chmod 755 "$STAGE/guest.sh"
 # ---------- 3. lock the clone (ScarfRack's protocol) ----------
 LOCKS="$RIG_HOME/locks"; mkdir -p "$LOCKS"
 make_askpass "$SCRATCH"
+# The lock dir is made with mkdir (atomic) and gets its pid at once; a holder
+# that is dead, or a pid-less lock older than 60 s (its maker died between the
+# two steps), is stale. Taking a stale lock over is a rename to a unique name —
+# only one contender's rename can succeed — and the renamed copy is deleted
+# only when it is still the lock that was judged stale.
+L="$LOCKS/$REUSE.lock"
 WAITED=0
-until mkdir "$LOCKS/$REUSE.lock" 2>/dev/null; do
-  HOLDER="$(cat "$LOCKS/$REUSE.lock/pid" 2>/dev/null || true)"
-  if [[ -n "$HOLDER" ]] && ! kill -0 "$HOLDER" 2>/dev/null; then rm -rf "$LOCKS/$REUSE.lock"; continue; fi
-  [[ $WAITED -lt 1200 ]] || die "$REUSE has been in use for 20 minutes ($(cat "$LOCKS/$REUSE.lock/who" 2>/dev/null || echo "by another run")): giving up"
-  [[ $WAITED -ne 0 ]] || log "$REUSE is in use ($(cat "$LOCKS/$REUSE.lock/who" 2>/dev/null || echo "another run")): waiting for it"
+until mkdir "$L" 2>/dev/null; do
+  HOLDER="$(cat "$L/pid" 2>/dev/null || true)"
+  STALE=0
+  if [[ -n "$HOLDER" ]]; then
+    kill -0 "$HOLDER" 2>/dev/null || STALE=1
+  elif [[ -d "$L" && $(( $(date +%s) - $(stat -f %m "$L" 2>/dev/null || date +%s) )) -gt 60 ]]; then
+    STALE=1
+  fi
+  if [[ $STALE -eq 1 ]]; then
+    GRAVE="$LOCKS/$REUSE.lock.stale.$$.$RANDOM"
+    if mv "$L" "$GRAVE" 2>/dev/null; then
+      if [[ "$(cat "$GRAVE/pid" 2>/dev/null || true)" == "$HOLDER" ]]; then rm -rf "$GRAVE"
+      # A live lock taken meanwhile: put it back (never delete a live lock).
+      elif [[ ! -e "$L" ]]; then mv "$GRAVE" "$L" 2>/dev/null || true; fi
+    fi
+    continue
+  fi
+  [[ $WAITED -lt 1200 ]] || die "$REUSE has been in use for 20 minutes ($(cat "$L/who" 2>/dev/null || echo "by another run")): giving up"
+  [[ $WAITED -ne 0 ]] || log "$REUSE is in use ($(cat "$L/who" 2>/dev/null || echo "another run")): waiting for it"
   sleep 10; WAITED=$((WAITED + 10))
 done
-LOCK="$LOCKS/$REUSE.lock"; echo $$ >"$LOCK/pid"; echo "Scarf ui-gate-vm from $REPO_ROOT since $(date +%H:%M)" >"$LOCK/who"
+echo $$ >"$L/pid"; LOCK="$L"
+echo "Scarf ui-gate-vm from $REPO_ROOT since $(date +%H:%M)" >"$LOCK/who"
 # A just-booted clone accepts the connection but can take minutes to answer
 # (first-login work pins its CPUs), so the wait is generous.
 SSH_WAIT="${SCARF_VM_SSH_WAIT:-600}"
@@ -510,8 +620,7 @@ GUEST_HOME="$(gssh 'echo $HOME')"
 # can hold copied credentials). Only Scarf's own folders: ~/work/* belongs to
 # every project that uses the clone. Xcode's system-log archives go too, as
 # ScarfRack's run does.
-gbash "for d in ~/work/scarf-*; do [ -d \"\$d\" ] || continue; pkill -f \"\$d/\" ; r=\$(cd \"\$d\" && pwd -P) && pkill -f \"\$r/\" ; rm -rf \"\$d\"; done; rm -rf ~/results/scarf-* /var/tmp/test-session-systemlogs-*; grep -q scarf-ui-gate-vm ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; true" >/dev/null 2>&1 || true
-GUEST_HAD_HERMES="$(gssh '[ -e ~/.hermes ] && echo 1 || echo 0')"
+gbash "for d in ~/work/scarf-*; do [ -d \"\$d\" ] || continue; pkill -f \"\$d/\" ; r=\$(cd \"\$d\" && pwd -P) && pkill -f \"\$r/\" ; rm -rf \"\$d\"; done; rm -rf ~/results/scarf-* /var/tmp/test-session-systemlogs-*; grep -q scarf-ui-gate-vm ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; $SWEEP" >/dev/null 2>&1 || true
 # The UI tests pin Scarf's window at {{40, 140}, {1800, 1300}} and fail any
 # test whose window comes up under 1500 × 1200 pt (ScarfUITestCase
 # .minimumWindowSize / requireTestWindowSize). AppKit keeps a window inside the
@@ -555,6 +664,12 @@ echo "free: ${FREE_GB} GB where ~/work lives, ${BOOT_GB} GB on the boot volume" 
 # ---------- 4. copy in ----------
 log "copying the products, uv, Hermes and the sanitized home into $REUSE:~/$GW"
 GUEST_UP=1
+# Anything the run's app or CLI writes to the real ~/.hermes must go with the
+# run, even after a crash: when the guest has none, the run creates it with a
+# marker inside, and every sweep removes a marked ~/.hermes. A ~/.hermes
+# without the marker is never touched.
+gbash "[ -e ~/.hermes ] || { mkdir -m 700 ~/.hermes && echo 'scarf-ui-gate-vm $STAMP' >~/.hermes/$HERMES_MARK; }" >/dev/null 2>&1 \
+  || die "could not prepare ~/.hermes in $REUSE"
 tar -C "$DERIVED/Build" -cf - Products -C "$STAGE" . | \
   gssh_in "mkdir -p ~/results ~/$GW && chmod 700 ~/$GW && tar -C ~/$GW -xf -" \
   || die "could not copy into $REUSE"
@@ -599,27 +714,29 @@ GIT_HASH="$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unkno
 # One xcodebuild run in the guest, bounded. Sets STATUS, WALL and TIMED_OUT.
 # $1 plan, $2 .xctestrun, $3 guest bundle path, $4 host log, $5 bound (s), $6… -only-testing args
 run_in_guest() {
-  local plan="$1" xctestrun="$2" bundle="$3" logf="$4" limit="$5" tests watch t0; shift 5
+  local plan="$1" xctestrun="$2" bundle="$3" logf="$4" limit="$5" t0; shift 5
   t0=$SECONDS; STATUS=0; TIMED_OUT=0
+  # Globals, so an interrupted run's cleanup can stop both (and their children).
   gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' plan '$plan' '$xctestrun' '$bundle' $PER_TEST $PER_TEST_MAX $*" >"$logf" 2>&1 &
-  tests=$!
-  ( sleep "$limit" && kill "$tests" ) >/dev/null 2>&1 & watch=$!
-  wait "$tests" || STATUS=$?
+  TESTS_PID=$!
+  ( sleep "$limit" && kill "$TESTS_PID" ) >/dev/null 2>&1 & WATCH_PID=$!
+  wait "$TESTS_PID" || STATUS=$?
   WALL=$((SECONDS - t0))
-  if kill -0 "$watch" 2>/dev/null; then pkill -P "$watch" 2>/dev/null || true; kill "$watch" 2>/dev/null || true
+  if kill -0 "$WATCH_PID" 2>/dev/null; then pkill -P "$WATCH_PID" 2>/dev/null || true; kill "$WATCH_PID" 2>/dev/null || true
   else
     warn "$plan passed its $((limit / 60))-minute bound and was stopped"
     # The guest's processes show the resolved path (~/work may be a symlink).
     gbash "d=~/$GW; pkill -f \"\$d/Products/\"; r=\$(cd \$d 2>/dev/null && pwd -P) && pkill -f \"\$r/Products/\"; true" >/dev/null 2>&1 || true
     STATUS=1; TIMED_OUT=1
   fi
+  TESTS_PID=""; WATCH_PID=""
 }
 # Reads a result bundle's summary. Sets COUNTS, FAILED_NAMES (markdown lines),
 # KILLED (tests whose every failure is "crashed with signal kill", as
 # Class/test) and OTHER_FAILED (how many tests failed any other way).
 # $1 host .xcresult, $2 summary.json to write
 read_results() {
-  COUNTS="no result bundle"; FAILED_NAMES=""; KILLED=(); OTHER_FAILED=0
+  COUNTS="no result bundle"; FAILED_NAMES=""; KILLED=(); OTHER_FAILED=0; NUMS=(0 0 0 0)
   [[ -d "$1" ]] || return 0
   xcrun xcresulttool get test-results summary --path "$1" >"$2" 2>/dev/null || true
   local parsed
@@ -631,6 +748,8 @@ except Exception:
     print("C\tsummary unreadable"); sys.exit()
 print("C\t%s executed / %s passed / %s failed / %s skipped" % (s.get("totalTestCount", "?"), s.get("passedTests", "?"),
       s.get("failedTests", "?"), s.get("skippedTests", "?")))
+n = lambda k: s.get(k) if isinstance(s.get(k), int) else -1
+print("N\t%d %d %d %d" % (n("totalTestCount"), n("passedTests"), n("failedTests"), n("skippedTests")))
 kinds = {}
 for f in s.get("testFailures", []):
     n = f.get("testIdentifierString") or f.get("testName", "?")
@@ -649,6 +768,8 @@ for n, k in kinds.items():
         print("O\t%s" % n)
 ' "$2")"
   COUNTS="$(printf '%s\n' "$parsed" | sed -n 's/^C	//p')"
+  # shellcheck disable=SC2207
+  NUMS=($(printf '%s\n' "$parsed" | sed -n 's/^N	//p')); [[ ${#NUMS[@]} -eq 4 ]] || NUMS=(-1 -1 -1 -1)
   FAILED_NAMES="$(printf '%s\n' "$parsed" | sed -n 's/^F	//p')"
   while IFS= read -r k; do [[ -z "$k" ]] || KILLED+=("$k"); done < <(printf '%s\n' "$parsed" | sed -n 's/^K	//p')
   OTHER_FAILED="$(printf '%s\n' "$parsed" | grep -c '^O	' || true)"
@@ -698,11 +819,11 @@ for plan in "${PLANS[@]}"; do
       log "rerunning $t alone ($plan; it crashed with signal kill; log: $RESULT/$plan-rerun$i.log)"
       run_in_guest "$plan" "$XCTESTRUN" "$RB_GUEST" "$RESULT/$plan-rerun$i.log" $((PER_TEST_MAX + 300)) "-only-testing:scarfUITests/$t"
       gscp_out "$RB_GUEST" "$RB" >/dev/null 2>&1 || true
-      SAVED=("$COUNTS" "$FAILED_NAMES" "$OTHER_FAILED"); SAVED_KILLED=("${KILLED[@]}")
+      SAVED=("$COUNTS" "$FAILED_NAMES" "$OTHER_FAILED"); SAVED_KILLED=("${KILLED[@]}"); SAVED_NUMS=("${NUMS[@]}")
       read_results "$RB" "$RESULT/$plan-rerun$i.summary.json"
       # A pass counts only when the test really ran (an identifier XCTest can't
       # match runs nothing and still exits 0).
-      if [[ $STATUS -eq 0 && "$COUNTS" =~ /\ [1-9][0-9]*\ passed\ /\ 0\ failed ]]; then
+      if [[ $STATUS -eq 0 && ${NUMS[0]} -ge 1 && ${NUMS[1]} -ge 1 && ${NUMS[2]} -eq 0 ]]; then
         RECOVERED=$((RECOVERED + 1)); outcome="PASS"
       else
         outcome="FAIL — $(printf '%s\n' "$FAILED_NAMES" | head -1 | sed 's/^[^:]*: //')"
@@ -710,11 +831,19 @@ for plan in "${PLANS[@]}"; do
       fi
       RERUN_LINES="$RERUN_LINES
   - $t(): run 1 crashed with signal kill; run 2, alone: $outcome (${WALL}s, $plan-rerun$i.log)"
-      COUNTS="${SAVED[0]}"; FAILED_NAMES="${SAVED[1]}"; OTHER_FAILED="${SAVED[2]}"; KILLED=("${SAVED_KILLED[@]}")
+      COUNTS="${SAVED[0]}"; FAILED_NAMES="${SAVED[1]}"; OTHER_FAILED="${SAVED[2]}"; KILLED=("${SAVED_KILLED[@]}"); NUMS=("${SAVED_NUMS[@]}")
     done
     # The plan passes on its reruns only when the kills were its ONLY failures,
-    # every one passed alone, and nothing else stopped the run.
-    if [[ "$VERDICT" == FAIL && $OTHER_FAILED -eq 0 && $RECOVERED -eq ${#KILLED[@]} && $PLAN_TIMED_OUT -eq 0 ]]; then
+    # every one passed alone, and the first run itself went the distance: it
+    # executed tests, its counts add up, its failures are exactly the kills, and
+    # XCTest printed its closing totals (a runner that died before running the
+    # plan never gets there), within the bound.
+    FIRST_RUN_WHOLE=0
+    if [[ ${NUMS[0]} -ge 1 && $(( NUMS[1] + NUMS[2] + NUMS[3] )) -eq ${NUMS[0]} && ${NUMS[2]} -eq ${#KILLED[@]} ]] \
+       && grep -qE "Executed [0-9]+ tests?, with ([0-9]+ tests? skipped and )?[0-9]+ failures?" "$PLAN_LOG"; then
+      FIRST_RUN_WHOLE=1
+    fi
+    if [[ "$VERDICT" == FAIL && $OTHER_FAILED -eq 0 && $RECOVERED -eq ${#KILLED[@]} && $PLAN_TIMED_OUT -eq 0 && $FIRST_RUN_WHOLE -eq 1 ]]; then
       VERDICT=PASS; RESULT_CELL="PASS (on rerun: ${#KILLED[@]} killed)"
     fi
   fi
