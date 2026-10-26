@@ -446,13 +446,40 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         )
         attachScreenshot(app, named: "kanban — created", keepAlways: false)
 
+        // The card reaching the board does NOT mean the create sheet is
+        // gone. `KanbanBoardViewModel.createTask` awaits `create`, then a
+        // `kanban dispatch` pass (the card has an assignee), then a
+        // refresh, and only then does the sheet dismiss — while the
+        // board's own 5 s poll has already drawn the card BEHIND the
+        // sheet. A click on that card lands on a sheet-modal window and
+        // is swallowed: observed on the VM as the sheet's spinner still
+        // up ~12 s after submit, the card click lost, and the inspector
+        // never opening. Wait the sheet out first.
+        let createTitleField = app.textFields.matching(identifier: "kanban.create.title").firstMatch
+        XCTAssertTrue(
+            waitUntil("create sheet dismisses", timeout: 60) { !createTitleField.exists },
+            "The create sheet is still up after \(task.id) landed. On screen: \(visibleIdentifiers(app))"
+        )
+
         // --- Move column ----------------------------------------------
         XCTContext.runActivity(named: "Move card to Blocked") { _ in
-            card(app, taskID: task.id).click()
-
+            // Click the card until the inspector offers Block. The board
+            // polls every five seconds and can rebuild the card under a
+            // click (same reason as the Block retry below); re-clicking a
+            // card whose inspector is already open is a harmless no-op.
             let block = control(app, "kanban.inspector.block")
-            XCTAssertTrue(block.waitForExistence(timeout: 20),
-                          "Inspector never opened (or offered no Block action) for \(task.id).")
+            var inspectorUp = false
+            for attempt in 1...5 where !inspectorUp {
+                if app.state != .runningForeground { app.activate() }
+                let target = card(app, taskID: task.id)
+                if target.exists { target.click() }
+                inspectorUp = block.waitForExistence(timeout: 8)
+                if !inspectorUp {
+                    print("[journey] Card click \(attempt)/5 did not open an inspector with Block; retrying.")
+                }
+            }
+            XCTAssertTrue(inspectorUp,
+                          "Inspector never opened (or offered no Block action) for \(task.id). On screen: \(visibleIdentifiers(app))")
 
             // Click Block until its sheet is actually up. The board polls
             // every five seconds and rebuilds the inspector under us; a
