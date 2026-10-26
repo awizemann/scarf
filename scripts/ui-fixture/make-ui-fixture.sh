@@ -383,6 +383,17 @@ session_count="$(printf '%s\n' "$sessions_out" | grep -cE '([0-9]{8}_[0-9]{6}_[0
 [ "$session_count" -ge 3 ] || { printf '%s\n' "$sessions_out" >&2; die "expected 3 seeded sessions, 'hermes sessions list' shows $session_count"; }
 note "sessions in state.db: $session_count"
 
+# Proof for ChatJourneyUITests that this home's credentials reach a provider.
+# The journey cannot probe it itself on gateway-backed Hermes (v0.22.x): its
+# `hermes -z` would start the gateway daemon INSIDE the XCUITest runner's App
+# Sandbox, which has network.client but not network.server, so the gateway's
+# loopback `listener.bind` (gateway/run_api.py:164, v0.22.5) fails EPERM. The
+# three one-shot chats above just proved it here, unsandboxed. Name duplicated
+# in ChatJourneyUITests.providerVerifiedMarker — change both together.
+printf 'hermes: %s\nverified: %s\n' "$("$HERMES_BIN" --version 2>/dev/null | head -1)" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$DEST_ABS/.scarf-provider-verified"
+note "provider verified: .scarf-provider-verified"
+
 # ---------------------------------------------------------------- seed: cost states
 
 # Three sessions pinning the three cost presentations Scarf must tell apart

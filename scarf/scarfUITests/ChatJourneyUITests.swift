@@ -28,11 +28,14 @@
 //  It spends real tokens on a real provider. `requireLive()` keeps it
 //  out of Smoke and Full (only `Live.xctestplan` sets
 //  `SCARF_UITEST_LIVE=1`) and out of a machine with no `hermes`
-//  binary. On top of that this file PROBES the copied credentials with
-//  a cheap one-shot `hermes -z` before touching the UI: a home whose
+//  binary. On top of that this file requires proof that the copied
+//  credentials reach a provider before touching the UI: a home whose
 //  `auth.json` has no usable provider would otherwise fail 90 s later
 //  as "no reply bubble", which reads as a product bug and is not one.
-//  A failed probe is an XCTSkip quoting the CLI's own stderr.
+//  The proof is the fixture builder's `.scarf-provider-verified` marker
+//  or, with no fixture, a cheap one-shot `hermes -z` (see
+//  `requireUsableProvider()` for why the marker comes first). No proof
+//  is an XCTSkip quoting the CLI's own stderr.
 //
 //  ## Isolation
 //
@@ -494,29 +497,58 @@ final class ChatJourneyUITests: ScarfUITestCase {
 
     // MARK: - Provider probe
 
+    /// Written by `scripts/ui-fixture/make-ui-fixture.sh` into the
+    /// fixture home once its real one-shot chats have answered — proof,
+    /// made OUTSIDE the sandbox, that these credentials reach a provider.
+    /// Literal duplicated there; change both together.
+    private static let providerVerifiedMarker = ".scarf-provider-verified"
+
     /// Skip unless the credentials copied into this test's isolated
     /// home actually reach a provider.
     ///
-    /// One cheap one-shot turn through the CLI, against the SAME home
-    /// the app is about to use, so the probe and the journey can never
-    /// disagree about which credentials are in play. Bounded at 60 s:
-    /// a provider slow enough to miss that is not one this gate can
-    /// hold a 90 s UI timeout open for either.
+    /// Fixture home (the gate's normal path): the fixture builder's
+    /// marker is the proof, and nothing is spawned here. That matters
+    /// from Hermes v0.22.x on, where `hermes -z` runs through the
+    /// gateway daemon (`gateway_client.connect_gateway` →
+    /// `ensure_gateway_runtime`): spawned from THIS process the daemon
+    /// inherits the XCUITest runner's App Sandbox, which grants
+    /// `network.client` but not `network.server`, so its loopback API
+    /// `listener.bind` (gateway/run_api.py:164, v0.22.5) dies with EPERM
+    /// and the probe would skip a perfectly good provider. The app under
+    /// test is unsandboxed, so its own `hermes acp` gateway is unaffected.
+    ///
+    /// No fixture: one cheap one-shot turn through the CLI against the
+    /// SAME home the app is about to use. That still works on pre-gateway
+    /// Hermes (v0.21.x); on gateway-backed Hermes it skips with the
+    /// reason spelled out. Bounded at 60 s: a provider slow enough to
+    /// miss that is not one this gate can hold a 90 s UI timeout open
+    /// for either.
     private func requireUsableProvider() throws {
+        if let isolatedHome,
+           FileManager.default.fileExists(
+               atPath: (isolatedHome as NSString).appendingPathComponent(Self.providerVerifiedMarker)) {
+            return
+        }
         let result = runHermes(["-z", "Reply with exactly: PING"], timeout: 60)
         guard result.code == 0 else {
+            let sandboxNote = result.stderr.contains("Gateway could not start")
+                ? " (This Hermes runs `-z` through its gateway daemon, which cannot bind its listener inside the sandboxed XCUITest runner — run with a fixture from scripts/ui-fixture/make-ui-fixture.sh, which verifies the provider outside the sandbox.)"
+                : ""
             throw XCTSkip(
-                "The credentials copied into the isolated Hermes home give no usable provider — `hermes -z` exited \(result.code). stderr: \(Self.trimmedForSkip(result.stderr))"
+                "The credentials copied into the isolated Hermes home give no usable provider — `hermes -z` exited \(result.code).\(sandboxNote) stderr: \(Self.trimmedForSkip(result.stderr))"
             )
         }
     }
 
     /// Keep a skip message readable: a provider SDK can emit a hundred
-    /// lines of traceback, and the first lines are the diagnosis.
+    /// lines of traceback. Keep the head (the error line) AND the tail
+    /// (a traceback's actual exception sits last).
     private static func trimmedForSkip(_ text: String) -> String {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "<empty>" }
-        return trimmed.count <= 600 ? trimmed : String(trimmed.prefix(600)) + "…"
+        return trimmed.count <= 900
+            ? trimmed
+            : String(trimmed.prefix(300)) + " … " + String(trimmed.suffix(600))
     }
 
     /// Run the real `hermes` CLI against THIS TEST'S isolated home.
