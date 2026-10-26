@@ -2061,6 +2061,20 @@ public actor HermesDataService {
         }
     }
 
+    /// `sessions.cwd` for `id` — the folder the session's tools run in
+    /// (hermes_state_common.py:490 @ v0.22.5). Probed by name (C4); nil
+    /// when the column is absent, the row is missing, or the value is NULL.
+    public func fetchSessionCwd(id: String) async -> String? {
+        guard await sessionsTableHasColumn("cwd") else { return nil }
+        do {
+            let rows = try await backend.query(
+                "SELECT cwd FROM sessions WHERE id = ? LIMIT 1", params: [.text(id)])
+            return rows.first?.optionalString(at: 0)
+        } catch {
+            return nil
+        }
+    }
+
     /// A session opened by id from outside the list (a search hit), as
     /// the detail view should show it.
     public struct SessionDetailLookup: Sendable {

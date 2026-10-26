@@ -1526,7 +1526,8 @@ final class ChatViewModel {
                     // new session — any other error fails this start
                     // (outer catch) instead of silently losing context.
                     let outcome = try await resolveResume(
-                        client: client, cwd: cwd, sessionId: existing, intent: intent)
+                        client: client, cwd: cwd, projectPath: projectPath,
+                        sessionId: existing, intent: intent)
                     guard startStillCurrent(intent, client: client) else { return }
                     resolvedSessionId = outcome.sessionId
                     loadedHead = outcome.loadedHead
@@ -2503,7 +2504,8 @@ final class ChatViewModel {
                     // must not wear a resume's clothes. Any load error other
                     // than not-restorable fails the start (outer catch).
                     let outcome = try await resolveResume(
-                        client: client, cwd: cwd, sessionId: sessionId, intent: intent)
+                        client: client, cwd: cwd, projectPath: projectPath,
+                        sessionId: sessionId, intent: intent)
                     guard startStillCurrent(intent, client: client) else { return }
                     resolvedSessionId = outcome.sessionId
                     let loadedHead = outcome.loadedHead
@@ -2917,7 +2919,13 @@ final class ChatViewModel {
                     // loses all conversation context. Keep in sync with the
                     // iOS ladder (Scarf iOS/Chat/ChatView.swift,
                     // attemptReconnect).
-                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                    // Gateway-backed hosts: reload a non-project chat in
+                    // its own folder, so the reconnect doesn't move it.
+                    let gatewayBacked = await capabilitiesForProjectContext().hasGatewayBackedACP
+                    let loaded = try await SessionResume.loadInSessionFolder(
+                        defaultCwd: cwd, projectPath: projectPath, gatewayBacked: gatewayBacked,
+                        sessionCwd: { await SessionResume.fetchCwd(context: ctx, sessionId: sessionId) },
+                        load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: sessionId) })
                     let resolvedSessionId = loaded.sessionId
 
                     // The awaits above can outlive this ladder: a sidebar
@@ -3732,8 +3740,12 @@ final class ChatViewModel {
     /// source Hermes can't restore, and fall back to `session/new` only on
     /// the not-restorable answer (`SessionResume.resolve`). Other load
     /// errors propagate to the caller's failure path.
+    ///
+    /// `projectPath` nil on a gateway-backed host: the load runs in the
+    /// session's own `sessions.cwd`, so Hermes doesn't move the chat to
+    /// `cwd` (`SessionResume.loadInSessionFolder`).
     private func resolveResume(
-        client: ACPClient, cwd: String, sessionId: String, intent: Int
+        client: ACPClient, cwd: String, projectPath: String?, sessionId: String, intent: Int
     ) async throws -> SessionResume.Outcome {
         // The sidebar row already carries `sessions.source` for a listed
         // session — skip the state.db round trip (an SSH hop on a remote).
@@ -3750,8 +3762,11 @@ final class ChatViewModel {
             sessionId: sessionId,
             source: source,
             gatewayBacked: gatewayBacked,
-            load: { id in
-                let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: id)
+            load: { [context] id in
+                let loaded = try await SessionResume.loadInSessionFolder(
+                    defaultCwd: cwd, projectPath: projectPath, gatewayBacked: gatewayBacked,
+                    sessionCwd: { await SessionResume.fetchCwd(context: context, sessionId: id) },
+                    load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: id) })
                 return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
             },
             newSession: { [weak self] in

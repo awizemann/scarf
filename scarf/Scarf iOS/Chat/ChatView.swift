@@ -3040,7 +3040,13 @@ final class ChatController {
 
                     // load-only — see the doc comment above for why
                     // resume must never come back here.
-                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: sessionId)
+                    // Gateway-backed hosts: reload a non-project chat in
+                    // its own folder, so the reconnect doesn't move it.
+                    let gatewayBacked = await capabilitiesProvider(context).hasGatewayBackedACP
+                    let loaded = try await SessionResume.loadInSessionFolder(
+                        defaultCwd: cwd, projectPath: lastProjectPath, gatewayBacked: gatewayBacked,
+                        sessionCwd: { [context] in await SessionResume.fetchCwd(context: context, sessionId: sessionId) },
+                        load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: sessionId) })
                     let resolvedSessionId = loaded.sessionId
 
                     // The awaits above can outlive this ladder: "New
@@ -3488,8 +3494,13 @@ final class ChatController {
                 sessionId: sessionID,
                 source: source,
                 gatewayBacked: gatewayBacked,
-                load: { id in
-                    let loaded = try await client.loadSessionWithProvenance(cwd: cwd, sessionId: id)
+                load: { [context] id in
+                    // Gateway-backed hosts: a non-project chat loads in its
+                    // own folder, so Hermes doesn't move it to `cwd`.
+                    let loaded = try await SessionResume.loadInSessionFolder(
+                        defaultCwd: cwd, projectPath: resolved?.path, gatewayBacked: gatewayBacked,
+                        sessionCwd: { await SessionResume.fetchCwd(context: context, sessionId: id) },
+                        load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: id) })
                     return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
                 },
                 newSession: { try await client.newSession(cwd: cwd) }

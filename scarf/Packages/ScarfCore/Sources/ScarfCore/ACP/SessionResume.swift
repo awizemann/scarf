@@ -107,7 +107,80 @@ public enum SessionResume {
     public static func isNotRestorable(_ error: Error, gatewayBacked: Bool = false) -> Bool {
         if case ACPClientError.sessionNotRestorable = error { return true }
         if gatewayBacked, ACPClientError.isGatewayRefusal(error, reason: "not_found") { return true }
+        // The gateway can't reopen the session as asked — a folder missing
+        // on the host even after ``loadInSessionFolder``'s retry, or a row
+        // it can't build a policy for (live v0.22.5: "the profile names no
+        // model and the saved session has none"): continue as new rather
+        // than fail the chat. Exact `invalid_params` only.
+        if gatewayBacked, isMissingFolderRefusal(error) { return true }
         return false
+    }
+
+    // MARK: - Load cwd (gateway-backed ACP)
+
+    /// Gateway-backed `session/load` MOVES the session to the cwd it is
+    /// sent when that differs from the session's own (`_resume` →
+    /// `_moved` / `_move_workspace`, acp_adapter/gateway_server.py:350-351, :389-400
+    /// @ v0.22.5), rewriting `sessions.cwd` for every row of the
+    /// conversation (`workspace_in_transaction`,
+    /// hermes_state_mutation_prepared.py:66-79). Reopening a CLI/TUI chat
+    /// from Scarf with the home folder would silently re-home it.
+    ///
+    /// So a chat NOT bound to a Scarf project loads with its own recorded
+    /// `sessions.cwd` when that is an absolute path. A project chat keeps
+    /// sending the project folder (deliberate: it belongs there), and
+    /// pre-gateway hosts keep `defaultCwd` unchanged.
+    public static func loadCwd(
+        defaultCwd: String, projectPath: String?, sessionCwd: String?, gatewayBacked: Bool
+    ) -> String {
+        guard gatewayBacked, projectPath == nil,
+              let own = sessionCwd?.trimmingCharacters(in: .whitespacesAndNewlines),
+              own.hasPrefix("/") else { return defaultCwd }
+        return own
+    }
+
+    /// The gateway's refusal when the load's cwd isn't a folder on the host:
+    /// `prepare_workspace` raises `RuntimeStoreError('invalid_params')`
+    /// (gateway/session_mutation_policy.py:46-50 @ v0.22.5), which reaches
+    /// the wire as `-32603` with `data.details` exactly `invalid_params`.
+    public static func isMissingFolderRefusal(_ error: Error) -> Bool {
+        ACPClientError.isGatewayRefusal(error, reason: "invalid_params")
+    }
+
+    /// Run a `session/load` in the session's own folder (``loadCwd``),
+    /// retrying ONCE with `defaultCwd` when the gateway refuses that folder
+    /// (``isMissingFolderRefusal``). `sessionCwd` (a state.db read) is
+    /// consulted only for a gateway-backed, non-project load; otherwise this
+    /// is exactly `load(defaultCwd)`.
+    public static func loadInSessionFolder<T>(
+        defaultCwd: String,
+        projectPath: String?,
+        gatewayBacked: Bool,
+        sessionCwd: () async -> String?,
+        load: (String) async throws -> T,
+        isolation: isolated (any Actor)? = #isolation
+    ) async throws -> T {
+        guard gatewayBacked, projectPath == nil else { return try await load(defaultCwd) }
+        let cwd = loadCwd(defaultCwd: defaultCwd, projectPath: projectPath,
+                          sessionCwd: await sessionCwd(), gatewayBacked: gatewayBacked)
+        do {
+            return try await load(cwd)
+        } catch where cwd != defaultCwd && isMissingFolderRefusal(error) {
+            #if canImport(os)
+            logger.info("session/load refused the session's own folder — retrying in the default cwd")
+            #endif
+            return try await load(defaultCwd)
+        }
+    }
+
+    /// Read `sessions.cwd` for `sessionId` (read-only, C3; the column is
+    /// probed, C4). Nil when the column, row or DB can't be read, or NULL.
+    public static func fetchCwd(context: ServerContext, sessionId: String) async -> String? {
+        let service = HermesDataService(context: context)
+        guard await service.open() else { return nil }
+        let cwd = await service.fetchSessionCwd(id: sessionId)
+        await service.close()
+        return cwd
     }
 
     /// Resolve a resume: skip the load for a non-ACP source, load
