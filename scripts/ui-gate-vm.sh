@@ -64,7 +64,7 @@
 # OPENROUTER_* names its _openrouter_auto_detected reads) names for the
 # ACTIVE provider — taken from .env, or from an API-key entry in auth.json's
 # credential pool — plus any names in SCARF_VM_EXTRA_ENV. GITHUB_TOKEN,
-# GH_TOKEN, HF_TOKEN and AWS_* never go in. auth.json never goes in: an OAuth
+# GH_TOKEN, HF_TOKEN, CLAUDE_CODE_OAUTH_TOKEN and AWS_* never go in. auth.json never goes in: an OAuth
 # provider stops the run unless --allow-oauth-provider, which copies that one
 # provider's entry (a guest refresh can rotate the token and sign this Mac out).
 # Every copied value is deleted on every exit, pass or fail, then searched for
@@ -72,8 +72,8 @@
 #
 # Sharing the clone: the same lock as ScarfRack's tools/ui-test/run.sh
 # ($RIG_HOME/locks/<clone>.lock, made with mkdir, pid written at once; a dead
-# holder's lock, or a pid-less one older than 60 s, is taken over by an atomic
-# rename; give up after 20 minutes). Only this run's own guest folders are removed.
+# holder's lock, or a pid-less one older than 60 s, is taken over under a
+# second mutex, <clone>.lock.takeover; give up after 20 minutes). Only this run's own guest folders are removed.
 #
 # Results: build/ui-gate-vm/results/<stamp>/ — summary.md, one .xcresult and
 # one .log per plan, plus the setup and fixture logs. Exits non-zero when any
@@ -224,7 +224,7 @@ GW="work/scarf-$STAMP"          # the guest run dir, relative to the guest's $HO
 GUEST_RESULTS="results/scarf-$STAMP"
 
 # ---------- cleanup on every exit ----------
-LOCK=""; GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
+LOCK=""; MUTEX=""; MUTEX_HELD=0; GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
 gssh_in() {   # gssh with this process's stdin (lib.sh's gssh reads /dev/null)
   SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=none \
     ssh "${SSH_OPTS[@]}" "$GUEST_USER@$VM_IP" "$@"
@@ -257,6 +257,7 @@ cleanup() {
     gbash "$SWEEP" >>"$RESULT/cleanup.log" 2>&1 || true
     verify_guest_clean || status=1
   fi
+  [[ $MUTEX_HELD -eq 0 ]] || rmdir "$MUTEX" 2>/dev/null || true
   [[ -z "$LOCK" ]] || rm -rf "$LOCK"
   rm -rf "$SCRATCH"
   [[ ! -e "$SCRATCH" ]] || { warn "could not delete the host scratch dir $SCRATCH"; status=1; }
@@ -270,14 +271,17 @@ verify_guest_clean() {
   local left mins found
   left="$(gbash "ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
   mins=$(( ( $(date +%s) - STARTED_AT ) / 60 + 5 ))
-  found=""
-  if [[ -s "$SCRATCH/secret-values" ]]; then
+  found=""; local searched="searched for"
+  if [[ ! -s "$SCRATCH/secret-values" ]]; then
+    searched="NOT searched for (this run recorded no copied credential values)"
+  else
     found="$(gssh_in "grep -rlsF -f /dev/stdin ~/work/ ~/results/ ~/.hermes ~/.local \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers 2>/dev/null | head -20; true" <"$SCRATCH/secret-values" || echo "(could not search)")"
   fi
   local envs
   envs="$(gssh "find ~ ~/work/ ~/results/ \"\$(getconf DARWIN_USER_TEMP_DIR)\" -mmin -$mins \( -name .env -o -name auth.json \) -not -path '*/Library/Caches/*' 2>/dev/null | head -20; true")"
   {
     echo "leftover paths: ${left:-none}"
+    echo "copied credential values: $searched"
     echo "files holding a copied credential: ${found:-none}"
     echo ".env/auth.json written during the run: ${envs:-none}"
   } | tee "$RESULT/cleanup-verify.txt" >&2
@@ -338,8 +342,9 @@ extra = [n for n in re.split(r"[\s,]+", sys.argv[6]) if n]
 def die(msg):
     print("sanitize: " + msg, file=sys.stderr); sys.exit(1)
 # Never copied, whatever the provider or the opt-in list says: broad tokens
-# (GitHub, Hugging Face) and cloud credentials.
-FORBIDDEN = re.compile(r"^(GITHUB_TOKEN|GH_TOKEN|HF_TOKEN|AWS_.*)$")
+# (GitHub, Hugging Face), cloud credentials, and CLAUDE_CODE_OAUTH_TOKEN (an
+# OAuth token that rides on anthropic's API-key row).
+FORBIDDEN = re.compile(r"^(GITHUB_TOKEN|GH_TOKEN|HF_TOKEN|CLAUDE_CODE_OAUTH_TOKEN|AWS_.*)$")
 
 cfg = yaml.safe_load((home / "config.yaml").read_text()) or {}
 model = cfg.get("model")
@@ -471,7 +476,9 @@ if oauth:
     auth_note = f"{provider!r} entry only (OAuth: the guest could rotate this Mac's refresh token)"
 for f in dst.iterdir():
     f.chmod(0o600)
-# Every copied value, whatever its length, is searched for in the guest after the run.
+# Every copied value is searched for in the guest after the run: each .env value
+# whatever its length (empty ones are never copied), and the auth.json strings
+# kept above (6 characters or more).
 values_out.write_text("".join(v + "\n" for v in sorted(set(v for v in values if v))))
 values_out.chmod(0o600)
 print(f"provider: {provider} ({entry['auth'] if entry else 'not in the registry'})")
@@ -598,36 +605,52 @@ chmod 755 "$STAGE/guest.sh"
 # ---------- 3. lock the clone (ScarfRack's protocol) ----------
 LOCKS="$RIG_HOME/locks"; mkdir -p "$LOCKS"
 make_askpass "$SCRATCH"
-# The lock dir is made with mkdir (atomic) and gets its pid at once; a holder
-# that is dead, or a pid-less lock older than 60 s (its maker died between the
-# two steps), is stale. Taking a stale lock over is a rename to a unique name —
-# only one contender's rename can succeed — and the renamed copy is deleted
-# only when it is still the lock that was judged stale.
-L="$LOCKS/$REUSE.lock"
+# The lock dir is made with mkdir (atomic) and gets its pid at once. It is
+# stale when its holder is dead, or when it has no pid and is older than 60 s
+# (its maker died between the two steps). Taking one over happens only under a
+# second mutex, $L.takeover (mkdir, removed on every path; a mutex older than
+# 60 s is a dead taker's and is cleared): inside it the lock is re-read and
+# re-checked, renamed to a unique name, and deleted only when the renamed dir is
+# the very one judged stale (same inode) — otherwise it is put back.
+L="$LOCKS/$REUSE.lock"; MUTEX="$L.takeover"; MUTEX_HELD=0
+dir_age() { echo $(( $(date +%s) - $(stat -f %m "$1" 2>/dev/null || date +%s) )); }
+lock_stale() {   # true when the lock at $L is stale; sets STALE_INODE
+  local h
+  STALE_INODE="$(stat -f %i "$L" 2>/dev/null || true)"
+  [[ -n "$STALE_INODE" ]] || return 1
+  h="$(cat "$L/pid" 2>/dev/null || true)"
+  if [[ -n "$h" ]]; then
+    [[ "$h" =~ ^[0-9]+$ ]] && ! ps -p "$h" >/dev/null 2>&1
+  else
+    [[ $(dir_age "$L") -gt 60 ]]
+  fi
+}
+take_over_stale_lock() {
+  local grave
+  if [[ -d "$MUTEX" && $(dir_age "$MUTEX") -gt 60 ]]; then rmdir "$MUTEX" 2>/dev/null || true; fi
+  mkdir "$MUTEX" 2>/dev/null || return 0
+  MUTEX_HELD=1
+  if lock_stale; then
+    grave="$L.stale.$$.$RANDOM"
+    if mv "$L" "$grave" 2>/dev/null; then
+      if [[ "$(stat -f %i "$grave" 2>/dev/null || true)" == "$STALE_INODE" ]]; then
+        rm -rf "$grave"
+      elif [[ ! -e "$L" ]]; then
+        mv "$grave" "$L" 2>/dev/null || true   # not the one judged stale: put it back
+      fi
+    fi
+  fi
+  rmdir "$MUTEX" 2>/dev/null || true; MUTEX_HELD=0
+}
 WAITED=0
 until mkdir "$L" 2>/dev/null; do
-  HOLDER="$(cat "$L/pid" 2>/dev/null || true)"
-  STALE=0
-  if [[ -n "$HOLDER" ]]; then
-    kill -0 "$HOLDER" 2>/dev/null || STALE=1
-  elif [[ -d "$L" && $(( $(date +%s) - $(stat -f %m "$L" 2>/dev/null || date +%s) )) -gt 60 ]]; then
-    STALE=1
-  fi
-  if [[ $STALE -eq 1 ]]; then
-    GRAVE="$LOCKS/$REUSE.lock.stale.$$.$RANDOM"
-    if mv "$L" "$GRAVE" 2>/dev/null; then
-      if [[ "$(cat "$GRAVE/pid" 2>/dev/null || true)" == "$HOLDER" ]]; then rm -rf "$GRAVE"
-      # A live lock taken meanwhile: put it back (never delete a live lock).
-      elif [[ ! -e "$L" ]]; then mv "$GRAVE" "$L" 2>/dev/null || true; fi
-    fi
-    continue
-  fi
+  if lock_stale; then take_over_stale_lock; continue; fi
   [[ $WAITED -lt 1200 ]] || die "$REUSE has been in use for 20 minutes ($(cat "$L/who" 2>/dev/null || echo "by another run")): giving up"
   [[ $WAITED -ne 0 ]] || log "$REUSE is in use ($(cat "$L/who" 2>/dev/null || echo "another run")): waiting for it"
   sleep 10; WAITED=$((WAITED + 10))
 done
-echo $$ >"$L/pid"; LOCK="$L"
-echo "Scarf ui-gate-vm from $REPO_ROOT since $(date +%H:%M)" >"$LOCK/who"
+LOCK="$L"; echo $$ >"$L/pid"
+echo "Scarf ui-gate-vm from $REPO_ROOT since $(date +%H:%M)" >"$LOCK/who" 2>/dev/null || true
 # A just-booted clone accepts the connection but can take minutes to answer
 # (first-login work pins its CPUs), so the wait is generous.
 SSH_WAIT="${SCARF_VM_SSH_WAIT:-600}"

@@ -204,7 +204,8 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   `OPENROUTER_*` names its own `_openrouter_auto_detected` reads) names for the **active**
   provider — from `~/.hermes/.env`, or from an API-key entry in `auth.json`'s
   credential pool — and any names you list in `SCARF_VM_EXTRA_ENV`.
-  `GITHUB_TOKEN`, `GH_TOKEN`, `HF_TOKEN` and `AWS_*` never go in. `auth.json`
+  `GITHUB_TOKEN`, `GH_TOKEN`, `HF_TOKEN`, `CLAUDE_CODE_OAUTH_TOKEN` and `AWS_*`
+  never go in. `auth.json`
   never goes in: if the active provider signs in with OAuth the run stops,
   because a guest holding the refresh token can rotate it and sign this Mac out;
   `--allow-oauth-provider` copies that one provider's entry anyway, with a
@@ -223,8 +224,9 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   ever deleted.
 - **Lock**: ScarfRack's `$RIG_HOME/locks/<clone>.lock`, made with `mkdir` and
   given its pid at once. A dead holder's lock, or a pid-less one older than
-  60 s, is taken over by renaming it to a unique name (atomic, so only one
-  contender wins) before it is deleted.
+  60 s, is taken over only under a second mutex (`<clone>.lock.takeover`): the
+  lock is re-checked inside it, renamed to a unique name, and deleted only if it
+  is the very directory judged stale (same inode); otherwise it is put back.
 
 Results land in `build/ui-gate-vm/results/<stamp>/`: `summary.md` (verdicts as
 `ui-gate.sh --classify` gives them: PASS / FAIL / RUNNER-FAILED, plus reruns of
