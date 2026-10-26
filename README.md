@@ -71,13 +71,14 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted and followed over time without knowing who you are. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context and Hermes's replies so the voice can speak them, and both apps ask before the first session.
 
-## What's New in 3.6.0
+## What's New in 3.7.0
 
-- **ScarfGo checks your server's identity** — it remembers each server's SSH host key on first connect and refuses a server that shows a different one, with both fingerprints and a **Trust New Key** step in System. Before this, ScarfGo accepted any host key. The Mac app always checked.
-- **Easier to read in light and dark mode** — a deeper orange for buttons and links in light mode, dark text on orange buttons in dark mode, darker status text that passes WCAG AA, and brick-red destructive actions, across both apps.
-- **Privacy, described accurately** — the privacy policy and in-app text now match the code. Live Voice asks for consent once more because the screen now says that Hermes's replies and status lines also go to OpenAI. The Mac setting is now called "usage statistics" instead of "anonymous."
-- **On macOS 14 Sonoma?** Scarf has required macOS 15 since v2.20.0. The update feed now says so, so Sonoma Macs are no longer offered updates that can't open.
-- Full notes: [releases/v3.6.0/RELEASE_NOTES.md](releases/v3.6.0/RELEASE_NOTES.md).
+- **Hermes v0.22.5 support** — Scarf now follows Hermes v0.21.6 through v0.22.5, where chat runs on Hermes's gateway. Resume chats you started in the CLI, TUI or Desktop app, use `/queue`, and answer Hermes's clarifying questions as question cards (**Skip** is a decline). Closing Scarf no longer stops a running reply, and Scarf says so.
+- **Gateway safety** — Hermes now refuses to stop or restart its gateway while chats are live. Scarf explains why and only interrupts them after you confirm; it never kills the process. A gateway you started by hand restarts in the background.
+- **Strict config loading** — from v0.21.6 a key written twice in `config.yaml` stops Hermes from starting. Scarf flags duplicates and refuses to save a file that has one.
+- **Features that became plugins** — memory providers, Home Assistant, Spotify sign-in and the Singularity terminal now live in Hermes plugins; Scarf offers to install or enable them where you use them. Sessions also show where each chat was created.
+- **Fixed on every Hermes version** — token usage was double-counted per turn, and Health no longer sends `status --all` to the old Hermes versions where that flag printed API keys unredacted.
+- Full notes: [releases/v3.7.0/RELEASE_NOTES.md](releases/v3.7.0/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
@@ -131,7 +132,7 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 15+** (Scarf) · **iOS 18.6+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/NousResearch/hermes-agent) v0.6.0+** on each host. Current target: **v0.21.5** (v2026.9.24) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/NousResearch/hermes-agent) v0.6.0+** on each host. Current target: **v0.22.5** (2026-10-22) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|
@@ -147,7 +148,10 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 | v0.21.1 (2026-09-07) | Verified — Tavily back, `perplexity` web backend, bounded `service_tier` modes, shared-metrics telemetry, `plugins compat --json`, cron `--paused`/`--failure-deliver`, MCP device-code OAuth, `messages_fts` 8 KB tool-content prefix |
 | v0.21.3 (2026-09-14) | Verified — GPT-Live voice chat mode (Scarf 3.3.0) |
 | v0.21.4 (2026-09-21) | Verified — multiplex-by-default gateway, FTS index aligned to an 8 KB tool prefix, `opencode-free` removed, `chatgpt` aliases, OpenAI-native web search, cron model pin, new exit codes for backup / profile delete / peer dm / sessions optimize |
-| v0.21.5 (2026-09-24) | **Verified — current target** — parked profiles, the standalone status box, retired `multiplex_profiles: false` rewritten, MCP numeric on/off; verified at the tag and on a live host |
+| v0.21.5 (2026-09-24) | Verified — parked profiles, the standalone status box, retired `multiplex_profiles: false` rewritten, MCP numeric on/off; verified at the tag and on a live host |
+| v0.21.6 – v0.21.7 (2026-10-08 → 10-11) | Verified — strict `config.yaml` loading (duplicate keys flagged), memory providers / Home Assistant / Spotify moved to plugins, `status` summary default, Tirith removed, partial-import exit code, cron `interpreter` |
+| v0.22.0 – v0.22.4 (2026-10-13 → 10-21) | Verified — gateway-backed chat (v0.22.1, reverted in v0.22.2, restored in v0.22.3), live-session stop/restart refusal, chats stored as `local` with their real origin, plugin enable/disable output, `krea-3`, `rentahuman` MCP |
+| v0.22.5 (2026-10-22) | **Verified — current target** — Singularity terminal moved to a plugin; source-audited at every tag v0.21.6–v0.22.5 and live-tested on a v0.22.5 host |
 
 Scarf reads Hermes's SQLite database and CLI output with automatic schema detection. If a Hermes update changes either, the Health view shows compatibility warnings.
 
