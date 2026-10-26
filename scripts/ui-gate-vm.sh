@@ -22,9 +22,10 @@
 #                      default ~/.hermes/hermes-agent).
 #   --plans LIST       Comma-separated test plans, run one at a time in this order
 #                      (default Smoke,Full,Live).
-#   --reuse NAME       The running Tart clone to use (default scarf-ui: Scarf's own
-#                      clone of ScarfRack's UI-test image, with a display tall
-#                      enough for the window the tests pin). This script never
+#   --reuse NAME       The running Tart clone to use. Only scarf-ui (the default:
+#                      Scarf's own clone of ScarfRack's UI-test image, with a
+#                      display tall enough for the window the tests pin) is
+#                      accepted; see "Sharing the clone". This script never
 #                      starts, stops or deletes a VM.
 #   --no-build         Run what the last build in build/ui-gate-vm/derived made.
 #   --keep-results     Keep every earlier results folder (default: the last ten).
@@ -70,10 +71,13 @@
 # Every copied value is deleted on every exit, pass or fail, then searched for
 # in the guest to prove it. Only NAMES are ever printed.
 #
-# Sharing the clone: the same lock as ScarfRack's tools/ui-test/run.sh
-# ($RIG_HOME/locks/<clone>.lock, made with mkdir, pid written at once; a dead
-# holder's lock, or a pid-less one older than 60 s, is taken over under a
-# second mutex, <clone>.lock.takeover; give up after 20 minutes). Only this run's own guest folders are removed.
+# Sharing the clone: a kernel-held lock — flock(2) on
+# $RIG_HOME/locks/<clone>.lockf, held by this script's own fd 9, so the kernel
+# releases it the moment the run exits or is killed (no stale locks, no
+# takeover). A second run waits up to 20 minutes. It does NOT interoperate
+# with ScarfRack's mkdir lock, so only Scarf's own clone (scarf-ui) may be
+# used: ScarfRack's clones (ui-dev, …) are not supported. Only this run's own
+# guest folders are removed.
 #
 # Results: build/ui-gate-vm/results/<stamp>/ — summary.md, one .xcresult and
 # one .log per plan, plus the setup and fixture logs. Exits non-zero when any
@@ -117,6 +121,7 @@ UI_ONLY=1
 DISPLAY_CHECK=1
 ALLOW_OAUTH=0
 CREDS_ONLY=0
+LOCK_TEST=""
 ONLY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -130,15 +135,41 @@ while [[ $# -gt 0 ]]; do
     --skip-display-check) DISPLAY_CHECK=0; shift ;;
     --allow-oauth-provider) ALLOW_OAUTH=1; shift ;;
     --credentials-only) CREDS_ONLY=1; BUILD=0; shift ;;
+    --lock-test) LOCK_TEST="${2:?}"; HERMES_TAG="${HERMES_TAG:-none}"; shift 2 ;;
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,84p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,88p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
 [[ -n "$HERMES_TAG" ]] || die "--hermes-tag is required (see --help)"
 case "$REUSE" in *[!A-Za-z0-9_-]*|"") die "--reuse takes a clone's name" ;; esac
+# The lock below is Scarf's own (flock), not ScarfRack's mkdir lock, so a clone
+# ScarfRack also drives (ui-dev, …) could be used by both at once.
+[[ "$REUSE" == scarf-ui ]] || die "--reuse $REUSE: only Scarf's own clone, scarf-ui, is supported (its lock doesn't interoperate with ScarfRack's, whose clones such as ui-dev are ScarfRack's)"
+
+# ---------- the clone's lock ----------
+# flock(2) on fd 9 of THIS shell: the kernel holds it for as long as the fd is
+# open in this process (or a child that inherited it) and drops it on exit,
+# crash or kill -9. Python only makes the flock call on the inherited fd.
+LOCKFILE="$RIG_HOME/locks/$REUSE.lockf"
+take_clone_lock() {
+  local waited=0
+  mkdir -p "$(dirname "$LOCKFILE")"
+  exec 9>>"$LOCKFILE"
+  until /usr/bin/python3 -I -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; do
+    [[ $waited -lt 1200 ]] || die "$REUSE has been in use for 20 minutes ($(head -1 "$LOCKFILE" 2>/dev/null || echo "by another run")): giving up"
+    [[ $waited -ne 0 ]] || log "$REUSE is in use ($(head -1 "$LOCKFILE" 2>/dev/null || echo "by another run")): waiting for it"
+    sleep 5; waited=$((waited + 5))
+  done
+  echo "Scarf ui-gate-vm (pid $$) from $REPO_ROOT since $(date +%H:%M)" >"$LOCKFILE" 2>/dev/null || true
+}
+# Long-lived children close fd 9 (the plan's ssh, its bound watcher), so a
+# kill -9 of this script frees the lock at once; short ones just finish.
+if [[ -n "$LOCK_TEST" ]]; then   # hidden: take the lock, hold it, exit (tests the lock alone)
+  take_clone_lock; log "lock-test: holding $LOCKFILE for ${LOCK_TEST}s (pid $$)"; sleep "$LOCK_TEST" 9>&-; log "lock-test: done"; exit 0
+fi
 IFS=',' read -r -a PLANS <<<"$PLANS_ARG"
 for plan in "${PLANS[@]}"; do
   case "$plan" in Smoke|Full|Live) ;; *) die "unknown plan: $plan (Smoke, Full or Live)" ;; esac
@@ -224,7 +255,7 @@ GW="work/scarf-$STAMP"          # the guest run dir, relative to the guest's $HO
 GUEST_RESULTS="results/scarf-$STAMP"
 
 # ---------- cleanup on every exit ----------
-LOCK=""; MUTEX=""; MUTEX_HELD=0; GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
+GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
 gssh_in() {   # gssh with this process's stdin (lib.sh's gssh reads /dev/null)
   SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=none \
     ssh "${SSH_OPTS[@]}" "$GUEST_USER@$VM_IP" "$@"
@@ -257,8 +288,7 @@ cleanup() {
     gbash "$SWEEP" >>"$RESULT/cleanup.log" 2>&1 || true
     verify_guest_clean || status=1
   fi
-  [[ $MUTEX_HELD -eq 0 ]] || rmdir "$MUTEX" 2>/dev/null || true
-  [[ -z "$LOCK" ]] || rm -rf "$LOCK"
+  exec 9>&- 2>/dev/null || true   # releases the clone's lock (exit would too)
   rm -rf "$SCRATCH"
   [[ ! -e "$SCRATCH" ]] || { warn "could not delete the host scratch dir $SCRATCH"; status=1; }
   log "results: $RESULT"
@@ -602,55 +632,9 @@ esac
 GUEST
 chmod 755 "$STAGE/guest.sh"
 
-# ---------- 3. lock the clone (ScarfRack's protocol) ----------
-LOCKS="$RIG_HOME/locks"; mkdir -p "$LOCKS"
+# ---------- 3. lock the clone ----------
 make_askpass "$SCRATCH"
-# The lock dir is made with mkdir (atomic) and gets its pid at once. It is
-# stale when its holder is dead, or when it has no pid and is older than 60 s
-# (its maker died between the two steps). Taking one over happens only under a
-# second mutex, $L.takeover (mkdir, removed on every path; a mutex older than
-# 60 s is a dead taker's and is cleared): inside it the lock is re-read and
-# re-checked, renamed to a unique name, and deleted only when the renamed dir is
-# the very one judged stale (same inode) — otherwise it is put back.
-L="$LOCKS/$REUSE.lock"; MUTEX="$L.takeover"; MUTEX_HELD=0
-dir_age() { echo $(( $(date +%s) - $(stat -f %m "$1" 2>/dev/null || date +%s) )); }
-lock_stale() {   # true when the lock at $L is stale; sets STALE_INODE
-  local h
-  STALE_INODE="$(stat -f %i "$L" 2>/dev/null || true)"
-  [[ -n "$STALE_INODE" ]] || return 1
-  h="$(cat "$L/pid" 2>/dev/null || true)"
-  if [[ -n "$h" ]]; then
-    [[ "$h" =~ ^[0-9]+$ ]] && ! ps -p "$h" >/dev/null 2>&1
-  else
-    [[ $(dir_age "$L") -gt 60 ]]
-  fi
-}
-take_over_stale_lock() {
-  local grave
-  if [[ -d "$MUTEX" && $(dir_age "$MUTEX") -gt 60 ]]; then rmdir "$MUTEX" 2>/dev/null || true; fi
-  mkdir "$MUTEX" 2>/dev/null || return 0
-  MUTEX_HELD=1
-  if lock_stale; then
-    grave="$L.stale.$$.$RANDOM"
-    if mv "$L" "$grave" 2>/dev/null; then
-      if [[ "$(stat -f %i "$grave" 2>/dev/null || true)" == "$STALE_INODE" ]]; then
-        rm -rf "$grave"
-      elif [[ ! -e "$L" ]]; then
-        mv "$grave" "$L" 2>/dev/null || true   # not the one judged stale: put it back
-      fi
-    fi
-  fi
-  rmdir "$MUTEX" 2>/dev/null || true; MUTEX_HELD=0
-}
-WAITED=0
-until mkdir "$L" 2>/dev/null; do
-  if lock_stale; then take_over_stale_lock; continue; fi
-  [[ $WAITED -lt 1200 ]] || die "$REUSE has been in use for 20 minutes ($(cat "$L/who" 2>/dev/null || echo "by another run")): giving up"
-  [[ $WAITED -ne 0 ]] || log "$REUSE is in use ($(cat "$L/who" 2>/dev/null || echo "another run")): waiting for it"
-  sleep 10; WAITED=$((WAITED + 10))
-done
-LOCK="$L"; echo $$ >"$L/pid"
-echo "Scarf ui-gate-vm from $REPO_ROOT since $(date +%H:%M)" >"$LOCK/who" 2>/dev/null || true
+take_clone_lock
 # A just-booted clone accepts the connection but can take minutes to answer
 # (first-login work pins its CPUs), so the wait is generous.
 SSH_WAIT="${SCARF_VM_SSH_WAIT:-600}"
@@ -759,9 +743,9 @@ run_in_guest() {
   local plan="$1" xctestrun="$2" bundle="$3" logf="$4" limit="$5" t0; shift 5
   t0=$SECONDS; STATUS=0; TIMED_OUT=0
   # Globals, so an interrupted run's cleanup can stop both (and their children).
-  gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' plan '$plan' '$xctestrun' '$bundle' $PER_TEST $PER_TEST_MAX $*" >"$logf" 2>&1 &
+  gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' plan '$plan' '$xctestrun' '$bundle' $PER_TEST $PER_TEST_MAX $*" >"$logf" 2>&1 9>&- &
   TESTS_PID=$!
-  ( sleep "$limit" && kill "$TESTS_PID" ) >/dev/null 2>&1 & WATCH_PID=$!
+  ( exec 9>&-; sleep "$limit" && kill "$TESTS_PID" ) >/dev/null 2>&1 & WATCH_PID=$!
   wait "$TESTS_PID" || STATUS=$?
   WALL=$((SECONDS - t0))
   if kill -0 "$WATCH_PID" 2>/dev/null; then pkill -P "$WATCH_PID" 2>/dev/null || true; kill "$WATCH_PID" 2>/dev/null || true

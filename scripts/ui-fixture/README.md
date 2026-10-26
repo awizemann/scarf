@@ -153,10 +153,12 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   signs) into `build/ui-gate-vm/derived`, then runs each plan's `.xctestrun` with
   `test-without-building` in the guest, one plan at a time, with per-test and
   per-plan time bounds.
-- The guest is a long-lived, already-running clone of ScarfRack's UI-test image
-  (`--reuse scarf-ui` by default); the script never starts or stops a VM. It takes
-  the clone's lock exactly as ScarfRack's `tools/ui-test/run.sh` does and waits up
-  to 20 minutes for another run to finish. It needs ScarfRack's
+- The guest is `scarf-ui`, a long-lived, already-running clone of ScarfRack's
+  UI-test image and the only clone the script accepts; the script never starts or
+  stops a VM. `ui-dev` and ScarfRack's other clones belong to ScarfRack and are
+  not supported: the script's lock (below) is its own and does not interoperate
+  with ScarfRack's, so sharing a clone with ScarfRack would let both drive it at
+  once. A second Scarf run waits up to 20 minutes for the first. It needs ScarfRack's
   `tools/fresh-mac-rig/lib.sh` (`SCARF_VM_RIG_LIB`), which holds the VM's
   login — none of it is in this repo.
 - **The clone's display must be tall enough.** The tests pin Scarf's window at
@@ -222,11 +224,12 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   `~/.hermes` that a run created: when the guest has none, the run creates it
   with a `.scarf-ui-gate-vm-created` marker inside, and only a marked one is
   ever deleted.
-- **Lock**: ScarfRack's `$RIG_HOME/locks/<clone>.lock`, made with `mkdir` and
-  given its pid at once. A dead holder's lock, or a pid-less one older than
-  60 s, is taken over only under a second mutex (`<clone>.lock.takeover`): the
-  lock is re-checked inside it, renamed to a unique name, and deleted only if it
-  is the very directory judged stale (same inode); otherwise it is put back.
+- **Lock**: a kernel-held `flock` on `$RIG_HOME/locks/scarf-ui.lockf`, held by
+  the script's own file descriptor. The kernel drops it the moment the run
+  exits, crashes or is `kill -9`ed, so there are no stale locks and no takeover.
+  The plan's long-lived children (its ssh and its time-limit watcher) don't
+  inherit it. The holder's description is written into the file and shown to a
+  waiting run.
 
 Results land in `build/ui-gate-vm/results/<stamp>/`: `summary.md` (verdicts as
 `ui-gate.sh --classify` gives them: PASS / FAIL / RUNNER-FAILED, plus reruns of
