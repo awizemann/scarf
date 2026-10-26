@@ -138,3 +138,58 @@ read-only, every mutation the CLI can express goes through the CLI, and the two
 exceptions above are this script writing the throwaway home it just built, never
 the real one (see "The two rows the CLI cannot make"). Never check a `state.db`
 into the repo; rebuild the fixture instead.
+
+## Running the UI plans in a Tart VM
+
+`scripts/ui-gate-vm.sh` runs the Smoke / Full / Live plans inside a headless Tart
+virtual Mac, so the tests never take this Mac's screen, keyboard or pointer:
+
+```bash
+scripts/ui-gate-vm.sh --hermes-tag v0.22.5 --plans Smoke,Full,Live
+scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
+```
+
+- It **builds once on the host** (`build-for-testing`, signed the way `ui-gate.sh`
+  signs) into `build/ui-gate-vm/derived`, then runs each plan's `.xctestrun` with
+  `test-without-building` in the guest, one plan at a time, with per-test and
+  per-plan time bounds.
+- The guest is a long-lived, already-running clone of ScarfRack's UI-test image
+  (`--reuse scarf-ui` by default); the script never starts or stops a VM. It takes
+  the clone's lock exactly as ScarfRack's `tools/ui-test/run.sh` does and waits up
+  to 20 minutes for another run to finish.
+- **The clone's display must be tall enough.** The tests pin Scarf's window at
+  1800 × 1300 pt and fail any test whose window is under 1500 × 1200, and AppKit
+  keeps a window inside the screen less the menu bar and the Dock. A 1920x1200
+  display leaves 1920 × 1080, so the script checks the guest's visible frame first
+  and stops before copying anything in. Give the clone at least 1920x1440 while it
+  is stopped (`tart set scarf-ui --display 1920x1440`).
+- **…and its disk roomy enough.** Under roughly 15 GB free, macOS runs its critical
+  cache purge every few minutes, and the purge terminates the sandboxed test runner
+  to empty its container caches (runningboardd: `CacheDeleteAppContainerCaches
+  requesting termination assertion for com.scarfUITests.xctrunner`). The test in
+  flight then reports **"Test crashed with signal kill"**. The script warns under
+  15 GB, and the summary flags such failures; read them as environment, not code.
+- Only the `scarfUITests` target of each plan runs by default (`--ui-only`); Full's
+  unit tests run headless on the host. `--with-unit-tests` runs the plans whole, and
+  `--only Class[/test]` (repeatable) narrows a run to one class or test. It needs ScarfRack's
+  `tools/fresh-mac-rig/lib.sh` (`SCARF_VM_RIG_LIB`), which holds the VM's
+  login — none of it is in this repo.
+- **Hermes in the guest**: the host's `uv` is copied in, installs a managed
+  Python the tag allows, and installs Hermes from the tag's `uv.lock` (`uv sync
+  --frozen --extra acp`, editable) from a depth-1 clone
+  of the tag shipped with its `.git` (Hermes derives its version from git tags).
+  The script checks `hermes --version` reports the tag's version, and puts a
+  `~/.local/bin/hermes` shim in the guest for the run.
+- **Credentials**: a sanitized copy of `~/.hermes`'s `config.yaml`, `.env` and
+  `auth.json` goes in — model-provider keys only. Every messaging-platform /
+  gateway variable (names taken from the tag's own source) and every platform
+  section is dropped first. The fixture is then seeded in the guest with
+  `make-ui-fixture.sh`.
+- **Cleanup on every exit**: the fixture's gateway is stopped, the run's
+  processes, guest folders, shim and test homes are removed, the lock is
+  released, the host scratch copy is deleted, and the guest is searched for the
+  copied key values to prove none is left.
+
+Results land in `build/ui-gate-vm/results/<stamp>/`: `summary.md` (verdicts as
+`ui-gate.sh --classify` gives them: PASS / FAIL / RUNNER-FAILED), one `.xcresult`
+and `.log` per plan, and the setup, fixture and cleanup logs.
