@@ -200,14 +200,16 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   `default`/`model`, `base_url` and `api_mode` (no `api_key`, MCP servers,
   auxiliary/delegation/TTS settings, custom providers or platforms). Its `.env`
   holds only the key variable(s) the tag's provider registry
-  (`hermes_cli/auth.py`, plus OpenRouter's own rung) names for the **active**
+  (`hermes_cli/auth.py` `_REGISTRY_ROWS`; for OpenRouter, which has no row, the
+  `OPENROUTER_*` names its own `_openrouter_auto_detected` reads) names for the **active**
   provider — from `~/.hermes/.env`, or from an API-key entry in `auth.json`'s
   credential pool — and any names you list in `SCARF_VM_EXTRA_ENV`.
   `GITHUB_TOKEN`, `GH_TOKEN`, `HF_TOKEN` and `AWS_*` never go in. `auth.json`
   never goes in: if the active provider signs in with OAuth the run stops,
   because a guest holding the refresh token can rotate it and sign this Mac out;
   `--allow-oauth-provider` copies that one provider's entry anyway, with a
-  warning. `sanitize.txt` in the results lists the NAMES that went in. The
+  warning. `sanitize.txt` in the results lists the NAMES that went in;
+  `--credentials-only` prints them for a tag without touching the VM. The
   fixture is then seeded in the guest with `make-ui-fixture.sh`.
 - **Cleanup on every exit**: the fixture's gateway is stopped, the run's
   processes (an interrupted plan's ssh and bound watcher included), guest

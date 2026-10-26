@@ -39,6 +39,8 @@
 #                      window-size check; useful only to exercise the script).
 #   --allow-oauth-provider  When the active provider signs in with OAuth, copy
 #                      its one auth.json entry in (otherwise the run stops).
+#   --credentials-only Build the guest's credentials on the host, print the
+#                      NAMES that would go in, delete them, and stop (no VM).
 #
 # Environment:
 #   SCARF_VM_RIG_LIB      ScarfRack's tools/fresh-mac-rig/lib.sh (gssh, wait_ssh,
@@ -58,7 +60,8 @@
 # model / base_url / api_mode (no api_key, MCP servers, auxiliary, delegation,
 # TTS, custom providers or platforms) and gateway.multiplex_profiles false. Its
 # .env holds only the key variable(s) the tag's provider registry
-# (hermes_cli/auth.py _REGISTRY_ROWS; OpenRouter's own rung) names for the
+# (hermes_cli/auth.py _REGISTRY_ROWS; for OpenRouter, which has no row, the
+# OPENROUTER_* names its _openrouter_auto_detected reads) names for the
 # ACTIVE provider — taken from .env, or from an API-key entry in auth.json's
 # credential pool — plus any names in SCARF_VM_EXTRA_ENV. GITHUB_TOKEN,
 # GH_TOKEN, HF_TOKEN and AWS_* never go in. auth.json never goes in: an OAuth
@@ -113,6 +116,7 @@ KEEP_RESULTS=0
 UI_ONLY=1
 DISPLAY_CHECK=1
 ALLOW_OAUTH=0
+CREDS_ONLY=0
 ONLY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -125,10 +129,11 @@ while [[ $# -gt 0 ]]; do
     --with-unit-tests) UI_ONLY=0; shift ;;
     --skip-display-check) DISPLAY_CHECK=0; shift ;;
     --allow-oauth-provider) ALLOW_OAUTH=1; shift ;;
+    --credentials-only) CREDS_ONLY=1; BUILD=0; shift ;;
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,81p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,84p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -152,7 +157,7 @@ git -C "$HERMES_SRC" rev-parse -q --verify "refs/tags/$HERMES_TAG" >/dev/null \
 for f in config.yaml .env; do
   [[ -f "$SOURCE_HOME/$f" ]] || die "$SOURCE_HOME/$f is missing (set SCARF_VM_SOURCE_HOME)"
 done
-need_tart
+[[ $CREDS_ONLY -eq 1 ]] || need_tart
 
 # A Python with PyYAML, used only on the host to sanitize config.yaml.
 PY=""
@@ -163,7 +168,7 @@ done
 [[ -n "$PY" ]] || die "no python3 with PyYAML found (set SCARF_VM_PYTHON)"
 
 # The clone must already be up; this script never boots one.
-tart list | awk -v n="$REUSE" '$2 == n && $NF == "running" { ok = 1 } END { exit !ok }' \
+[[ $CREDS_ONLY -eq 1 ]] || tart list | awk -v n="$REUSE" '$2 == n && $NF == "running" { ok = 1 } END { exit !ok }' \
   || die "Tart clone $REUSE is not running (start it with ScarfRack's tools/ui-test/clone.sh start $REUSE)"
 
 # ---------- the Hermes version the guest must report ----------
@@ -303,7 +308,7 @@ if [[ $BUILD -eq 1 ]]; then
     -skipPackagePluginValidation -skipMacroValidation \
     >"$RESULT/build.log" 2>&1 || { grep -E "error:" "$RESULT/build.log" | head -20 >&2; die "build-for-testing failed (log: $RESULT/build.log)"; }
 fi
-for plan in "${PLANS[@]}"; do
+[[ $CREDS_ONLY -eq 1 ]] || for plan in "${PLANS[@]}"; do
   ls "$DERIVED/Build/Products/${SCHEME}_${plan}_"*.xctestrun >/dev/null 2>&1 \
     || die "no ${SCHEME}_${plan}_*.xctestrun in $DERIVED/Build/Products: run without --no-build"
 done
@@ -371,11 +376,21 @@ for r in rows:
         args = [lit(a) for a in r.args]; kw = {k.arg: lit(k.value) for k in r.keywords}
         registry[args[0]] = {"auth": kw.get("auth_type", args[2] if len(args) > 2 else None),
                              "env": tuple(kw.get("api_key_env_vars") or ())}
-# OpenRouter has no registry row on purpose (its own rung in resolve_provider):
-# its key variable is the one auth.py's _openrouter_auto_detected reads.
-auth_src = (src / "hermes_cli/auth.py").read_text()
-if "openrouter" not in registry and 'scoped_key_env("OPENROUTER_API_KEY")' in auth_src:
-    registry["openrouter"] = {"auth": "api_key", "env": ("OPENROUTER_API_KEY",)}
+# A provider with no registry row (OpenRouter has its own rung in
+# resolve_provider, at every supported tag) is resolved by auth.py's own
+# function for it (`_openrouter_auto_detected`): of the key-shaped names that
+# function reads, the ones named for the provider (OPENROUTER_*) — not the
+# legacy OPENAI_API_KEY fallback, which belongs to another provider.
+if provider not in registry:
+    stem = re.sub(r"[^a-z0-9]+", "_", provider)
+    prefix = stem.upper() + "_"
+    found = set()
+    for fn in ast.walk(tree):
+        if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)) and stem in fn.name:
+            found |= {c.value for c in ast.walk(fn) if isinstance(c, ast.Constant) and isinstance(c.value, str)
+                      and re.fullmatch(r"[A-Z][A-Z0-9_]*_(API_KEY|TOKEN|KEY)", c.value) and c.value.startswith(prefix)}
+    if found:
+        registry[provider] = {"auth": "api_key", "env": tuple(sorted(found))}
 
 entry = registry.get(provider)
 oauth = False
@@ -471,6 +486,10 @@ PY
   "$ALLOW_OAUTH" "${SCARF_VM_EXTRA_ENV:-}" | tee "$RESULT/sanitize.txt" >&2 || die "could not build the guest's credentials from $SOURCE_HOME"
 [[ $ALLOW_OAUTH -eq 0 ]] || warn "--allow-oauth-provider: the guest holds an OAuth credential; a refresh there can rotate the token and sign this Mac out"
 rm -rf "$SCRATCH/hermes"
+if [[ $CREDS_ONLY -eq 1 ]]; then
+  log "--credentials-only: nothing copied anywhere; the host copy is deleted on exit"
+  exit 0
+fi
 
 # The guest-side helper. One file, subcommands; run with bash in the guest.
 cat >"$STAGE/guest.sh" <<'GUEST'
