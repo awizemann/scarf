@@ -225,10 +225,11 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   with a `.scarf-ui-gate-vm-created` marker inside, and only a marked one is
   ever deleted.
 - **Lock**: a kernel-held `flock` on `$RIG_HOME/locks/scarf-ui.lockf`, held by
-  the script's own file descriptor. The kernel drops it the moment the run
-  exits, crashes or is `kill -9`ed, so there are no stale locks and no takeover.
-  The plan's long-lived children (its ssh and its time-limit watcher) don't
-  inherit it. The holder's description is written into the file and shown to a
+  the script's own file descriptor. The kernel drops it when the run exits,
+  crashes or is `kill -9`ed, so there are no stale locks and no takeover. The
+  plan's long-lived children (its ssh and its time-limit watcher) don't inherit
+  it; a shorter child running at the moment of a `kill -9` (setup or fixture
+  ssh) keeps it until that child finishes. The holder's description is written into the file and shown to a
   waiting run.
 
 Results land in `build/ui-gate-vm/results/<stamp>/`: `summary.md` (verdicts as

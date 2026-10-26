@@ -158,15 +158,25 @@ take_clone_lock() {
   local waited=0
   mkdir -p "$(dirname "$LOCKFILE")"
   exec 9>>"$LOCKFILE"
-  until /usr/bin/python3 -I -c 'import fcntl; fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)' 2>/dev/null; do
+  local rc
+  while :; do
+    rc=0
+    /usr/bin/python3 -I -c 'import fcntl, sys
+try: fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+except BlockingIOError: sys.exit(1)' || rc=$?
+    [[ $rc -eq 0 ]] && break
+    # 1 = held by another run; anything else (no python3, bad fd) is a real error.
+    [[ $rc -eq 1 ]] || die "could not take the $REUSE lock (python3 flock exited $rc)"
     [[ $waited -lt 1200 ]] || die "$REUSE has been in use for 20 minutes ($(head -1 "$LOCKFILE" 2>/dev/null || echo "by another run")): giving up"
     [[ $waited -ne 0 ]] || log "$REUSE is in use ($(head -1 "$LOCKFILE" 2>/dev/null || echo "by another run")): waiting for it"
     sleep 5; waited=$((waited + 5))
   done
   echo "Scarf ui-gate-vm (pid $$) from $REPO_ROOT since $(date +%H:%M)" >"$LOCKFILE" 2>/dev/null || true
 }
-# Long-lived children close fd 9 (the plan's ssh, its bound watcher), so a
-# kill -9 of this script frees the lock at once; short ones just finish.
+# Long-lived children close fd 9 (the plan's ssh, its bound watcher). Other
+# children inherit it, so after a kill -9 of this script the lock stays held
+# until the one running then finishes (the setup and fixture ssh have no host
+# time limit, so that can be minutes, while the guest is still busy anyway).
 if [[ -n "$LOCK_TEST" ]]; then   # hidden: take the lock, hold it, exit (tests the lock alone)
   take_clone_lock; log "lock-test: holding $LOCKFILE for ${LOCK_TEST}s (pid $$)"; sleep "$LOCK_TEST" 9>&-; log "lock-test: done"; exit 0
 fi
