@@ -150,20 +150,35 @@ final class Issues35UITests: ScarfUITestCase {
 
     // MARK: - #146 honest resume of a cli session
 
-    /// Opening a `source = cli` session from the chat sidebar keeps its
-    /// transcript on screen and shows the persistent continuity notice
-    /// ("This session started in cli. …"), and the pane is NOT bound to
-    /// the old id (it continued as a new session instead of claiming a
-    /// resume).
+    /// Opening a `source = cli` session from the chat sidebar.
+    ///
+    /// In-process ACP (before Hermes 0.22.1, and 0.22.2): Hermes can't
+    /// load a non-ACP row, so the transcript stays on screen with the
+    /// persistent continuity notice ("This session started in cli. …"),
+    /// and the pane is NOT bound to the old id (it continued as a new
+    /// session instead of claiming a resume).
+    ///
+    /// Gateway-backed ACP (0.22.1 and 0.22.3+, `hasGatewayBackedACP`):
+    /// `session/load` adopts the legacy cli row (`_attach_info`,
+    /// acp_adapter/gateway_server.py:327-338 → `LEGACY_LOCAL_SOURCES`,
+    /// hermes_state_local_migration.py:15 @ v0.22.5) and the agent gets
+    /// its messages back, so it is a real resume: the pane binds to the
+    /// cli session's own id, the transcript is on screen, and there is
+    /// NO continuity notice (it would claim the context was lost).
     @MainActor
     func testReopeningACliSessionKeepsTranscriptAndSaysSo() throws {
         try requireLive()
+        let gatewayBacked = try hostHasGatewayBackedACP()
         let app = launchExpanded()
         defer { gracefulQuit(app) }
         try openSection(app, "Chat")
 
         let row = try requireSeeded(app, "chat.session.\(Self.cliTools)")
         let noticeRow = notice(app)
+        if gatewayBacked {
+            try assertCliSessionResumesInPlace(row, notice: noticeRow, app: app)
+            return
+        }
         guard clickUntil(row, appears: noticeRow, named: "the continuity notice", in: app) else {
             attachScreenshot(app, named: "no-continuity-notice", keepAlways: true)
             print("[Issues35] AX tree:\n\(app.windows.firstMatch.debugDescription)")
@@ -184,6 +199,81 @@ final class Issues35UITests: ScarfUITestCase {
         let gone = XCTNSPredicateExpectation(predicate: NSPredicate(format: "exists == false"), object: noticeRow)
         XCTAssertNotEqual(XCTWaiter().wait(for: [gone], timeout: 6), .completed,
                           "The continuity notice disappeared — it must stay while the chat is on that session.")
+    }
+
+    /// The gateway-backed half of the test above: the cli session is
+    /// really reopened. The first load on a fresh fixture home also
+    /// cold-starts the profile gateway, so the waits are longer than the
+    /// default click retry's.
+    private func assertCliSessionResumesInPlace(_ row: XCUIElement, notice noticeRow: XCUIElement,
+                                                app: XCUIApplication) throws {
+        let bound = app.windows.descendants(matching: .any)
+            .matching(NSPredicate(format: "identifier == %@ AND value == 'active'", "chat.session.\(Self.cliTools)"))
+            .firstMatch
+        guard clickUntil(row, appears: bound, named: "the cli session to bind", firstWait: 30, finalWait: 45, in: app) else {
+            attachScreenshot(app, named: "cli-session-never-bound", keepAlways: true)
+            print("[Issues35] AX tree:\n\(app.windows.firstMatch.debugDescription)")
+            let banner = element(app, "error.banner")
+            XCTFail("On gateway-backed ACP the cli session should load in place, but the pane never bound to \(Self.cliTools). "
+                    + "Continuity notice: \(noticeRow.exists ? noticeRow.label : "<none>"). "
+                    + "Error banner: \(banner.exists ? banner.label : "<none>")")
+            return
+        }
+        XCTAssertTrue(staticText(app, containing: Self.cliFinalText).waitForExistence(timeout: 10),
+                      "The cli transcript (\"\(Self.cliFinalText)\") is not on screen after the load.")
+        XCTAssertTrue(staticText(app, containing: Self.cliPromptText).exists,
+                      "The cli user prompt (\"\(Self.cliPromptText)\") is not on screen after the load.")
+        // A notice would tell the user the context was lost when Hermes
+        // just restored it — polled briefly, it must not show up.
+        XCTAssertFalse(noticeRow.waitForExistence(timeout: 5),
+                       "The continuity notice is shown although Hermes reopened the cli session: \(noticeRow.label)")
+        XCTAssertFalse(element(app, "error.banner").exists, "An error banner is shown after the cli session loaded.")
+    }
+
+    /// Whether the host's Hermes runs gateway-backed ACP — the same rule as
+    /// `HermesCapabilities.hasGatewayBackedACP` (exactly 0.22.1, or 0.22.3
+    /// and later), read off `hermes --version` (the UI-test target links
+    /// neither the app nor ScarfCore). Run against this test's isolated
+    /// home, never `~/.hermes`. An unreadable version is a skip: the two
+    /// behaviours can't be told apart without it.
+    private func hostHasGatewayBackedACP() throws -> Bool {
+        guard let isolatedHome, FileManager.default.isExecutableFile(atPath: Self.hermesBinary) else {
+            throw XCTSkip("No hermes binary at \(Self.hermesBinary) to read the host version from.")
+        }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: Self.hermesBinary)
+        process.arguments = ["--version"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HERMES_HOME"] = isolatedHome
+        process.environment = environment
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = FileHandle.nullDevice
+        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 120, execute: watchdog)
+        defer { watchdog.cancel() }
+        try process.run()
+        let output = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        guard let version = Self.semver(fromVersionOutput: output) else {
+            throw XCTSkip("Could not read a Hermes version from `hermes --version`: \(output.prefix(200))")
+        }
+        print("[Issues35] host Hermes \(version)")
+        return Self.isGatewayBackedACP(version)
+    }
+
+    /// `Hermes Agent v0.22.5 (2026.9.24)` → (0, 22, 5). A major outside
+    /// 0...9 is the date version, not a semver (as ScarfCore's parser).
+    static func semver(fromVersionOutput output: String) -> (Int, Int, Int)? {
+        guard let marker = output.range(of: "Hermes Agent v") else { return nil }
+        let tail = output[marker.upperBound...].prefix { $0.isNumber || $0 == "." }
+        let parts = tail.split(separator: ".").compactMap { Int($0) }
+        guard parts.count >= 3, (0...9).contains(parts[0]) else { return nil }
+        return (parts[0], parts[1], parts[2])
+    }
+
+    static func isGatewayBackedACP(_ v: (Int, Int, Int)) -> Bool {
+        v == (0, 22, 1) || v >= (0, 22, 3)
     }
 
     // MARK: - #148 history-derived turn duration
