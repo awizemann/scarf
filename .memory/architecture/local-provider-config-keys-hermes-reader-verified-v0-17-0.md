@@ -4,7 +4,7 @@ type: note
 permalink: scarf/architecture/local-provider-config-keys-hermes-reader-verified-v0-17-0
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelConfigPlan.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: 6569d39774b3967a2e7ce2b6df53be288b5d4d8c
 created: 2026-07-13
 updated: 2026-09-26
 reviewed: 2026-09-27

@@ -7,7 +7,7 @@ source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabil
 source_paths_inferred: false
 source_sha: 60e38b31e53c0c0db6a6853677d27cfaa2f68ce4
 created: 2026-10-25
-updated: 2026-10-25
+updated: 2026-10-27
 ---
 
 Scarf's Hermes v0.21.6 → v0.22.5 parity cycle (2026-10-24/25), branch `feat/hermes-v0225-parity`. Audit + plan: documents/plans/2026-10-24-hermes-v0-22-5-audit-and-plan.md. Seven slices (S1–S7), each built in its own worktree, fresh-eyes audited, then cherry-picked. Tasks t-5a840e26, t-1301c677, t-69cf8a08, t-9b7739c1, t-434180c7, t-ba7bbc57, t-0cf09691, t-7e2da589.
@@ -23,3 +23,7 @@ Scarf's Hermes v0.21.6 → v0.22.5 parity cycle (2026-10-24/25), branch `feat/he
 - relates_to [[Hermes v0.21.4/v0.21.5 Compatibility Decisions]]
 - implements [[Hermes Capability Gating Pattern]]
 - relates_to [[Hermes v0.22 Wire Verification]]
+
+
+- [decision] /undo [N] and /retry go to Hermes on v0.22.3+ (hasGatewayRewindCommands; v0.22.1 is gateway-backed but refuses them, gateway_mutations.py:136-149 @ v0.22.1). Afterwards RichChatViewModel.followRewindFromDB rebuilds the transcript from state.db, where rewound rows are active = 0 (hermes_state_mutation_transcript.py:25-28 @ v0.22.5). It must drop the command's own echo and earlier ones (an undone typed turn otherwise looks "not yet stored" and is kept), keep later /queue echoes and their stream, and discard a late streamed remnant: the ACP prompt response can arrive before the reply's last chunks. Commit fce52231, gh#147 #acp #gateway
+- [gotcha] The unit tests passed while the live test failed three times on real Hermes v0.22.5 (an undone echo kept, a late chunk re-added as a second answer, a racy stop-control check). For anything that rebuilds the transcript, run the Live journey in scarf-ui, not just ScarfCore tests #testing

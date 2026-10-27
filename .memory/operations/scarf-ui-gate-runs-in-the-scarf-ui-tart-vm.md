@@ -3,11 +3,13 @@ title: Scarf UI gate runs in the scarf-ui Tart VM
 type: note
 permalink: scarf/operations/scarf-ui-gate-runs-in-the-scarf-ui-tart-vm
 tags: [testing, ui-tests, tart, vm, release-gate]
-source_paths: [scripts/ui-gate-vm.sh, scripts/ui-fixture/make-ui-fixture.sh, scripts/ui-fixture/README.md, scarf/scarfUITests/ChatJourneyUITests.swift]
+source_paths: [scripts/ui-gate-vm.sh, scripts/release.sh, scripts/ui-gate.sh]
 source_paths_inferred: false
-source_sha: 85d51c427cebc7d83466c9be52a0eaf74e02ae2c
+source_sha: 7841304189e4c501dc42732b3af7299beae11ab4
 created: 2026-10-26
 updated: 2026-10-26
+reviewed: 2026-10-26
+reviewed_by: claude-opus-5-5
 ---
 
 Since 2026-10-26 Scarf's XCUITest plans run in a dedicated Tart VM via scripts/ui-gate-vm.sh instead of on Alan's screen (on-host UI tests take over the Mac). First full green: Hermes v0.22.5 and v0.21.5, Smoke/Full/Live all PASS at commit 85d51c42.
@@ -26,3 +28,8 @@ Since 2026-10-26 Scarf's XCUITest plans run in a dedicated Tart VM via scripts/u
 
 
 - [decision] Lock (9956e2a8, 9c68e072): a kernel `flock` on `$RIG_HOME/locks/scarf-ui.lockf`, taken on the script's own fd 9 via a one-line python3 call; no stale-lock takeover code at all. `/usr/bin/lockf` was rejected: the lock belongs to the lockf process, so `kill -9` of lockf frees it while the command keeps running. `--reuse` accepts only `scarf-ui` (ScarfRack's ui-dev uses a different mkdir lock and must not be shared). Two earlier mkdir+mutex designs failed audits on takeover races #vm
+
+
+- [operations] From commit 78413041 (after v3.7.0), release.sh runs the gate as host unit tests (ui-gate.sh --unit-only) plus Full,Live in scarf-ui (ui-gate-vm.sh --summary), booting a stopped VM headless; --host-ui-gate is the old on-screen gate, --gate-only is a rehearsal that stops before the bump. No usable VM stops the release; it never falls back to the screen #release
+- [gotcha] Never edit scripts/release.sh or ui-gate*.sh in a checkout where a release is running: bash reads the script from its open file as it goes, so an in-place edit broke a live 3.7.0 run on 2026-10-26. Change them in a worktree #release #agents
+- [flaky] ChatJourneyUITests/testKanbanChipCountFollowsTheChatAndCountsReview failed once inside the Live plan (chip 1, expected 2) and passed alone in 47 s, so it's an in-plan ordering/timing flake #testing
