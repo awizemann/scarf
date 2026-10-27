@@ -23,12 +23,26 @@ fi
 #   ./scripts/release.sh 1.7.0 --skip-ui-tests   # bypass the UI release gate (loud
 #                                           # warning, recorded in UI-GATE.md). Not
 #                                           # recommended — see BUILDING.md.
+#   ./scripts/release.sh 1.7.0 --host-ui-gate    # run the UI plans on THIS Mac's
+#                                           # screen (scripts/ui-gate.sh) instead of
+#                                           # the scarf-ui Tart VM. Takes the Mac ~25 min.
+#   ./scripts/release.sh 1.7.0 --gate-only  # preflight + UI gate, then stop: no bump,
+#                                           # no build, no commit. Skips the clean-tree /
+#                                           # main checks (UI-GATE.md records the tree state).
+#                                           # A rehearsal: the real run gates again.
 #
 # UI release gate:
-#   Before the archive step, this script runs scripts/ui-gate.sh (unit tests + the
-#   Smoke/Full/Live XCUITest plans against a seeded throwaway Hermes home) and writes
-#   releases/v<VERSION>/UI-GATE.md. A failing gate aborts the release. --skip-ui-tests
-#   bypasses it with a loud warning and records "SKIPPED" into UI-GATE.md instead.
+#   Before the archive step, this script runs the gate and writes
+#   releases/v<VERSION>/UI-GATE.md. A failing gate (any FAIL or RUNNER-FAILED) aborts
+#   the release. By default the gate is:
+#     1. scripts/ui-gate.sh --unit-only — Full's scarfTests on this Mac (headless,
+#        serial; no UI tests, nothing takes the screen);
+#     2. scripts/ui-gate-vm.sh --plans Full,Live — the UI tests in the scarf-ui Tart
+#        VM against Hermes HERMES_TARGET_TAG from scripts/check-hermes-tables.py.
+#        A stopped scarf-ui is booted headless (see scripts/ui-fixture/README.md) and
+#        left running. No usable VM stops the release: fix it, or pass --host-ui-gate.
+#   --host-ui-gate runs scripts/ui-gate.sh (unit + Full + Live on this Mac) instead.
+#   --skip-ui-tests bypasses the gate with a loud warning and records "SKIPPED".
 #
 # Release notes:
 #   If `releases/v<VERSION>/RELEASE_NOTES.md` exists, it is committed alongside the
@@ -54,16 +68,22 @@ set -euo pipefail
 VERSION=""
 DRAFT=0
 SKIP_UI_TESTS=0
+HOST_UI_GATE=0
+GATE_ONLY=0
 for arg in "$@"; do
   case "$arg" in
     --draft) DRAFT=1 ;;
     --skip-ui-tests) SKIP_UI_TESTS=1 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --host-ui-gate) HOST_UI_GATE=1 ;;
+    --gate-only) GATE_ONLY=1 ;;
+    -h|--help) sed -n '13,63p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) printf '[ERR] unknown flag: %s\n' "$arg" >&2; exit 1 ;;
     *) [[ -z "$VERSION" ]] && VERSION="$arg" || { printf '[ERR] unexpected arg: %s\n' "$arg" >&2; exit 1; } ;;
   esac
 done
-[[ -n "$VERSION" ]] || { printf 'usage: ./scripts/release.sh <marketing-version> [--draft]\n' >&2; exit 1; }
+[[ -n "$VERSION" ]] || { printf 'usage: ./scripts/release.sh <marketing-version> [--draft] [--skip-ui-tests|--host-ui-gate] [--gate-only]\n' >&2; exit 1; }
+[[ $SKIP_UI_TESTS -eq 1 && ( $HOST_UI_GATE -eq 1 || $GATE_ONLY -eq 1 ) ]] \
+  && { printf '[ERR] --skip-ui-tests cannot be combined with --host-ui-gate or --gate-only\n' >&2; exit 1; }
 
 # ---------- config ----------
 TEAM_ID="3Q6X2L86C4"
@@ -128,11 +148,15 @@ cd "$REPO_ROOT"
 # path when all contents are untracked, so the whitelist matches both forms.
 ALLOW="^\?\? releases/v${VERSION}/"
 DIRTY="$(git status --porcelain | grep -Ev "$ALLOW" || true)"
-if [[ -n "$DIRTY" ]]; then
-  die "working tree not clean — commit or stash first"
-fi
 CUR_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-[[ "$CUR_BRANCH" == "main" ]] || die "not on main (on $CUR_BRANCH)"
+if [[ $GATE_ONLY -eq 1 ]]; then
+  # Nothing is committed or built for release, so a dirty tree or another branch
+  # is allowed; UI-GATE.md says which it was.
+  [[ -z "$DIRTY" ]] || warn "--gate-only: working tree not clean — the gate tests it as it is"
+else
+  [[ -z "$DIRTY" ]] || die "working tree not clean — commit or stash first"
+  [[ "$CUR_BRANCH" == "main" ]] || die "not on main (on $CUR_BRANCH)"
+fi
 
 # identity present
 security find-identity -v -p codesigning | grep -q "$SIGNING_IDENTITY" \
@@ -171,6 +195,82 @@ fi
 log "Sparkle keypair OK ($EMBEDDED_PUBKEY)"
 
 # ---------- UI release gate ----------
+# The default gate: scarfTests on this Mac, then the UI plans in the scarf-ui Tart
+# VM (scripts/ui-gate-vm.sh), so nothing takes this Mac's screen. Writes both
+# summaries into $UI_GATE_SUMMARY and dies unless both passed.
+VM_NAME="scarf-ui"
+VM_WORK_DISK="${SCARF_VM_WORK_DISK:-$HOME/.tart/scarf-ui-logs/scarf-work.img}"
+vm_state() { { tart list 2>/dev/null || true; } | awk -v n="$VM_NAME" '$2 == n { print $NF }'; }
+ensure_vm_running() {
+  command -v tart >/dev/null 2>&1 || die "tart not installed — the UI gate runs in the $VM_NAME Tart VM. Set it up (scripts/ui-fixture/README.md) or pass --host-ui-gate"
+  # The guest runs the host's Xcode, shared read-only, so it must be the one
+  # this script builds with.
+  local xcode_app; xcode_app="${DEVELOPER_DIR:-$(xcode-select -p 2>/dev/null || true)}"; xcode_app="${xcode_app%/}"; xcode_app="${xcode_app%/Contents/Developer}"
+  [[ "$xcode_app" == *.app && -d "$xcode_app" ]] || die "could not find the Xcode.app to share with $VM_NAME (got '$xcode_app'; set DEVELOPER_DIR)"
+  local state; state="$(vm_state)"
+  case "$state" in
+    running)
+      local shared
+      shared="$(ps -axo command= | sed -n "s/.*tart run $VM_NAME .*--dir=xcode:\([^ ]*\):ro.*/\1/p" | head -1)"
+      [[ -z "$shared" || "${shared%/}" == "$xcode_app" ]] \
+        || die "$VM_NAME is running with $shared shared, but this release builds with $xcode_app — stop it (tart stop $VM_NAME) to let this script boot it with $xcode_app, or set DEVELOPER_DIR=$shared"
+      log "$VM_NAME is running${shared:+ (Xcode: $shared)}"; return 0 ;;
+    stopped) ;;
+    "") die "no Tart VM named $VM_NAME — set it up (scripts/ui-fixture/README.md, \"Setting up scarf-ui\") or pass --host-ui-gate" ;;
+    *) die "$VM_NAME is $state, not running or stopped — sort it out or pass --host-ui-gate" ;;
+  esac
+  [[ -f "$VM_WORK_DISK" ]] || die "$VM_NAME's work disk is missing at $VM_WORK_DISK (set SCARF_VM_WORK_DISK) — see scripts/ui-fixture/README.md"
+  local boot_log; boot_log="$(dirname "$VM_WORK_DISK")/boot-$(date +%Y%m%d-%H%M%S).log"
+  log "Booting $VM_NAME headless (Xcode: $xcode_app; log: $boot_log); it stays running after the release"
+  # In its own session (setsid via perl), so a Ctrl-C of this release doesn't stop the VM.
+  nohup perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec: $!"' \
+    tart run "$VM_NAME" --no-graphics --no-audio \
+    "--dir=xcode:$xcode_app:ro" "--disk=$VM_WORK_DISK" </dev/null >"$boot_log" 2>&1 &
+  local tart_pid=$! i
+  for i in $(seq 1 60); do
+    [[ "$(vm_state)" == running ]] && { log "$VM_NAME booted (ui-gate-vm.sh waits for SSH)"; return 0; }
+    kill -0 "$tart_pid" 2>/dev/null || die "tart run $VM_NAME exited — see $boot_log"
+    sleep 2
+  done
+  die "$VM_NAME did not reach 'running' within 2 minutes — see $boot_log"
+}
+run_vm_ui_gate() {
+  local tag unit_sum vm_sum unit_rc=0 vm_rc=0 tree="clean tree"
+  [[ -z "$(git status --porcelain | grep -Ev "$ALLOW" || true)" ]] || tree="DIRTY tree"
+  tag="$(sed -n 's/^HERMES_TARGET_TAG = "\(v[^"]*\)"$/\1/p' "$REPO_ROOT/scripts/check-hermes-tables.py")"
+  [[ -n "$tag" ]] || die "could not read HERMES_TARGET_TAG from scripts/check-hermes-tables.py"
+  ensure_vm_running
+  unit_sum="$(mktemp "${TMPDIR:-/tmp}/scarf-gate-unit.XXXXXX")"
+  vm_sum="$(mktemp "${TMPDIR:-/tmp}/scarf-gate-vm.XXXXXX")"
+  rm -f "$UI_GATE_SUMMARY"
+
+  log "UI release gate 1/2: scarfTests on this Mac (scripts/ui-gate.sh --unit-only)"
+  "$REPO_ROOT/scripts/ui-gate.sh" --unit-only --summary "$unit_sum" || unit_rc=$?
+  if [[ $unit_rc -eq 0 ]]; then
+    log "UI release gate 2/2: Full + Live UI tests in $VM_NAME, Hermes $tag (scripts/ui-gate-vm.sh)"
+    "$REPO_ROOT/scripts/ui-gate-vm.sh" --hermes-tag "$tag" --plans Full,Live --summary "$vm_sum" || vm_rc=$?
+  fi
+  {
+    printf '# UI Gate Summary (release %s)\n\n' "$VERSION"
+    printf -- '- Mode: unit tests on this Mac, UI tests in the %s Tart VM\n' "$VM_NAME"
+    printf -- '- Git commit: %s (%s when the gate started)\n\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)" "$tree"
+    sed 's/^# /## /; s/^Overall: /Result: /' "$unit_sum"
+    printf '\n'
+    if [[ $unit_rc -ne 0 ]]; then
+      printf '## UI Gate (Tart VM)\n\nNot run: the unit tests failed.\n'
+    elif [[ -s "$vm_sum" ]]; then
+      sed 's/^# /## /; s/^Overall: /Result: /' "$vm_sum"
+    else
+      printf '## UI Gate (Tart VM)\n\nFAIL: scripts/ui-gate-vm.sh stopped before running the plans (exit %s) — see its output above.\n' "$vm_rc"
+    fi
+    printf '\nOverall: %s\n' "$(if [[ $unit_rc -eq 0 && $vm_rc -eq 0 ]]; then echo PASS; else echo FAIL; fi)"
+  } >"$UI_GATE_SUMMARY"
+  rm -f "$unit_sum" "$vm_sum"
+  [[ $unit_rc -eq 0 && $vm_rc -eq 0 ]] \
+    || die "UI release gate failed — see $UI_GATE_SUMMARY. Fix it, or re-run with --host-ui-gate / --skip-ui-tests (not recommended)."
+  log "UI release gate passed — summary: $UI_GATE_SUMMARY"
+}
+
 # Runs BEFORE the version bump so a failed gate leaves no stray bump commit, and
 # so the bump commit below can carry UI-GATE.md as the release's own evidence.
 # On a resume run (version already bumped) pass --skip-ui-tests if the gate has
@@ -189,11 +289,19 @@ if [[ $SKIP_UI_TESTS -eq 1 ]]; then
     printf -- '- Git commit: %s\n\n' "$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
     printf 'SKIPPED by --skip-ui-tests\n'
   } > "$UI_GATE_SUMMARY"
-else
-  log "Running UI release gate (scripts/ui-gate.sh)"
+elif [[ $HOST_UI_GATE -eq 1 ]]; then
+  warn "--host-ui-gate: the UI plans run on THIS Mac's screen (~25 min); don't touch it"
+  log "Running UI release gate on this Mac (scripts/ui-gate.sh)"
+  rm -f "$UI_GATE_SUMMARY"
   "$REPO_ROOT/scripts/ui-gate.sh" --summary "$UI_GATE_SUMMARY" \
     || die "UI release gate failed — see $UI_GATE_SUMMARY. Re-run with --skip-ui-tests to bypass (not recommended)."
   log "UI release gate passed — summary: $UI_GATE_SUMMARY"
+else
+  run_vm_ui_gate
+fi
+if [[ $GATE_ONLY -eq 1 ]]; then
+  log "--gate-only: stopping before the version bump (summary: $UI_GATE_SUMMARY)"
+  exit 0
 fi
 
 # ---------- bump version ----------

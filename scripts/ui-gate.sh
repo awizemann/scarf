@@ -15,10 +15,13 @@
 # directory so the app only builds once, and writes a pass/fail summary.
 #
 # Usage:
-#   scripts/ui-gate.sh [--smoke-only] [--skip-live] [--derived-data <path>]
+#   scripts/ui-gate.sh [--smoke-only] [--skip-live] [--unit-only] [--derived-data <path>]
 #                       [--keep-fixture] [--summary <file>]
 #
 #   --smoke-only        Run only the Smoke plan (fast sanity: section sweep). Skips Full/Live.
+#   --unit-only         Run only Full's scarfTests (-only-testing:scarfTests), no fixture and
+#                       no UI tests, so nothing takes the screen. release.sh pairs it with
+#                       scripts/ui-gate-vm.sh, which runs the UI tests in a Tart VM.
 #   --skip-live          Run Full but skip Live (no real credentials / provider keys needed).
 #   --derived-data DIR  Reuse this DerivedData dir instead of a fresh TMPDIR one.
 #   --keep-fixture       Don't delete the seeded fixture home on exit.
@@ -101,6 +104,7 @@ fi
 # ---------- arg parsing ----------
 SMOKE_ONLY=0
 SKIP_LIVE=0
+UNIT_ONLY=0
 KEEP_FIXTURE=0
 DERIVED_DATA=""
 SUMMARY_FILE=""
@@ -113,12 +117,13 @@ for arg in "$@"; do
   case "$arg" in
     --smoke-only) SMOKE_ONLY=1 ;;
     --skip-live) SKIP_LIVE=1 ;;
+    --unit-only) UNIT_ONLY=1 ;;
     --keep-fixture) KEEP_FIXTURE=1 ;;
     --derived-data) _prev="$arg" ;;
     --derived-data=*) DERIVED_DATA="${arg#--derived-data=}" ;;
     --summary) _prev="$arg" ;;
     --summary=*) SUMMARY_FILE="${arg#--summary=}" ;;
-    -h|--help) sed -n '2,38p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
@@ -155,6 +160,9 @@ cleanup() {
 trap cleanup EXIT
 
 # ---------- fixture ----------
+# The unit tests don't read it.
+FIXTURE_WALL=0
+if [[ $UNIT_ONLY -eq 0 ]]; then
 log "Building seeded fixture Hermes home"
 FIXTURE_PARENT="$(mktemp -d "$RUN_TMP/fixture.XXXXXX")"
 FIXTURE_DEST="$FIXTURE_PARENT/fixture-home"
@@ -165,10 +173,15 @@ fi
 FIXTURE_T1=$(date +%s)
 FIXTURE_WALL=$((FIXTURE_T1 - FIXTURE_T0))
 log "Fixture ready at $FIXTURE_DIR (${FIXTURE_WALL}s)"
+fi
 
 # ---------- plans to run ----------
 PLANS=()
-if [[ $SMOKE_ONLY -eq 1 ]]; then
+ONLY_ARGS=()
+if [[ $UNIT_ONLY -eq 1 ]]; then
+  PLANS=(Full)
+  ONLY_ARGS=(-only-testing:scarfTests)
+elif [[ $SMOKE_ONLY -eq 1 ]]; then
   PLANS=(Smoke)
 else
   PLANS=(Full)
@@ -214,6 +227,7 @@ run_plan() {
     -resultBundlePath "$bundle" \
     -skipPackagePluginValidation -skipMacroValidation \
     -parallel-testing-enabled NO \
+    ${ONLY_ARGS[@]+"${ONLY_ARGS[@]}"} \
     2>&1 | tee "$log_file" | grep --line-buffered -E "Test Suite|Test Case|error:|BUILD FAILED|BUILD SUCCEEDED|\*\* TEST (SUCCEEDED|FAILED) \*\*"
   status=${PIPESTATUS[0]}
   set -e
@@ -246,7 +260,8 @@ run_plan() {
     fi
   fi
 
-  RESULT_LINES+=("| $plan | $verdict | UI: ${executed} executed / ${failed} failed; ${unit_line} | ${wall}s | \`$bundle\` |")
+  local label="$plan"; [[ $UNIT_ONLY -eq 0 ]] || label="$plan (scarfTests only)"
+  RESULT_LINES+=("| $label | $verdict | XCTest: ${executed} executed / ${failed} failed; ${unit_line} | ${wall}s | \`$bundle\` |")
   log "$plan: $verdict (${wall}s) — log: $log_file, bundle: $bundle"
 }
 
@@ -260,8 +275,8 @@ SUMMARY_CONTENT="$(cat <<EOF
 
 - Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
 - Git commit: $GIT_HASH
-- Hermes version: $HERMES_VERSION
-- Fixture build: ${FIXTURE_WALL}s (fixture removed unless --keep-fixture)
+- Hermes version: $(if [[ $UNIT_ONLY -eq 1 ]]; then echo "not used (--unit-only)"; else echo "$HERMES_VERSION"; fi)
+- Fixture build: $(if [[ $UNIT_ONLY -eq 1 ]]; then echo "none (--unit-only)"; else echo "${FIXTURE_WALL}s (fixture removed unless --keep-fixture)"; fi)
 - DerivedData: $DERIVED_DATA
 
 | Plan | Result | Tests | Wall time | Result bundle |

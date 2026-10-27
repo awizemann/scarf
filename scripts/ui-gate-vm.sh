@@ -16,6 +16,7 @@
 #                         [--reuse scarf-ui] [--no-build] [--keep-results]
 #                         [--with-unit-tests] [--skip-display-check]
 #                         [--only Class[/test]]… [--allow-oauth-provider]
+#                         [--summary FILE]
 #
 #   --hermes-tag TAG   Hermes tag to install in the guest (v0.22.5, v2026.9.24, …).
 #                      Must exist in the Hermes checkout ($SCARF_VM_HERMES_SRC,
@@ -40,6 +41,9 @@
 #                      window-size check; useful only to exercise the script).
 #   --allow-oauth-provider  When the active provider signs in with OAuth, copy
 #                      its one auth.json entry in (otherwise the run stops).
+#   --summary FILE     Also copy summary.md here when the plans have run
+#                      (scripts/release.sh's UI-GATE.md). Not written when the
+#                      run stops before the plans.
 #   --credentials-only Build the guest's credentials on the host, print the
 #                      NAMES that would go in, delete them, and stop (no VM).
 #
@@ -122,6 +126,7 @@ DISPLAY_CHECK=1
 ALLOW_OAUTH=0
 CREDS_ONLY=0
 LOCK_TEST=""
+SUMMARY_COPY=""
 ONLY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -134,16 +139,18 @@ while [[ $# -gt 0 ]]; do
     --with-unit-tests) UI_ONLY=0; shift ;;
     --skip-display-check) DISPLAY_CHECK=0; shift ;;
     --allow-oauth-provider) ALLOW_OAUTH=1; shift ;;
+    --summary) SUMMARY_COPY="${2:?--summary needs a file}"; shift 2 ;;
     --credentials-only) CREDS_ONLY=1; BUILD=0; shift ;;
     --lock-test) LOCK_TEST="${2:?}"; HERMES_TAG="${HERMES_TAG:-none}"; shift 2 ;;
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,88p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,92p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
 [[ -n "$HERMES_TAG" ]] || die "--hermes-tag is required (see --help)"
+[[ -z "$SUMMARY_COPY" || -d "$(dirname "$SUMMARY_COPY")" ]] || die "--summary: no such directory: $(dirname "$SUMMARY_COPY")"
 case "$REUSE" in *[!A-Za-z0-9_-]*|"") die "--reuse takes a clone's name" ;; esac
 # The lock below is Scarf's own (flock), not ScarfRack's mkdir lock, so a clone
 # ScarfRack also drives (ui-dev, …) could be used by both at once.
@@ -918,4 +925,5 @@ done
   else echo "Overall: FAIL"; fi
 } >"$RESULT/summary.md"
 cat "$RESULT/summary.md"
+[[ -z "$SUMMARY_COPY" ]] || cp "$RESULT/summary.md" "$SUMMARY_COPY"
 exit "$OVERALL"
