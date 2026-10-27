@@ -28,7 +28,11 @@ Packages/
 !scarf/Packages/
 Package.pins
 Package.resolved
-*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+**/*.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/*
+# Except the app's own pins: without them a fresh clone resolves the newest
+# release of every dependency (SwiftTerm's broke the build), not the versions
+# releases are built and tested with.
+!scarf/scarf.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 .swiftpm/
 
 # macOS
