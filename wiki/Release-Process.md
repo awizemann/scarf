@@ -3,7 +3,7 @@ title: Release-Process
 type: note
 permalink: scarf-wiki/release-process
 created: 2026-05-29
-updated: 2026-06-06
+updated: 2026-10-26
 ---
 
 # Release Process
@@ -22,6 +22,19 @@ Mac releases are produced by a single local script: [`scripts/release.sh`](https
 A full release bumps the version, archives Universal (arm64 + x86_64) + ARM64-only variants, signs with Developer ID, notarizes via `xcrun notarytool`, staples, EdDSA-signs the appcast entry with Sparkle's key, pushes the appcast to `gh-pages`, and creates a GitHub release with both zips attached.
 
 **Post-package verification gate** _(v2.5.1+)._ After every variant's final `ditto`, the script extracts the packaged zip into a temp dir and runs `codesign --verify --strict --deep --verbose=4` + `spctl --assess --type execute --verbose` on the extracted bundle. Either failure aborts the release. This catches any regression in the shipped artifact (stapler edge cases, post-staple modifications, framework-seal drift) before users see "Scarf.app is damaged" reports — issue [#49](https://github.com/awizemann/scarf/issues/49).
+
+**UI release gate** _(v3.7.1+)._ Before the version bump, `release.sh` runs the test gate and writes `releases/v<VERSION>/UI-GATE.md`, which the bump commit carries. Any FAIL or RUNNER-FAILED stops the release. By default nothing takes over the Mac's screen:
+
+1. `scripts/ui-gate.sh --unit-only`: Full's `scarfTests` on this Mac, serially, with no UI tests.
+2. `scripts/ui-gate-vm.sh --plans Full,Live`: the XCUITests inside the `scarf-ui` Tart VM, against the Hermes tag in `scripts/check-hermes-tables.py` (`HERMES_TARGET_TAG`). If `scarf-ui` is stopped, the script boots it headless with the release's Xcode shared in, and leaves it running. If it's already running with a different Xcode, the release stops. Setup: `scripts/ui-fixture/README.md` → "Running the UI plans in a Tart VM".
+
+```bash
+./scripts/release.sh <VERSION> --gate-only      # rehearsal: preflight + gate, then stop (no bump, build or commit)
+./scripts/release.sh <VERSION> --host-ui-gate   # fallback: the old on-screen gate (takes the Mac ~25 min)
+./scripts/release.sh <VERSION> --skip-ui-tests  # bypass; records SKIPPED in UI-GATE.md
+```
+
+No usable VM means the release stops; it never falls back to the screen on its own. Don't edit `scripts/` in the checkout while a release is running: bash reads the script as it runs. Change the scripts in a worktree instead.
 
 A draft release stops after the GitHub release is uploaded, so the current version stays "latest" until explicitly promoted.
 
