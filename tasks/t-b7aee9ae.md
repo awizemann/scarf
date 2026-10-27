@@ -1,7 +1,7 @@
 ---
 id: t-b7aee9ae
 title: v0.22.5 S8: live test, memory, wiki
-status: doing
+status: done
 added: 2026-10-25
 priority: high
 ---

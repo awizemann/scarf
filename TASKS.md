@@ -10,6 +10,7 @@
 - [ ] Mini-app kanban writes (kanban:write, behind permission) (id: t-934207cd) (added: 2026-06-21) (priority: low)
 - [ ] Add a permission toggle for each chat, for auto or yolo (or supported Hermes verbs) to help with tool dialogs. (added: 2026-06-06)
 - [ ] New chat session from project (or working in a project) isn't linked to the project and doesn't show up in sessions for that project. Harden the project to chat logic. (added: 2026-06-06)
+- [ ] Add a chat Fork button once Hermes records fork lineage (id: t-60bb1518) (added: 2026-10-27) (priority: low)
 
 ## Todo
 
@@ -104,20 +105,26 @@
 - [ ] Retry after a resume fallback: reconnect to the fallback session and keep the original history (id: t-5191697d) (added: 2026-09-29)
 - [ ] Flaky/failing Mac UI tests: Kanban, Cron, SectionSweep, ModelPreset (id: t-c431ea6c) (added: 2026-09-29)
 - [ ] Consider setting HERMES_TENANT on Scarf project chats (id: t-aa644979) (added: 2026-09-29)
+- [ ] Fix release.sh resume leaving UI-GATE.md dirty (id: t-251254e2) (added: 2026-10-26) (priority: low)
+- [ ] De-flake Kanban chip count Live UI test (id: t-ccd07453) (added: 2026-10-26)
+- [ ] Post gh#147 retest note when the next release ships (id: t-9f3fefc6) (added: 2026-10-26)
+- [ ] Upload ScarfGo 3.7.0 (Mac 3.7.0 shipped) (id: t-126e3304) (added: 2026-10-05) (priority: high)
+- [ ] Investigate slow chat resume (gh#150) (id: t-9eed811c) (added: 2026-10-27)
 
 ## Doing
 
-- [ ] v0.22.5 S8: live test, memory, wiki (id: t-b7aee9ae) (added: 2026-10-25) (priority: high)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
 - [ ] Refresh marketing site + README FAQ for v2.15 Projects (supersede PR #109) (id: t-83c4c692) (added: 2026-06-28)
 - [ ] gh-pages: backfill appcast minimum OS + fix privacy page link/colors (id: t-8af65c8f) (added: 2026-10-05) (priority: urgent)
-- [ ] Upload ScarfGo 3.6.0 (Mac 3.6.0 shipped) (id: t-126e3304) (added: 2026-10-05) (priority: high)
-- [ ] Release Scarf v3.7.0 (Hermes v0.22.5 parity) (id: t-c07fefca) (added: 2026-10-26) (priority: high)
 
 ## Done
 
+- [x] Pass /retry and /undo through on gateway-backed ACP (id: t-b2ba0fa8) (added: 2026-10-26) (priority: high)
+- [x] Pin SwiftTerm so fresh clones build (id: t-c6412713) (added: 2026-10-26) (priority: high)
+- [x] v0.22.5 S8: live test, memory, wiki (id: t-b7aee9ae) (added: 2026-10-25) (priority: high)
+- [x] Release Scarf v3.7.0 (Hermes v0.22.5 parity) (id: t-c07fefca) (added: 2026-10-26) (priority: high)
 - [x] Check: ACP load of a CLI session from a different folder on Hermes 0.22.3+ (id: t-361f4f02) (added: 2026-10-26)
 - [x] Scarf UI gate in a Tart VM (dedicated scarf-ui) (id: t-cce54618) (added: 2026-10-25) (priority: high)
 - [x] VM UI runs: survive macOS low-disk purge kills (id: t-800af0b8) (added: 2026-10-26) (priority: high)

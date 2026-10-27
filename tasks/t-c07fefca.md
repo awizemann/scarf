@@ -1,7 +1,7 @@
 ---
 id: t-c07fefca
 title: Release Scarf v3.7.0 (Hermes v0.22.5 parity)
-status: doing
+status: done
 added: 2026-10-26
 priority: high
 ---
