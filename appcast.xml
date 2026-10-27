@@ -6,6 +6,137 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.7.0</title>
+      <sparkle:version>76</sparkle:version>
+      <sparkle:shortVersionString>3.7.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 27 Oct 2026 00:51:39 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.7.0</p>
+<p>This release brings Scarf up to <strong>Hermes v0.22.5</strong>, covering everything Hermes shipped from v0.21.6 through v0.22.5. The biggest change on Hermes&#x27;s side is that, from v0.22.3, chat no longer runs in its own process: <code>hermes acp</code> became a window onto Hermes&#x27;s gateway, the same background service your other apps and bots talk to. Scarf now follows that new chat model end to end, so you can resume chats you started in the Hermes CLI, TUI or Desktop app, answer Hermes&#x27;s clarifying questions, and close Scarf without stopping a reply that&#x27;s still running. Scarf also respects Hermes&#x27;s new safety rules: it no longer kills a gateway that Hermes refused to stop because chats were still live, and it stops you from saving a <code>config.yaml</code> that the new, stricter Hermes would refuse to load. Everything new is gated to the Hermes version that introduced it. Nothing changes on a host you don&#x27;t upgrade.</p>
+<h2>Chat on Hermes&#x27;s gateway</h2>
+<p>From Hermes v0.22.3, every chat is a gateway session. The protocol Scarf speaks didn&#x27;t change, but the way Hermes behaves behind it did, in ways that would have made Scarf quietly do the wrong thing on the day you upgraded:</p>
+<ul>
+  <li><strong>Resuming chats started elsewhere works.</strong> Hermes now stores chats started in the CLI, TUI, Desktop app or over ACP as one &quot;local&quot; kind, with the real origin kept separately. Scarf only resumed chats marked as its own kind, so opening one of these silently started a fresh chat instead. Scarf now loads them, so the transcript and the model&#x27;s context carry on. A reopened chat also keeps its own working folder: Scarf used to send the project or home folder, and Hermes then quietly moved the chat to your home folder. If the chat&#x27;s folder no longer exists, Scarf reopens it in the project or home folder instead. If Hermes still refuses (for example, no model is set for it), Scarf shows the error with a hint, rather than quietly starting a new chat and losing the conversation.</li>
+  <li><strong><code>/queue</code> keeps the chat working.</strong> A queued prompt is now its own turn on Hermes&#x27;s side, and the running reply finishes before the queued one starts. Scarf used to clear its queue and say &quot;done&quot; at that point. It now stays in the working state until the queued prompt has its answer.</li>
+  <li><strong>Clarifying questions are question cards.</strong> When Hermes needs you to pick an option, the question arrives the way a tool approval does. Scarf showed it as &quot;Tool Approval Required&quot;, and pressing <strong>Skip</strong> counted as yes. It now has its own heading, and Skip is a decline. Scarf reads every approval answer by what the option means rather than its position, on every Hermes version.</li>
+  <li><strong>Model switches can ask first.</strong> Hermes may now ask you to confirm a model change mid-chat. Scarf shows that as its own card, and a switch you decline reverts quietly.</li>
+  <li><strong>Closing Scarf no longer stops a running reply.</strong> The gateway keeps working after Scarf disconnects. Scarf&#x27;s &quot;connection lost&quot; line no longer says the reply stopped, and the &quot;Allow edits for this session&quot; button is hidden mid-turn where Hermes can&#x27;t change it.</li>
+  <li><strong>Smaller chat changes.</strong> Long chats that Hermes compresses are followed from the database, because the gateway no longer announces it. The approval-mode chip follows mode changes Hermes reports. <code>/goal</code> and other commands Hermes handles itself no longer get a &quot;sent as an ordinary prompt&quot; note. If chat can&#x27;t start because an old gateway is still running or the gateway belongs to another profile, Scarf explains it in plain words.</li>
+</ul>
+<h2>Gateway safety</h2>
+<p>From v0.22.3, Hermes refuses to stop or restart the gateway while chats are live, to protect the work in progress. Your open Scarf chat counts. Scarf read that refusal as a failure and fell back to killing the gateway process, interrupting exactly the work Hermes was protecting.</p>
+<p>Now Scarf shows Hermes&#x27;s reason and asks: <strong>Interrupt N live sessions and stop/restart the gateway?</strong> Only a yes passes Hermes&#x27;s own confirmation. Scarf never falls back to killing the process after a refusal, on any Hermes version. This applies in Health, the Gateway pane, Platforms, MCP and the menu bar.</p>
+<p>Also on the gateway:</p>
+<ul>
+  <li>A gateway you started by hand (with no installed service) now restarts in the background through Hermes&#x27;s own <code>restart --detach</code> on v0.22.3+, instead of being refused or tied to Scarf.</li>
+  <li>Right after an upgrade, the gateway can be running but unable to serve the new Hermes. The Gateway pane now says so, with Hermes&#x27;s reason and a Restart button, instead of showing &quot;running&quot;.</li>
+</ul>
+<h2>Strict config loading</h2>
+<p>From v0.21.6, Hermes loads <code>config.yaml</code> strictly: <strong>a key written twice in the same section stops Hermes, its gateway and cron from starting.</strong> Older Hermes quietly used the last one. On these hosts, Scarf now finds duplicate keys, shows the error on the Dashboard (Mac) and in Settings (ScarfGo), and refuses to save a file that contains one, whichever screen is saving. Hermes also now reads a bare <code>y</code> or <code>n</code> as yes or no, so Scarf puts quotes around those values when it writes them, keeping them as text on every Hermes version.</p>
+<h2>Features that moved into Hermes plugins</h2>
+<p>Hermes moved several built-in features into installable plugins from its catalog: the memory providers (Honcho, mem0, OpenViking, Supermemory, Hindsight, Holographic), Home Assistant, Spotify and the Singularity terminal. Your settings stay put, but the feature only works once the plugin is installed and enabled. Scarf now shows a short note where you use each of these, with <strong>Install Plugin</strong> or <strong>Enable</strong>. Spotify sign-in uses the plugin&#x27;s own <code>hermes spotify login</code>, with your client ID passed along as before. A memory provider that needs its own setup points you to <code>hermes memory setup &lt;name&gt;</code> in Terminal.</p>
+<h2>Sessions show where a chat was created</h2>
+<p>The Sessions list, badges and icons now show where a chat really started (CLI, TUI, Desktop or ACP) instead of &quot;local&quot; for all of them. When Hermes refuses to delete a session that is still active or has a turn running, Scarf shows Hermes&#x27;s reason instead of &quot;exited 1&quot;.</p>
+<h2>Fixed on every Hermes version</h2>
+<ul>
+  <li><strong>Token usage was double-counted.</strong> Hermes reports each chat&#x27;s prompt tokens as a running total, and Scarf added each turn&#x27;s total to the previous ones. Scarf now uses the total as reported.</li>
+  <li><strong>Health no longer asks old Hermes for API keys in plain text.</strong> Hermes v0.21.6 shortened <code>hermes status</code> to a one-screen summary, which left Scarf&#x27;s Health status panel empty. Scarf now asks for the full report with <code>status --all</code>, but <strong>only on v0.21.6 and later</strong>: on Hermes versions from about v0.6 to v0.19, that same flag printed API keys unredacted, so Scarf never sends it there.</li>
+  <li><strong>No more false &quot;stale provider&quot; banner for vLLM or llama.cpp.</strong> Hermes treats <code>vllm</code>, <code>llamacpp</code>, <code>llama.cpp</code>, <code>llama-cpp</code> and <code>local</code> as the custom provider, and always has. Scarf now does the same.</li>
+</ul>
+<h2>Smaller fixes</h2>
+<ul>
+  <li>Enabling or disabling a plugin on v0.22.3+ no longer shows a failure banner when it worked.</li>
+  <li>A plugin that needs your consent to install its dependencies no longer reads as &quot;Installed&quot; while it&#x27;s off. Scarf asks, then enables it with Hermes&#x27;s own <code>plugins enable</code>, never a forced reinstall that would also skip Hermes&#x27;s security scan.</li>
+  <li>An import that only partly restored reads as partial success again, with Hermes&#x27;s notes, instead of a failure.</li>
+  <li>Duplicating a cron job keeps its interpreter setting.</li>
+  <li>New providers and catalog entries: Solstice routing (v0.21.6+), the <code>krea-3</code> image model and the <code>rentahuman</code> MCP server (v0.22.3+).</li>
+  <li>The Tirith Sandbox settings are hidden on v0.21.6+, where Hermes removed them.</li>
+  <li>When Hermes&#x27;s chat (ACP) packages are missing from an install, Scarf says so and shows the command Hermes suggests to add them.</li>
+  <li>Also: kanban shows two new diagnostic kinds, restoring a built-in skill reads as success, Health recognises a Hermes newer than the stable release, the Plugins pane no longer runs a removed compatibility check on every load, and session recency ignores bad timestamps the way Hermes does.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>New capability flags for Hermes v0.21.6, v0.21.7, v0.22.3 and v0.22.5, with tests for every floor. v0.22.2 reverted v0.22.1&#x27;s gateway work and v0.22.3 restored it, so Scarf treats v0.22.1 and v0.22.3+ as gateway-backed.</li>
+  <li>Hermes now tags releases <code>vX.Y.Z</code>, and the date in <code>hermes --version</code> stays at 2026.9.24. Scarf reads the version number, so detection is unaffected.</li>
+  <li>The provider-table checker now reads providers that new Hermes plugins register inline, and checks against v0.22.5.</li>
+  <li>The UI tests now run in a Tart virtual machine, against a chosen Hermes version, so they never take over the Mac&#x27;s screen.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 15.0+ (Apple Silicon and Intel). ScarfGo (iOS 18.6+) gets the shared fixes in its next App Store and TestFlight build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.22.5. Older Hermes versions keep working exactly as before; features from v0.21.6 and later appear only on hosts that have them.</li>
+  <li>After upgrading Hermes to v0.21.6 or later, check the Dashboard for a duplicate-key warning before restarting the gateway, and install the plugins for any memory provider, Home Assistant, Spotify or Singularity setup you use.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.7.0/Scarf-v3.7.0-Universal.zip"
+                 sparkle:edSignature="0uxrcPS66LU7Hr25ziSOIDtCodzhXggJYMJ7OeB/xcO+ZR+VDERnFPGtXfYEriThae6FYIjJwLFAM9iWQ8nzDQ=="
+                 length="36684483"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.6.0</title>
       <sparkle:version>75</sparkle:version>
       <sparkle:shortVersionString>3.6.0</sparkle:shortVersionString>
