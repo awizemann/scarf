@@ -6,6 +6,106 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.7.1</title>
+      <sparkle:version>77</sparkle:version>
+      <sparkle:shortVersionString>3.7.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Tue, 27 Oct 2026 21:25:12 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.7.1</p>
+<p>A small follow-up to 3.7.0: <strong><code>/undo</code> and <code>/retry</code> now work in Scarf&#x27;s chat on Hermes v0.22.3 and later.</strong> From v0.22.3, Hermes&#x27;s gateway answers both commands itself, but Scarf still stopped them with a &quot;use the Hermes CLI&quot; note. Scarf now sends them to Hermes and then redraws the chat to match what Hermes kept. Older Hermes versions behave exactly as before.</p>
+<h2><code>/undo</code> and <code>/retry</code> in chat</h2>
+<p>On Hermes v0.22.3 and later, typing <code>/undo</code> (or <code>/undo N</code>) or <code>/retry</code> in a chat now does what it does in the Hermes CLI:</p>
+<ul>
+  <li><strong><code>/undo</code></strong> removes the last turn (or the last N turns) from the conversation. Scarf shows Hermes&#x27;s reply, such as how many turns it removed or that there was nothing to undo.</li>
+  <li><strong><code>/retry</code></strong> throws away the last answer and asks the model again. The new answer replaces the old one in the transcript. If Hermes refuses (for example, while another prompt is still running), Scarf shows Hermes&#x27;s reason instead of doing nothing.</li>
+</ul>
+<p>Hermes doesn&#x27;t delete undone turns; it marks them as no longer part of the conversation. After either command, Scarf rebuilds the transcript from Hermes&#x27;s own record, so what you see is exactly what the model will see next. A prompt you queued with <code>/queue</code> while the command ran keeps its place and its answer.</p>
+<p>On Hermes v0.22.1 and earlier, both commands keep showing the &quot;use the Hermes CLI&quot; note, because those versions can&#x27;t run them over chat.</p>
+<h2>Smaller fixes</h2>
+<ul>
+  <li>If Scarf can&#x27;t read a chat&#x27;s history from Hermes (for example, a remote host drops the connection), the transcript now stays as it was instead of going blank. This also applies when Scarf reconnects to a chat.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>New capability flag for Hermes&#x27;s chat rewind commands (v0.22.3+), with tests for both sides of the floor.</li>
+  <li>New live UI test that runs <code>/undo</code> and <code>/retry</code> against a real Hermes and checks both the transcript and Hermes&#x27;s stored conversation. The UI release gate now runs in a Tart virtual machine by default.</li>
+  <li>The app&#x27;s Swift package versions are now pinned in the repository, so a fresh clone builds with the same SwiftTerm and other packages the release was tested with.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 15.0+ (Apple Silicon and Intel). ScarfGo (iOS 18.6+) gets <code>/undo</code> and <code>/retry</code> in its next App Store and TestFlight build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.22.5. <code>/undo</code> and <code>/retry</code> need Hermes v0.22.3 or later.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.7.1/Scarf-v3.7.1-Universal.zip"
+                 sparkle:edSignature="HOC23hUAent9Qq9xTFFZvwq1k2XGSPoQDINntwSDPi8nkv+NZkB3mMt5IFFqJldi/PR1h5x5tqcSq9n8RsvGAQ=="
+                 length="36712448"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.7.0</title>
       <sparkle:version>76</sparkle:version>
       <sparkle:shortVersionString>3.7.0</sparkle:shortVersionString>
