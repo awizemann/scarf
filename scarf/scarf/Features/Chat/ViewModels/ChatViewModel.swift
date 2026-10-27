@@ -1321,11 +1321,12 @@ final class ChatViewModel {
         // prevented: a stray untitled `session/new` in the bot's profile.
         if let sendRouter, sendRouter(text, images) { return }
         if displayMode == .richChat {
-            // gh#147: `/title` and `/retry`/`/undo` never touch the wire,
-            // so answer them here — before the no-client branch would
+            // gh#147: `/title`, and `/retry`/`/undo` on a host that doesn't
+            // serve them, never touch the wire, so answer them here — before the no-client branch would
             // auto-start a session just to deliver them.
-            if let intercept = RichChatViewModel.clientSideSlashCommand(for: text),
-               handleLocalSlashCommand(intercept) { return }
+            if let intercept = RichChatViewModel.clientSideSlashCommand(
+                for: text, capabilities: richChatViewModel.capabilitiesGate
+            ), handleLocalSlashCommand(intercept) { return }
             if let client = acpClient {
                 if holdSendIfReplayPending(client: client, text: text, images: images) { return }
                 sendViaACP(client: client, text: text, images: images)
@@ -1661,7 +1662,9 @@ final class ChatViewModel {
         // ADyrlh, 2026-05-11. Run BEFORE the user-message append so
         // the transcript doesn't sprout an orphaned slash bubble right
         // before we tear it down for the new session.
-        if let intercept = RichChatViewModel.clientSideSlashCommand(for: text) {
+        if let intercept = RichChatViewModel.clientSideSlashCommand(
+            for: text, capabilities: richChatViewModel.capabilitiesGate
+        ) {
             switch intercept {
             case .newSession(let name):
                 // Mac startNewSession doesn't yet honor v0.13's optional
@@ -1928,6 +1931,15 @@ final class ChatViewModel {
                 // not touch shared state: the newer session owns
                 // `acpStatus`, the transcript, and notifications.
                 guard acpClient === client, !othersStillRunning() else { return }
+                // gh#147: a served `/undo` / `/retry` reply's last chunk can
+                // still be in the event loop; drain it so it lands before
+                // the turn closes and the transcript is rebuilt.
+                let isRewind = RichChatViewModel.isGatewayRewindSlash(
+                    wireText, capabilities: richChatViewModel.capabilitiesGate)
+                if isRewind {
+                    await awaitEventLoopDrain(client: client)
+                    guard acpClient === client, !othersStillRunning() else { return }
+                }
                 acpStatus = ACPPhase.ready
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
@@ -1946,6 +1958,11 @@ final class ChatViewModel {
                         lineage: richChatViewModel.transcriptSessionIds
                     )
                     scheduleSessionsRefresh()
+                }
+                // gh#147: a served `/undo` / `/retry` rewound the session in
+                // state.db; rebuild the transcript from it (no-op otherwise).
+                if isRewind, let undone = await richChatViewModel.followRewindFromDB(wireText: wireText) {
+                    showHint(undone)
                 }
                 // Re-fetch session from DB to pick up cost/token data Hermes may have written
                 await richChatViewModel.refreshSessionFromDB()
@@ -1986,6 +2003,15 @@ final class ChatViewModel {
                         thoughtTokens: 0, cachedReadTokens: 0
                     ))
                 )
+                // A `/retry` whose resent turn failed has still rewound
+                // the session (gh#147); no-op for anything else. Not while
+                // any other turn (a queued one included) is in flight: the
+                // rebuild would drop its half-streamed reply.
+                if RichChatViewModel.isGatewayRewindSlash(wireText, capabilities: richChatViewModel.capabilitiesGate),
+                   !promptTurns.contains(where: { $0.key != token }) {
+                    await awaitEventLoopDrain(client: client)
+                    await richChatViewModel.followRewindFromDB(wireText: wireText)
+                }
             }
         }
         // The task can't have run yet (same actor, no suspension since it

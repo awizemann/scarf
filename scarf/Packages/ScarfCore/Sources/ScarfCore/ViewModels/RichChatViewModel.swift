@@ -352,6 +352,12 @@ public final class RichChatViewModel {
         self.dataService = HermesDataService(context: context)
     }
 
+    /// Tests: a data service over an injected backend.
+    internal init(context: ServerContext, dataService: HermesDataService) {
+        self.context = context
+        self.dataService = dataService
+    }
+
 
     public var messages: [HermesMessage] = []
     public var currentSession: HermesSession?
@@ -954,7 +960,12 @@ public final class RichChatViewModel {
     /// conversation history") is the ACP replacement for the `/clear`
     /// gesture users knew. `retry` and `undo` (gh#147) are CLI/gateway
     /// only too; they are intercepted rather than listed — see
-    /// ``cliOnlySlashNames``. `title` IS listed, as a client-side command.
+    /// ``cliOnlySlashNames``. From v0.22.3 gateway-backed ACP advertises
+    /// and serves both (``HermesCapabilities/hasGatewayRewindCommands``);
+    /// there they reach the menu from `available_commands_update`, sent on
+    /// every attach (`_after_attach`, acp_adapter/gateway_server.py:316-320
+    /// @ v0.22.5), and are not intercepted. `title` IS listed, as a
+    /// client-side command.
     public static func alwaysAvailableCommands(
         capabilities: HermesCapabilities
     ) -> [HermesSlashCommand] {
@@ -1429,9 +1440,11 @@ public final class RichChatViewModel {
         /// in the ACP adapter's `_COMMANDS`, so on the wire it would reach
         /// the model as an ordinary prompt.
         case renameSession(title: String?)
-        /// `/retry` or `/undo` — real CLI/gateway commands the ACP adapter
-        /// never dispatches (gh#147). Never sent: the model would get the
-        /// literal text. The send paths show
+        /// `/retry` or `/undo` — real CLI/gateway commands the in-process
+        /// ACP adapter never dispatches (gh#147). Never sent there: the
+        /// model would get the literal text. Not produced on a host with
+        /// ``HermesCapabilities/hasGatewayRewindCommands``, whose ACP serves
+        /// both (see ``gatewayRewindSlashNames``). The send paths show
         /// ``RichChatViewModel/cliOnlySlashNotice(name:)`` instead. There is
         /// deliberately no client-side resend for `/retry` — Scarf can't
         /// drop the previous turn from Hermes's history, so a resend would
@@ -1446,6 +1459,21 @@ public final class RichChatViewModel {
     /// that can never be enabled is noise, and the typed name still gets
     /// the explanation.
     public static let cliOnlySlashNames: Set<String> = ["retry", "undo"]
+
+    /// The names of ``cliOnlySlashNames`` that gateway-backed ACP serves
+    /// itself from v0.22.3 (``HermesCapabilities/hasGatewayRewindCommands``):
+    /// both run the session's `rewind` mutation (`ROUTES`,
+    /// acp_adapter/gateway_commands.py:288-289 @ v0.22.5), so on such a host
+    /// they go to the wire like any other command and the transcript then
+    /// follows the rewind from state.db (``followRewindFromDB(wireText:)``).
+    public static let gatewayRewindSlashNames: Set<String> = ["retry", "undo"]
+
+    /// Whether `text` is a `/undo` or `/retry` this host serves over ACP.
+    public static func isGatewayRewindSlash(_ text: String, capabilities: HermesCapabilities) -> Bool {
+        guard capabilities.hasGatewayRewindCommands,
+              let name = parseSlashName(text).name else { return false }
+        return gatewayRewindSlashNames.contains(name)
+    }
 
     /// The hint for a name in ``cliOnlySlashNames``; `nil` otherwise.
     public static func cliOnlySlashNotice(name: String) -> String? {
@@ -1480,7 +1508,14 @@ public final class RichChatViewModel {
     /// non-interruptive (`/steer` / `/goal` / `/queue`), and
     /// ACP-handled commands — all of which keep their existing wire
     /// paths.
-    public static func clientSideSlashCommand(for text: String) -> ClientSideSlashCommand? {
+    ///
+    /// `capabilities` decides `/retry` and `/undo`: intercepted unless the
+    /// host serves them (``isGatewayRewindSlash(_:capabilities:)``). The
+    /// default `.empty` keeps the pre-gateway answer.
+    public static func clientSideSlashCommand(
+        for text: String,
+        capabilities: HermesCapabilities = .empty
+    ) -> ClientSideSlashCommand? {
         let parsed = parseSlashName(text)
         switch parsed.name {
         case "new":
@@ -1490,6 +1525,7 @@ public final class RichChatViewModel {
             let trimmed = parsed.args.trimmingCharacters(in: .whitespacesAndNewlines)
             return .renameSession(title: trimmed.isEmpty ? nil : trimmed)
         case let name? where cliOnlySlashNames.contains(name):
+            if isGatewayRewindSlash(text, capabilities: capabilities) { return nil }
             return .cliOnly(name: name)
         default:
             return nil
@@ -2418,6 +2454,102 @@ public final class RichChatViewModel {
         return grew
     }
 
+    /// Make the transcript follow a `/undo` or `/retry` that just completed
+    /// on a host serving them (``HermesCapabilities/hasGatewayRewindCommands``).
+    /// No-op (nil) for any other prompt and on every other host (C1).
+    ///
+    /// The rewind soft-deletes the removed turns in state.db (`active = 0`,
+    /// `rewind_in_transaction`, hermes_state_mutation_transcript.py:25-28
+    /// @ v0.22.5) before the command replies (`_rewind`,
+    /// acp_adapter/gateway_commands.py:134-155), and no ACP update says
+    /// which rows went. Scarf's transcript reads already leave rewound rows
+    /// out (`active = 1 OR compacted = 1`, probed by PRAGMA), so the
+    /// existing reconnect rebuild — ``reconcileWithDB(sessionId:)`` — is the
+    /// refresh: it drops the removed turns, the `/undo` / `/retry` echo
+    /// (Hermes stores no "/undo" row; `/retry`'s row is the resent text)
+    /// and the streamed command reply, which is not stored either.
+    ///
+    /// The command's own echo, and every local echo before it, are dropped
+    /// by the rebuild. A chat typed in this window shows its turns as local
+    /// echoes, never re-read from state.db, and the rebuild keeps an echo it
+    /// can't match to a stored row — exactly what a rewound row looks like
+    /// (`active = 0` is not read). Left alone, the undone prompt came back as
+    /// an unsent bubble (live gate, v0.22.5). The rewind refuses unless the
+    /// session is idle (`require_idle`, hermes_state_mutation_guards.py:53-62;
+    /// hermes_state_mutations.py:125-130 @ v0.22.5), so every prompt sent
+    /// before the command has its row and a turn still live in Hermes
+    /// returns as that row. Echoes sent AFTER the command (a `/queue`d
+    /// prompt) keep their normal pending handling.
+    ///
+    /// Returns the command's streamed reply when it is the only trace of
+    /// what happened: always for `/undo` ("Undid 1 turn …", or "nothing to
+    /// undo"), and for `/retry` only when Hermes stored no row carrying it —
+    /// a refusal (an image turn, no user turn, empty resend text,
+    /// `_rewind`, acp_adapter/gateway_commands.py:127-150 @ v0.22.5) is
+    /// sent as the turn's reply and stored nowhere, while a resent turn's
+    /// answer is the stored assistant row the rebuild shows.
+    @discardableResult
+    public func followRewindFromDB(wireText: String) async -> String? {
+        guard Self.isGatewayRewindSlash(wireText, capabilities: capabilitiesGate),
+              let sid = sessionId else { return nil }
+        let trimmed: (String) -> String = { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let command = trimmed(wireText)
+        // The reply's last chunk can be handled AFTER `promptComplete` (the
+        // chunk and the prompt reply race), reopening the streaming bubble.
+        // Close it into the transcript so it counts as part of the reply and
+        // the rebuild below drops it with the rest — unless a prompt sent
+        // after the command (a `/queue`d turn Hermes starts right after it)
+        // owns the stream now: then its buffers must survive the rebuild so
+        // its next chunk redraws the whole reply. (Mac drains the command's
+        // own late chunks before `promptComplete`.)
+        let isCommandEcho: (HermesMessage) -> Bool = {
+            $0.id < 0 && $0.isUser && trimmed($0.content) == command
+        }
+        let laterPromptOwnsStream = messages.lastIndex(where: isCommandEcho).map { echo in
+            messages[messages.index(after: echo)...].contains { $0.isUser && $0.id < 0 }
+        } ?? false
+        if !laterPromptOwnsStream { finalizeStreamingMessage() }
+        var segments: [String] = []
+        var settledEchoes = Set<Int>()
+        if let echo = messages.lastIndex(where: isCommandEcho) {
+            // The command's reply: its streamed segments up to the next prompt.
+            let after = messages[messages.index(after: echo)...]
+            segments = after.prefix { !$0.isUser }
+                .filter { $0.isAssistant && $0.id < 0 }
+                .map { trimmed($0.content) }
+                .filter { !$0.isEmpty }
+            settledEchoes = Set(messages[...echo].filter { $0.id < 0 && $0.isUser }.map(\.id))
+        }
+        let rebuilt = await reconcileWithDB(sessionId: sid, dropLocalEchoes: settledEchoes)
+        // A chunk handled during the rebuild's awaits, or a throttled flush
+        // still pending, would put a stray streaming bubble back beside the
+        // stored answer. The turn is over (its prompt returned): drop it —
+        // unless a later prompt's turn owns the stream.
+        if rebuilt && !laterPromptOwnsStream { discardStreamingRemnant() }
+        guard rebuilt, let last = segments.last else { return nil }
+        if Self.parseSlashName(wireText).name == "retry" {
+            let whole = trimmed(segments.joined())
+            if messages.contains(where: {
+                $0.isAssistant && $0.id > 0 && [last, whole].contains(trimmed($0.content))
+            }) { return nil }
+        }
+        return segments.joined(separator: "\n")
+    }
+
+    /// Clear the streaming buffers and any id-0 bubble, cancelling a pending
+    /// throttled flush, for a turn whose prompt has already returned.
+    private func discardStreamingRemnant() {
+        cancelStreamingFlush()
+        streamingAssistantText = ""
+        streamingThinkingText = ""
+        streamingToolCalls = []
+        streamingReplyId = nil
+        if messages.contains(where: { $0.id == Self.streamingId }) {
+            messages.removeAll { $0.id == Self.streamingId }
+            buildMessageGroups()
+        }
+    }
+
     /// Tell the transcript what the send path actually put on the wire for
     /// the prompt just echoed with `addUserMessage(text: displayText)`, so
     /// the echo is retired against the row Hermes really stores (a
@@ -2466,6 +2598,11 @@ public final class RichChatViewModel {
         for cmd in Self.nonInterruptiveCommands
         where Self.nonInterruptiveSlashIsDispatched(cmd.name, capabilities: capabilitiesGate) {
             names.insert(cmd.name)
+        }
+        // `/undo` stores no user row; `/retry`'s row is the rewound turn's
+        // text, never "/retry" — so neither echo waits for one.
+        if capabilitiesGate.hasGatewayRewindCommands {
+            names.formUnion(Self.gatewayRewindSlashNames)
         }
         return names
     }
@@ -3658,21 +3795,34 @@ public final class RichChatViewModel {
     /// Reconcile in-memory messages with DB state after a successful reconnection.
     /// Merges DB-persisted messages with any local-only messages (e.g., user messages
     /// that the ACP process may not have persisted before crashing).
-    public func reconcileWithDB(sessionId: String) async {
+    ///
+    /// `dropLocalEchoes`: local echo ids to drop with the rebuild (a rewind
+    /// follow, ``followRewindFromDB(wireText:)``), applied only once the
+    /// fetch succeeded. Returns whether the transcript was rebuilt; a failed
+    /// or timed-out fetch leaves it untouched rather than blank.
+    @discardableResult
+    public func reconcileWithDB(sessionId: String, dropLocalEchoes: Set<Int> = []) async -> Bool {
         // Every caller attaches `sessionId` just before calling; a
         // transcript that has moved on (or moves on during the awaits
         // below) must never receive another session's rows.
-        guard self.sessionId == sessionId else { return }
+        guard self.sessionId == sessionId else { return false }
         if let close = pendingDataServiceClose { await close.value }
         let opened = await dataService.open()
-        guard opened else { return }
+        guard opened else { return false }
 
         // Reconnects don't generate hundreds of unseen messages, so a
         // 200-row tail is plenty for the merge — and it keeps us from
         // re-materializing 1000+ message sessions on every reconnect.
         let ownIds = transcriptSessionIds
         let ownIdSet = Set(ownIds)
-        var dbMessages = await dataService.fetchMessages(sessionIds: ownIds, limit: HistoryPageSize.reconcile)
+        let fetched = await dataService.fetchMessagesOutcome(sessionIds: ownIds, limit: HistoryPageSize.reconcile)
+        guard !fetched.didTimeOut else {
+            // A transport failure reads as zero rows; installing that would
+            // blank the transcript.
+            await dataService.close()
+            return false
+        }
+        var dbMessages = fetched.messages
 
         // If we have an origin session (CLI session continued via ACP),
         // include those messages too
@@ -3686,7 +3836,12 @@ public final class RichChatViewModel {
 
         let session = await dataService.fetchSession(id: sessionId)
         await dataService.close()
-        guard self.sessionId == sessionId else { return }
+        guard self.sessionId == sessionId else { return false }
+        if !dropLocalEchoes.isEmpty {
+            messages.removeAll { $0.id < 0 && dropLocalEchoes.contains($0.id) }
+            let kept = (pendingLocalUserMessages[sessionId] ?? []).filter { !dropLocalEchoes.contains($0.message.id) }
+            pendingLocalUserMessages[sessionId] = kept.isEmpty ? nil : kept
+        }
 
         // The tail window only reaches back `reconcile` rows. Rows of this
         // session OLDER than the window that are already on screen (paged
@@ -3773,6 +3928,7 @@ public final class RichChatViewModel {
             earlierHistoryCutoffId = nil
         }
         buildMessageGroups()
+        return true
     }
 
     // MARK: - Load History from DB (for resumed sessions)

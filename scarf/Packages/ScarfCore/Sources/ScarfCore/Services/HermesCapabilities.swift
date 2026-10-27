@@ -2874,6 +2874,23 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v0.22.1 and v0.22.2.
     public var hasGatewayRestartDetach: Bool { isV0223OrLater }
 
+    /// Gateway-backed ACP serves `/undo [N]` and `/retry` (gh#147): both
+    /// are advertised (`COMMANDS`, acp_adapter/gateway_session_meta.py:39-40
+    /// @ v0.22.3/v0.22.4/v0.22.5) and routed to the session's `rewind`
+    /// mutation (`ROUTES`, acp_adapter/gateway_commands.py:288-289;
+    /// `_rewind`, :116-155). `/undo` replies with what it removed; `/retry`
+    /// resubmits the rewound turn's text as this prompt. The rewound rows
+    /// stay in state.db as `active = 0` (`rewind_in_transaction`,
+    /// hermes_state_mutation_transcript.py:25-28 @ v0.22.5).
+    ///
+    /// NOT at v0.22.1 although its ACP is gateway-backed: it advertises no
+    /// commands and `slash_mutation` serves only `model`, `compress` and
+    /// `branch`, raising `unsupported_command` for the rest
+    /// (hermes_cli/gateway_mutations.py:136-149 @ v0.22.1), which fails the
+    /// prompt (acp_adapter/gateway_server.py:434-440 @ v0.22.1). Absent at
+    /// v0.22.2 (no gateway ACP). A plain v0.22.3 floor.
+    public var hasGatewayRewindCommands: Bool { isV0223OrLater }
+
     // MARK: v0.22.5 flags
     //
     // Opened at v0.22.5 and at v0.22.4, the tag before it.

@@ -2277,7 +2277,9 @@ final class ChatController {
         // transcript doesn't sprout an orphaned slash bubble right before
         // we tear it down for the new session.
         if !text.isEmpty,
-           let intercept = RichChatViewModel.clientSideSlashCommand(for: text) {
+           let intercept = RichChatViewModel.clientSideSlashCommand(
+               for: text, capabilities: vm.capabilitiesGate
+           ) {
             draft = ""
             clearStoredDraft()
             attachments = []
@@ -2604,6 +2606,11 @@ final class ChatController {
             // Gateway-backed ACP announces no compression rotation; follow
             // it from state.db (no-op on every other host).
             await vm.followCompressionTipFromDB()
+            // gh#147: a served `/undo` / `/retry` rewound the session in
+            // state.db; rebuild the transcript from it (no-op otherwise).
+            if let undone = await vm.followRewindFromDB(wireText: wireText) {
+                showHint(undone)
+            }
             // A real turn (not an ACP slash command, which stores nothing)
             // has stored the session: apply a pending `/new <name>`.
             if result.stopReason == "end_turn", !wireText.hasPrefix("/") {
@@ -2673,6 +2680,9 @@ final class ChatController {
                     cachedReadTokens: 0
                 ))
             )
+            // A `/retry` whose resent turn failed has still rewound the
+            // session (gh#147); no-op for anything else.
+            await vm.followRewindFromDB(wireText: wireText)
         }
     }
 

@@ -113,8 +113,14 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
         closeCallCount += 1
     }
 
+    /// Called at the start of every `query`, while the caller is suspended
+    /// in it — lets a test act "during" a data-service read.
+    private var onQuery: (@Sendable (String) async -> Void)?
+    func setOnQuery(_ hook: (@Sendable (String) async -> Void)?) { onQuery = hook }
+
     func query(_ sql: String, params: [SQLValue]) async throws -> [Row] {
         queryLog.append((sql: sql, params: params))
+        if let onQuery { await onQuery(sql) }
         if let failure = longestMatchingFailure(for: sql) {
             throw failure
         }

@@ -121,6 +121,11 @@ final class Issues35UITests: ScarfUITestCase {
     /// Before the fix both went out as a prompt (auto-starting ACP).
     @MainActor
     func testRetryAndUndoAreAnsweredLocallyAndSendNothing() throws {
+        // From v0.22.3 Hermes serves /retry and /undo over ACP, and Scarf
+        // sends them (ChatJourneyUITests.testUndoAndRetryFollowTheGatewayRewind).
+        if try hostHermesVersion() >= (0, 22, 3) {
+            throw XCTSkip("Hermes v0.22.3+ serves /retry and /undo; covered by the live rewind journey.")
+        }
         let app = launchExpanded()
         defer { gracefulQuit(app) }
         try openSection(app, "Chat")
@@ -237,6 +242,12 @@ final class Issues35UITests: ScarfUITestCase {
     /// home, never `~/.hermes`. An unreadable version is a skip: the two
     /// behaviours can't be told apart without it.
     private func hostHasGatewayBackedACP() throws -> Bool {
+        Self.isGatewayBackedACP(try hostHermesVersion())
+    }
+
+    /// The host Hermes's semver, read off `hermes --version` against this
+    /// test's isolated home. An unreadable version is a skip.
+    private func hostHermesVersion() throws -> (Int, Int, Int) {
         guard let isolatedHome, FileManager.default.isExecutableFile(atPath: Self.hermesBinary) else {
             throw XCTSkip("No hermes binary at \(Self.hermesBinary) to read the host version from.")
         }
@@ -259,7 +270,7 @@ final class Issues35UITests: ScarfUITestCase {
             throw XCTSkip("Could not read a Hermes version from `hermes --version`: \(output.prefix(200))")
         }
         print("[Issues35] host Hermes \(version)")
-        return Self.isGatewayBackedACP(version)
+        return version
     }
 
     /// `Hermes Agent v0.22.5 (2026.9.24)` → (0, 22, 5). A major outside

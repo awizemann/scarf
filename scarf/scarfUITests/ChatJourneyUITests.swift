@@ -49,6 +49,7 @@
 //
 
 import XCTest
+import SQLite3
 
 final class ChatJourneyUITests: ScarfUITestCase {
 
@@ -268,6 +269,272 @@ final class ChatJourneyUITests: ScarfUITestCase {
             "Sessions lists \(listedSessionCount(app).map(String.init(describing:)) ?? "<no stats line>") sessions; expected \(sessionsBefore + 1) after one chat turn. The reply rendered, so the turn ran — this is Scarf's state.db read, not the model."
         )
         attachScreenshot(app, named: "sessions-lists-the-new-session", keepAlways: false)
+    }
+
+    // MARK: - Journey: /undo and /retry follow the gateway's rewind (gh#147)
+
+    /// From Hermes v0.22.3 gateway-backed `hermes acp` serves `/undo` and
+    /// `/retry` itself (acp_adapter/gateway_commands.py:288-289 @ v0.22.5).
+    /// Scarf must send them rather than answer "Use the Hermes CLI", and
+    /// the transcript must lose the turns Hermes rewound.
+    ///
+    /// Sequence: ALPHA turn → `/undo` → the ALPHA turn leaves the
+    /// transcript and state.db shows it rewound (`active = 0`); BRAVO turn
+    /// → `/retry` → no CLI-only hint, state.db shows the old BRAVO pair
+    /// rewound and the resent prompt plus a new answer active; then the
+    /// transcript settles at exactly one user and one assistant bubble —
+    /// the resent BRAVO prompt and its fresh answer, the old answer gone.
+    /// state.db is read read-only from this test's isolated home.
+    ///
+    /// Skips on a host below v0.22.3, where both stay intercepted.
+    @MainActor
+    func testUndoAndRetryFollowTheGatewayRewind() throws {
+        try requireLive()
+        try requireUsableProvider()
+        try requireGatewayRewind()
+
+        let app = launchExpanded()
+        // The evidence a failure needs, kept on every outcome, then the quit.
+        // A teardown block, not a `defer`: a failed assertion with
+        // `continueAfterFailure = false` skips the rest of the method, and a
+        // `defer` quit would run first and leave no status to read.
+        addTeardownBlock { [weak self] in
+            MainActor.assumeIsolated {
+                self?.attachRewindEvidence(app)
+                self?.gracefulQuit(app)
+            }
+        }
+        try openSection(app, "Chat")
+
+        // ALPHA, then /undo.
+        sendFromComposer(app, "Reply with exactly: ALPHA")
+        XCTAssertTrue(awaitBubble(app, role: "Assistant", containing: "ALPHA", timeout: Self.replyTimeout),
+                      "No assistant reply containing ALPHA.")
+        sendFromComposer(app, "/undo")
+        let undone = waitUntil(timeout: 45, describing: "the undone ALPHA turn to leave the transcript") {
+            !self.bubbleText(app, role: "Assistant", containing: "ALPHA").exists
+                && !self.bubbleText(app, role: "You", containing: "ALPHA").exists
+        }
+        if !undone {
+            attachScreenshot(app, named: "undo-turn-still-shown", keepAlways: true)
+            print("[ChatJourney] transcript after /undo: \(visibleTranscriptLabels(app))")
+        }
+        XCTAssertTrue(undone, "The ALPHA turn is still in the transcript after /undo.")
+        XCTAssertFalse(cliOnlyHint(app).exists, "/undo was intercepted with the CLI-only notice.")
+        // Hermes really rewound: the ALPHA prompt and everything after it
+        // in that session are soft-deleted (`active = 0`). One read, taken
+        // only once the UI has settled and no turn is running.
+        let alpha = "Reply with exactly: ALPHA"
+        XCTAssertTrue(awaitIdle(app), "The chat never went idle after /undo.")
+        let alphaRows = settledRows(prompt: alpha)
+        XCTAssertTrue((alphaRows?.count ?? 0) >= 2 && alphaRows!.allSatisfy { !$0.active },
+                      "state.db does not show the ALPHA turn rewound (active = 0): \(alphaRows.map(String.init(describing:)) ?? "<unreadable>")")
+
+        // BRAVO, then /retry.
+        sendFromComposer(app, "Reply with exactly: BRAVO")
+        XCTAssertTrue(awaitBubble(app, role: "Assistant", containing: "BRAVO", timeout: Self.replyTimeout),
+                      "No assistant reply containing BRAVO.")
+        // Sent, not intercepted, and served: no CLI-only hint; once the UI
+        // settles (no /retry bubble, one Assistant BRAVO, composer idle) a
+        // single state.db read shows the rewind — the first BRAVO pair
+        // `active = 0`, then the resent prompt and a new answer, active.
+        sendFromComposer(app, "/retry")
+        XCTAssertFalse(cliOnlyHint(app).exists, "/retry was intercepted with the CLI-only notice.")
+        let settled = waitUntil(timeout: Self.replyTimeout, describing: "the transcript to settle on the retried turn") {
+            !self.bubbleText(app, role: "You", containing: "/retry").exists
+                && self.bubbleText(app, role: "Assistant", containing: "BRAVO").exists
+                && self.bubbles(app, role: "Assistant").count == 1
+                && !self.element(app, "chat.composer.stop").exists
+        }
+        XCTAssertTrue(settled, "The transcript never settled on one fresh BRAVO answer after /retry.")
+        XCTAssertFalse(cliOnlyHint(app).exists, "/retry was intercepted with the CLI-only notice.")
+        let bravo = "Reply with exactly: BRAVO"
+        if settled {
+            let rows = settledRows(prompt: bravo)
+            var retried = false
+            if let rows, let resent = rows.dropFirst().firstIndex(where: { $0.role == "user" && $0.content == bravo }) {
+                let old = rows[..<resent]
+                let new = rows[resent...]
+                retried = old.count >= 2 && old.allSatisfy { !$0.active }
+                    && new.first?.active == true
+                    && new.contains { $0.role == "assistant" && $0.active }
+            }
+            XCTAssertTrue(retried, "state.db does not show the BRAVO turn retried: \(rows.map(String.init(describing:)) ?? "<unreadable>")")
+        }
+        let users = bubbles(app, role: "You").count
+        let assistants = bubbles(app, role: "Assistant").count
+        if users != 1 || assistants != 1 {
+            attachScreenshot(app, named: "retry-transcript", keepAlways: true)
+            print("[ChatJourney] transcript after /retry: \(visibleTranscriptLabels(app))")
+        }
+        XCTAssertEqual(users, 1, "Expected only the resent BRAVO prompt after /retry.")
+        XCTAssertEqual(assistants, 1, "Expected exactly one (fresh) answer after /retry; the old one must be gone.")
+        XCTAssertTrue(bubbleText(app, role: "You", containing: "BRAVO").exists)
+        attachScreenshot(app, named: "retry-replaced-the-answer", keepAlways: false)
+    }
+
+    /// Skip below Hermes v0.22.3, where `/undo` and `/retry` are not served
+    /// over ACP (`hasGatewayRewindCommands`). Reads `hermes --version` from
+    /// the same binary the app runs; no gateway is started by it.
+    private func requireGatewayRewind() throws {
+        let line = runHermes(["--version"], timeout: 30).stdout
+        guard let range = line.range(of: #"v(\d+)\.(\d+)\.(\d+)"#, options: .regularExpression) else {
+            throw XCTSkip("Could not read the Hermes version: \(Self.trimmedForSkip(line))")
+        }
+        let parts = line[range].dropFirst().split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 3, (parts[0], parts[1], parts[2]) >= (0, 22, 3) else {
+            throw XCTSkip("Hermes \(line[range]) does not serve /undo or /retry over ACP (needs v0.22.3+).")
+        }
+    }
+
+    /// Type `text` into the composer and click Send, retrying until the
+    /// composer clears (the observable outcome of a send).
+    private func sendFromComposer(_ app: XCUIApplication, _ text: String) {
+        let input = element(app, "chat.composer.input")
+        XCTAssertTrue(input.waitForExistence(timeout: 25), "No chat.composer.input.")
+        setText(text, in: input, of: app)
+        let send = element(app, "chat.composer.send")
+        XCTAssertTrue(send.waitForExistence(timeout: 15), "No chat.composer.send.")
+        for attempt in 1...3 {
+            ensureFrontmost(app)
+            if send.exists && send.isEnabled { send.click() }
+            if waitUntil(timeout: 10, describing: "the composer to clear after sending \(text)", {
+                ((input.value as? String) ?? "") != text
+            }) { return }
+            print("[ChatJourney] send of \(text) attempt \(attempt)/3 left it in the composer; retrying.")
+        }
+        XCTFail("Sending \(text) never cleared the composer.")
+    }
+
+    /// Wait (chunked) until no turn is running: the stop control is gone.
+    private func awaitIdle(_ app: XCUIApplication) -> Bool {
+        waitUntil(timeout: Self.replyTimeout, describing: "the chat to go idle") {
+            !self.element(app, "chat.composer.stop").exists
+        }
+    }
+
+    /// `rowsFrom(prompt:)` once, with a short retry only while the file is
+    /// momentarily unreadable (nil). Call only when no turn is running.
+    private func settledRows(prompt: String) -> [StoredRow]? {
+        for attempt in 0..<5 {
+            if let rows = rowsFrom(prompt: prompt) { return rows }
+            if attempt < 4 { Thread.sleep(forTimeInterval: 0.5) }
+        }
+        return nil
+    }
+
+    /// Keep what a failure needs on every outcome: the isolated Hermes
+    /// home's `logs/` (each file's tail) and the app's own Hermes status
+    /// texts (sidebar footer, chat header). The runner created that home,
+    /// so its sandbox can read it.
+    private func attachRewindEvidence(_ app: XCUIApplication) {
+        func attach(_ text: String, _ name: String) {
+            let a = XCTAttachment(string: text)
+            a.name = name
+            a.lifetime = .keepAlways
+            add(a)
+        }
+        if app.state != .notRunning {
+            let statuses = app.windows.descendants(matching: .staticText)
+                .matching(NSPredicate(format: "value BEGINSWITH %@ OR value IN %@",
+                                      "Hermes v", ["Ready", "Agent working…", "No active session"]))
+                .allElementsBoundByIndex
+                .compactMap { $0.exists ? $0.value as? String : nil }
+            attach(statuses.joined(separator: "\n"), "rewind-app-status")
+        }
+        guard let isolatedHome else { return }
+        let logs = (isolatedHome as NSString).appendingPathComponent("logs")
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: logs)) ?? []).sorted()
+        if names.isEmpty { attach("no files under \(logs)", "rewind-hermes-logs") }
+        let limit = 200_000
+        for name in names where name.hasSuffix(".log") {
+            let path = (logs as NSString).appendingPathComponent(name)
+            guard let data = FileManager.default.contents(atPath: path) else { continue }
+            let tail = data.count > limit ? data.suffix(limit) : data
+            attach(String(decoding: tail, as: UTF8.self), "rewind-hermes-\(name)")
+        }
+    }
+
+    /// One `messages` row of the isolated home's state.db.
+    private struct StoredRow: CustomStringConvertible {
+        let id: Int64
+        let role: String
+        let content: String
+        let active: Bool
+        var description: String { "\(id):\(role):\(active ? "active" : "rewound")" }
+    }
+
+    /// The rows of the session holding the first user row whose content is
+    /// `prompt`, from that row on, oldest first — read READ-ONLY (charter
+    /// C3) from the state.db of this test's isolated home, which the app
+    /// and its `hermes acp` gateway write (`HERMES_HOME`, `makeApp`). Nil
+    /// when the database or the row is not there yet. The prompts are this
+    /// journey's own, so they name its chat among the fixture's seeded ones.
+    private func rowsFrom(prompt: String) -> [StoredRow]? {
+        guard let isolatedHome else { return nil }
+        let path = (isolatedHome as NSString).appendingPathComponent("state.db")
+        guard FileManager.default.fileExists(atPath: path) else { return nil }
+        var db: OpaquePointer?
+        let uri = "file:" + (path.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? path) + "?mode=ro"
+        guard sqlite3_open_v2(uri, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, nil) == SQLITE_OK else {
+            sqlite3_close(db)
+            return nil
+        }
+        defer { sqlite3_close(db) }
+        sqlite3_busy_timeout(db, 2000)
+        let sql = """
+            WITH first AS (SELECT id, session_id FROM messages
+                           WHERE role = 'user' AND content = ?1 ORDER BY id LIMIT 1)
+            SELECT m.id, m.role, COALESCE(m.content, ''), m.active
+            FROM messages m, first WHERE m.session_id = first.session_id AND m.id >= first.id
+              AND m.role IN ('user', 'assistant')
+            ORDER BY m.id
+            """
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return nil }
+        defer { sqlite3_finalize(stmt) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        sqlite3_bind_text(stmt, 1, prompt, -1, transient)
+        var rows: [StoredRow] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            rows.append(StoredRow(
+                id: sqlite3_column_int64(stmt, 0),
+                role: String(cString: sqlite3_column_text(stmt, 1)),
+                content: String(cString: sqlite3_column_text(stmt, 2)),
+                active: sqlite3_column_int(stmt, 3) != 0
+            ))
+        }
+        return rows.isEmpty ? nil : rows
+    }
+
+    /// Bubbles of one role (`RichMessageBubble`'s group label).
+    private func bubbles(_ app: XCUIApplication, role: String) -> XCUIElementQuery {
+        app.windows.descendants(matching: .group).matching(NSPredicate(format: "label == %@", role))
+    }
+
+    /// First text inside a `role` bubble containing `token` (lazy).
+    private func bubbleText(_ app: XCUIApplication, role: String, containing token: String) -> XCUIElement {
+        bubbles(app, role: role)
+            .descendants(matching: .staticText)
+            .matching(NSPredicate(format: "value CONTAINS[c] %@", token))
+            .firstMatch
+    }
+
+    private func awaitBubble(_ app: XCUIApplication, role: String, containing token: String,
+                             timeout: TimeInterval) -> Bool {
+        let target = bubbleText(app, role: role, containing: token)
+        for _ in 0..<max(1, Int((timeout / 10).rounded())) {
+            if target.waitForExistence(timeout: 10) { return true }
+            ensureFrontmost(app)
+        }
+        return false
+    }
+
+    /// The pre-gateway "isn't available in Scarf chat yet" hint.
+    private func cliOnlyHint(_ app: XCUIApplication) -> XCUIElement {
+        app.windows.descendants(matching: .staticText)
+            .matching(NSPredicate(format: "value CONTAINS %@", "Use the Hermes CLI"))
+            .firstMatch
     }
 
     // MARK: - Journey: the Kanban chip's count follows the chat

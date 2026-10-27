@@ -1766,6 +1766,7 @@ import Foundation
         ("hasGatewayIncompatibleOwnerStatus", \.hasGatewayIncompatibleOwnerStatus),
         ("hasGatewayLiveSessionGuard", \.hasGatewayLiveSessionGuard),
         ("hasGatewayRestartDetach", \.hasGatewayRestartDetach),
+        ("hasGatewayRewindCommands", \.hasGatewayRewindCommands),
         ("hasCatalogSingularity", \.hasCatalogSingularity),
     ] }
 
@@ -1890,7 +1891,8 @@ import Foundation
             #expect(caps(3)[keyPath: flag])
             #expect(caps(4)[keyPath: flag])
         }
-        let v0223: [KeyPath<HermesCapabilities, Bool>] = [\.isV0223OrLater, \.hasGatewayLiveSessionGuard, \.hasGatewayRestartDetach]
+        let v0223: [KeyPath<HermesCapabilities, Bool>] = [\.isV0223OrLater, \.hasGatewayLiveSessionGuard, \.hasGatewayRestartDetach,
+                                                         \.hasGatewayRewindCommands]
         for flag in v0223 {
             #expect(!caps(0)[keyPath: flag])
             #expect(!caps(1)[keyPath: flag])
