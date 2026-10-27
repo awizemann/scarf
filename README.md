@@ -71,14 +71,12 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted and followed over time without knowing who you are. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context and Hermes's replies so the voice can speak them, and both apps ask before the first session.
 
-## What's New in 3.7.0
+## What's New in 3.7.1
 
-- **Hermes v0.22.5 support** — Scarf now follows Hermes v0.21.6 through v0.22.5, where chat runs on Hermes's gateway. Resume chats you started in the CLI, TUI or Desktop app, use `/queue`, and answer Hermes's clarifying questions as question cards (**Skip** is a decline). Closing Scarf no longer stops a running reply, and Scarf says so.
-- **Gateway safety** — Hermes now refuses to stop or restart its gateway while chats are live. Scarf explains why and only interrupts them after you confirm; it never kills the process. A gateway you started by hand restarts in the background.
-- **Strict config loading** — from v0.21.6 a key written twice in `config.yaml` stops Hermes from starting. Scarf flags duplicates and refuses to save a file that has one.
-- **Features that became plugins** — memory providers, Home Assistant, Spotify sign-in and the Singularity terminal now live in Hermes plugins; Scarf offers to install or enable them where you use them. Sessions also show where each chat was created.
-- **Fixed on every Hermes version** — token usage was double-counted per turn, and Health no longer sends `status --all` to the old Hermes versions where that flag printed API keys unredacted.
-- Full notes: [releases/v3.7.0/RELEASE_NOTES.md](releases/v3.7.0/RELEASE_NOTES.md).
+- **`/undo` and `/retry` work in chat** — on Hermes v0.22.3 and later, Scarf sends both commands to Hermes instead of pointing you to the CLI, then redraws the chat to match what Hermes kept. `/undo N` removes the last N turns; `/retry` asks the model again and replaces the last answer.
+- **Transcript stays put on a failed read** — if Scarf can't read a chat's history (for example, a remote host drops the connection), the transcript no longer goes blank.
+- **Carried over from 3.7.0** — Hermes v0.22.5 support: chat on Hermes's gateway, gateway safety (Scarf never kills a gateway Hermes refused to stop), strict `config.yaml` checks, and setup for features that moved into Hermes plugins. See the [3.7.0 notes](releases/v3.7.0/RELEASE_NOTES.md).
+- Full notes: [releases/v3.7.1/RELEASE_NOTES.md](releases/v3.7.1/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
