@@ -3,11 +3,13 @@ title: ScarfGo App Store privacy label stays Data Not Collected
 type: note
 permalink: scarf/decisions/scarfgo-app-store-privacy-label-stays-data-not-collected
 tags: [appstore, privacy, scarfgo]
-source_paths: [scarf/Scarf iOS/PrivacyInfo.xcprivacy, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceDataConsent.swift, scarf/docs/PRIVACY_POLICY.md]
+source_paths: [scarf/Scarf iOS/PrivacyInfo.xcprivacy, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceDataConsent.swift]
 source_paths_inferred: false
-source_sha: 69e9e2b223c365909a2bb3c91debc5fa304fdc65
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-10-05
 updated: 2026-10-05
+reviewed: 2026-10-27
+reviewed_by: audit:claude-code (background)
 ---
 
 Decided by Alan on 2026-10-05 during 3.6.0 release prep, after the privacy policy was corrected to say what Live Voice sends to OpenAI.

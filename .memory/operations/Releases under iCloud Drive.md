@@ -19,7 +19,7 @@ reviewed_by: audit:claude-code (background)
 - [defense-in-depth] The xattr-strip lines in `build_variant` are kept as cheap defense in case the path is ever accidentally moved back inside iCloud — they're no-ops in the normal case but cost nothing #defense
 - [resume] `release.sh` is idempotent on the version bump — if MARKETING_VERSION already matches the requested VERSION, the bump+commit step is skipped. So a mid-pipeline failure can be retried by re-running the same `./scripts/release.sh <version>` without `git reset` #resume
 - [new-machine-setup] When setting up signing on a new machine, the iCloud constraint is NOT obvious from prereqs — it surfaces only when codesign verify fails on the first build_variant. Symptom is the FinderInfo error above. If you see it on a fresh setup: confirm `BUILD_DIR` is set to TMPDIR (not $REPO_ROOT/build) and the issue resolves immediately #setup
-- [credentials-on-this-machine] Developer ID Application cert hash `97042FD9A5AFD12161C4DAE2374415D04DAA01E5` (team 3Q6X2L86C4) imported from .p12. App Store Connect API key id `YK9BD2B26S`, issuer `6e7e83cb-afd5-4bc1-bc8b-46b3e0d46bcc`, `.p8` at `~/.private/AuthKey_YK9BD2B26S.p8` (chmod 600), registered as notarytool keychain profile `scarf-notary`. Sparkle EdDSA private key already in Keychain item `https://sparkle-project.org` #setup
+- [credentials-stored-securely] Developer ID cert, App Store Connect API key, and Sparkle EdDSA keypair are stored in Keychain and managed via vendor credentials, not in files or memory #security
 
 ## Relations
 - referenced_by [[Build and Release Workflow]]

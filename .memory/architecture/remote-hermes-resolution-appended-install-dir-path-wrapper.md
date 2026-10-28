@@ -5,10 +5,10 @@ permalink: scarf/architecture/remote-hermes-resolution-appended-install-dir-path
 tags: [transport, ssh, hermes-cli, servers]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesConfigReader.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesPathSet.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift, scarf/scarf/Features/Servers/ViewModels/TestConnectionProbe.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift]
 source_paths_inferred: false
-source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-26
 updated: 2026-09-28
-reviewed: 2026-10-05
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

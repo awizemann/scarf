@@ -12,9 +12,10 @@ reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 
-R05 / S14-F4. `hermes status` prints `_row` as `  name  ✓|✗ text` (no colon) and `_kv_flag` as `  Label:  ✓|✗ text` (hermes_cli/status.py:35-52 @ v2026.9.24); the Status tab's parser (`HealthViewModel.parseOutputStatic`, shared with doctor) only knew glyph-first lines.
+R05 / S14-F4. `hermes status` prints `_row` as `  name  ✓|✗ text` (no colon) and `_kv_flag` as `  Label:  ✓|✗ text` (hermes_cli/status.py:35-52 @ v0.21.5); v0.21.6+ changed plain `status` to a summary with no sections, requiring `--all` flag to read the same rows. The Status tab's parser (`HealthViewModel.parseOutputStatic`, shared with doctor) invokes via `HermesStatusArgv.full(capabilities:)` to get full output #health.
 
 ## Observations
 - [decision] A mark right after the label sets the row status: ✓ → ok, ⚠ → warning, ✗ → `HealthCheck.CheckStatus.off` (grey mark, counted as neither passing nor failing, section accent muted when a section is all-off). Most status ✗ rows are things not in use (unset API keys, unconfigured platforms, stopped gateway, sudo off); `hermes doctor` is where missing pieces are judged. Exception: ✗ under `Deep Checks` (live probes, status.py:330-345) → error #health
+- [gotcha] v0.21.6+ requires `--all` flag to read section output; plain `status` is now a summary. Invoked via `HermesStatusArgv.full(capabilities: caps)` #hermes-cli
 - [gotcha] `_detail` lines (4-space indent, `Auth file:`/`Error:`) fold into the row above; a `\r`-rewritten progress line is read as its last segment (doctor's 'Running N connectivity checks…' hid the first result), after stripping a CRLF `\r` #parsing
 - [convention] Fixtures in scarfTests/HealthStatusRowParsingTests.swift were captured from the tagged 0.21.5 CLI against scratch HERMES_HOMEs; recapture from the CLI rather than hand-writing rows when Hermes changes status output #fixtures

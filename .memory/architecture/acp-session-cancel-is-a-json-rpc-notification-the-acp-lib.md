@@ -5,10 +5,10 @@ permalink: scarf/architecture/acp-session-cancel-is-a-json-rpc-notification-the-
 tags: [acp, hermes, cancel]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ACPMessages.swift]
 source_paths_inferred: false
-source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-26
 updated: 2026-09-28
-reviewed: 2026-10-05
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

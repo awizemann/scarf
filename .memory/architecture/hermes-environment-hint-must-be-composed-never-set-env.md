@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-environment-hint-must-be-composed-never-set
 tags: [acp, ssh, environment-hint, gh142]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/SSHTransport.swift, scarf/scarf/Core/Services/ACPClient+Mac.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/ACPClient+iOS.swift]
 source_paths_inferred: false
-source_sha: 244c249f2734f8309ced10747cee69cf393617d8
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-29
 updated: 2026-09-29
+reviewed: 2026-10-27
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

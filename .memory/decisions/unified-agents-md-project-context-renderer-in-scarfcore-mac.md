@@ -4,11 +4,11 @@ type: note
 permalink: scarf/decisions/unified-agents-md-project-context-renderer-in-scarfcore-mac
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/Scarf iOS/Chat/ChatView.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-06-28
 updated: 2026-09-29
-reviewed: 2026-09-29
-reviewed_by: claude-sonnet-5
+reviewed: 2026-10-28
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Decision (2026-06-28, chosen by Alan)

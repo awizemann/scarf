@@ -5,10 +5,10 @@ permalink: scarf/architecture/gateway-restart-drains-in-flight-work-scarf-follow
 tags: [hermes, gateway, restart, c10]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Features/Gateway/ViewModels/GatewayViewModel.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-27
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,10 +5,10 @@ permalink: scarf/decisions/bot-mode-phase-b-decisions
 tags: [bot-mode, phase-b, hermes, profiles, config, decisions]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotAgentConfigService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/BotAgentConfig.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/BotsService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesProfileScope.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-01
 updated: 2026-09-26
-reviewed: 2026-09-27
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

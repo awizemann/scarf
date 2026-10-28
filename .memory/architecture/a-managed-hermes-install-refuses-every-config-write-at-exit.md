@@ -5,10 +5,10 @@ permalink: scarf/architecture/a-managed-hermes-install-refuses-every-config-writ
 tags: [hermes-cli, verification, capability-gating]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesManagedInstall.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-11
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

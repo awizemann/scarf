@@ -4,10 +4,10 @@ type: note
 permalink: scarf/conventions/export-surfaces-always-land-artifacts-on-the-user-s-mac
 source_paths: [scarf/scarf/Features/Profiles/RemoteProfileExport.swift, scarf/scarf/Features/Sessions/ViewModels/SessionsViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-07-17
 updated: 2026-07-17
-reviewed: 2026-09-29
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

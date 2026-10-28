@@ -5,10 +5,10 @@ permalink: scarf/decisions/the-skill-is-tool-first-and-scarf-deletes-skills-that
 tags: [projects, skills, mcp, phase-6, agents]
 source_paths: [scarf/scarf/Resources/BuiltinSkills.bundle/scarf-template-author/SKILL.md, scarf/scarf/Core/Services/SkillBootstrapService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarfTests/SkillBootstrapServiceTests.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-03
 updated: 2026-09-03
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

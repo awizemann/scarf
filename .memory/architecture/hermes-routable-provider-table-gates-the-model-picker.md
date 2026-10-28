@@ -3,12 +3,12 @@ title: Hermes routable provider table gates the model picker
 type: note
 permalink: scarf/architecture/hermes-routable-provider-table-gates-the-model-picker
 tags: [providers, hermes-v0.21.5, blind-reaudit]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scripts/check-hermes-tables.py]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflight.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesRoutableProviders.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-09-27
 updated: 2026-09-28
-reviewed: 2026-09-29
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

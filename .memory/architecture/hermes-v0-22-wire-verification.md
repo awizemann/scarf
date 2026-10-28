@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-v0-22-wire-verification
 tags: [hermes, acp, state-db, verification, v022]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/SessionResume.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift]
 source_paths_inferred: false
-source_sha: 60e38b31e53c0c0db6a6853677d27cfaa2f68ce4
+source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
 created: 2026-10-25
 updated: 2026-10-25
+reviewed: 2026-10-27
+reviewed_by: audit:claude-code (background)
 ---
 
 Source-grounded findings from the v0.21.6 → v0.22.5 audit, including deliberate no-ops so the next audit doesn't re-litigate them. Hermes tags are now `vX.Y.Z`; v0.22.2 reverted v0.22.1's gateway work and v0.22.3 restored it.
