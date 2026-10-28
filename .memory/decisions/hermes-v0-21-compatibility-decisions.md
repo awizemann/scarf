@@ -5,10 +5,10 @@ permalink: scarf/decisions/hermes-v0-21-compatibility-decisions
 tags: [hermes, capability-gating, config, versioning, settings]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesConfig.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ConfigDottedKeySegment.swift, scarf/scarf/Navigation/SidebarView.swift, scarf/scarf/Features/Settings/Views/Tabs/DisplayTab.swift, scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 20115cd33082b0187505ec369e7081dafdb1a70c
 created: 2026-09-01
 updated: 2026-09-26
-reviewed: 2026-09-29
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

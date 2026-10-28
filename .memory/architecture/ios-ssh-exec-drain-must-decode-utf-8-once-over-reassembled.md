@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/ios-ssh-exec-drain-must-decode-utf-8-once-over-reassembled
 source_paths: [scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: 12018c8f8fa9d17404a94138589a6d39f7a61d97
+source_sha: 20115cd33082b0187505ec369e7081dafdb1a70c
 created: 2026-09-18
 updated: 2026-09-18
-reviewed: 2026-09-27
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

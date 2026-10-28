@@ -5,10 +5,10 @@ permalink: scarf/decisions/absent-vs-unreadable-is-the-discriminator-every-scarf
 tags: [projects, transport, resilience, dataloss, restore]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/RemoteRestoreService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedSidecarStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/MiniAppGrantStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SessionAttributionService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/TransportPrivateMode.swift, scarf/scarf/Core/Services/ProjectTemplateInstaller.swift]
 source_paths_inferred: false
-source_sha: e1e77724e4056341f29165bef3a5874528ee4174
+source_sha: 20115cd33082b0187505ec369e7081dafdb1a70c
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-26
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 

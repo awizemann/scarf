@@ -5,11 +5,11 @@ permalink: scarf/conventions/xcuitest-runner-gotchas-env-vars-need-test-runner
 tags: [testing, xcuitest, swiftui, a11y, gotcha]
 source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarf/ContentView.swift]
 source_paths_inferred: false
-source_sha: 09bc6bed5dd25c3aa33c4d09c861cd37c8bc0383
+source_sha: 20115cd33082b0187505ec369e7081dafdb1a70c
 created: 2026-09-08
 updated: 2026-09-21
-reviewed: 2026-09-08
-reviewed_by: claude-fable-5-1
+reviewed: 2026-10-27
+reviewed_by: audit:claude-code (background)
 ---
 
 Learned while building the section sweep (t-e732e091, 2026-09-08). All four verified on this Mac, not inferred.

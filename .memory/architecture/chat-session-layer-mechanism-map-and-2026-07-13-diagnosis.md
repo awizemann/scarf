@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/chat-session-layer-mechanism-map-and-2026-07-13-diagnosis
 source_paths: [scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ProcessACPChannel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPStallPolicy.swift, scarf/Scarf iOS/Chat/ChatView.swift]
 source_paths_inferred: false
-source_sha: 5b84e55fef83a814476bb330cd07d7cba8d45740
+source_sha: 20115cd33082b0187505ec369e7081dafdb1a70c
 created: 2026-07-13
 updated: 2026-09-28
-reviewed: 2026-09-22
+reviewed: 2026-10-27
 reviewed_by: audit:claude-code (background)
 ---
 
