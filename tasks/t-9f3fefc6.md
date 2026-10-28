@@ -1,7 +1,7 @@
 ---
 id: t-9f3fefc6
 title: Post gh#147 retest note when the next release ships
-status: todo
+status: done
 added: 2026-10-26
 ---
 
@@ -15,5 +15,6 @@ v3.7.0 shipped 2026-10-27 (Sparkle appcast carries it). Draft "v3.7.0 is out, pl
 
 ## Artifacts
 
-2026-10-27: /undo and /retry fix committed (fce52231). Status update posted on gh#147 promising a note when the release is out. #146 reply posted 2026-10-26. Closed 2026-10-27: #117, #141, #145.
+- Retest note posted 2026-10-27 after v3.7.1 shipped: https://github.com/awizemann/scarf/issues/147#issuecomment-6454564562
+- Issue stays open until the reporter confirms.
 

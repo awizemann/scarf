@@ -107,7 +107,6 @@
 - [ ] Consider setting HERMES_TENANT on Scarf project chats (id: t-aa644979) (added: 2026-09-29)
 - [ ] Fix release.sh resume leaving UI-GATE.md dirty (id: t-251254e2) (added: 2026-10-26) (priority: low)
 - [ ] De-flake Kanban chip count Live UI test (id: t-ccd07453) (added: 2026-10-26)
-- [ ] Post gh#147 retest note when the next release ships (id: t-9f3fefc6) (added: 2026-10-26)
 - [ ] Upload ScarfGo 3.7.0 (Mac 3.7.0 shipped) (id: t-126e3304) (added: 2026-10-05) (priority: high)
 - [ ] Investigate slow chat resume (gh#150) (id: t-9eed811c) (added: 2026-10-27)
 
@@ -121,6 +120,7 @@
 
 ## Done
 
+- [x] Post gh#147 retest note when the next release ships (id: t-9f3fefc6) (added: 2026-10-26)
 - [x] Pass /retry and /undo through on gateway-backed ACP (id: t-b2ba0fa8) (added: 2026-10-26) (priority: high)
 - [x] Pin SwiftTerm so fresh clones build (id: t-c6412713) (added: 2026-10-26) (priority: high)
 - [x] v0.22.5 S8: live test, memory, wiki (id: t-b7aee9ae) (added: 2026-10-25) (priority: high)
@@ -314,6 +314,7 @@
 - [x] **[release · HIGH]** Cut **v2.10.3** — ships three fixes that are on `main` but missed the v2.10.2 cut (tagged 2026-06-05, before they landed): gh#102 100% CPU `720c805`, gh#112 Failure-1 stderr-surfacing `3401cc7`, gh#105 10s menu-bar flash `c7f42a6`. **Publicly promised on gh#102/#112/#105 (2026-06-13)** — users were told "fixed/next build" but no release contains these yet (this was gh#102 reporter aseelye's exact complaint). Until v2.10.3 ships, gh#102/#112(F1)/#105(flash) can't be closed. (id: t-rel-2103) (added: 2026-06-13, source: gh issue triage)
 - [x] Round-6 exit-0 family: webhook remove/test, backup, import, migrate xai, curator (id: t-4edfd804) (added: 2026-09-12)
 - [x] Voice P0: import #143 dictation + TTS commits onto feat/voice (id: t-039306e3) (added: 2026-09-18)
+- [x] Release v3.7.1 (/undo and /retry, gh#147) (id: t-2c8e7059) (added: 2026-10-27)
 
 ## Archived
 
