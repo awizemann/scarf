@@ -31,6 +31,16 @@ struct ChatView: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @State private var controller: ChatController
     @State private var showProjectPicker = false
+    /// A chat switch picked in the project picker, run once the sheet is
+    /// gone so its confirmation dialog can present.
+    @State private var pickerSwitch: ChatController.ChatSwitchRequest?
+    /// A switch waiting on "This chat is still replying". One at a time:
+    /// a newer request replaces it.
+    @State private var pendingSwitch: ChatController.ChatSwitchRequest?
+    @State private var showSwitchDialog = false
+    /// The dialog was closed to let a sheet through (a permission prompt);
+    /// the request stays held and is re-presented on that sheet's dismiss.
+    @State private var switchDialogSuspended = false
     @State private var showSlashCommandsSheet = false
     /// Drives the inline slash-command autocomplete above the composer.
     /// Toggled by `RichChatViewModel.shouldShowSlashMenu(text:)` on draft
@@ -190,19 +200,58 @@ struct ChatView: View {
                 } label: {
                     Image(systemName: "plus.bubble")
                 }
-                .disabled(controller.state == .connecting)
+                .disabled(controller.state == .connecting || controller.isSwitchingChats)
             }
         }
-        .sheet(isPresented: $showProjectPicker) {
+        .sheet(isPresented: $showProjectPicker, onDismiss: {
+            guard let request = pickerSwitch else { return presentHeldSwitch() }
+            pickerSwitch = nil
+            Task { await requestSwitch(request) }
+        }) {
             ProjectPickerSheet(
                 context: config.toServerContext(id: Self.sharedContextID),
-                onQuickChat: {
-                    Task { await controller.resetAndStartNewSession() }
-                },
-                onProject: { project in
-                    Task { await controller.resetAndStartInProject(project) }
-                }
+                onQuickChat: { pickerSwitch = .newChat() },
+                onProject: { project in pickerSwitch = .project(project) }
             )
+        }
+        .confirmationDialog(
+            "This chat is still replying",
+            isPresented: $showSwitchDialog,
+            titleVisibility: .visible,
+            presenting: pendingSwitch
+        ) { request in
+            Button("Stop and Switch", role: .destructive) {
+                pendingSwitch = nil
+                Task { await controller.runSwitch(request, stopTurnFirst: true) }
+            }
+            // The coordinator's pending value was cleared when the
+            // request was taken, so dropping it here can't re-fire.
+            Button("Keep Waiting", role: .cancel) {}
+        } message: { _ in
+            Text("Switching to another chat stops the reply.")
+        }
+        // Dismissed without "Stop and Switch" (Keep Waiting, or a tap
+        // outside): drop the request; a typed `/new` gets its text back.
+        .onChange(of: showSwitchDialog) { _, shown in
+            if switchDialogSuspended {
+                switchDialogSuspended = false
+                return
+            }
+            guard !shown, pendingSwitch != nil else { return }
+            pendingSwitch = nil
+            controller.cancelPendingSwitch()
+        }
+        // A permission prompt mid-reply must not wait behind the dialog
+        // (the turn would hang): step aside, keep the request held, and
+        // come back from the prompt's onDismiss.
+        .onChange(of: controller.vm.pendingPermission != nil) { _, hasPermission in
+            guard hasPermission, showSwitchDialog else { return }
+            switchDialogSuspended = true
+            showSwitchDialog = false
+        }
+        // The photos picker has no onDismiss hook.
+        .onChange(of: showPhotoPicker) { _, shown in
+            if !shown { presentHeldSwitch() }
         }
         // Forward the env-injected capabilities snapshot into the
         // shared `RichChatViewModel` whenever it changes. Drives the
@@ -223,6 +272,10 @@ struct ChatView: View {
             await controller.refreshVoiceChatMode()
         }
         .task {
+            // A typed `/new` mid-reply asks through the same dialog.
+            controller.switchRequestHandler = { request in
+                Task { await requestSwitch(request) }
+            }
             // Dashboard row taps set `pendingResumeSessionID`, Project
             // Detail's "New Chat" sets `pendingProjectChat`. Both fire
             // a tab switch to .chat alongside the value set; we
@@ -231,11 +284,11 @@ struct ChatView: View {
             // but in practice the coordinator never sets both at once.
             if let sessionID = coordinator?.pendingResumeSessionID {
                 coordinator?.pendingResumeSessionID = nil
-                await controller.startResuming(sessionID: sessionID)
+                await requestSwitch(.resume(sessionID: sessionID))
             } else if let projectPath = coordinator?.pendingProjectChat {
                 coordinator?.pendingProjectChat = nil
-                await consumePendingProjectChat(projectPath)
-            } else {
+                await requestSwitch(.projectPath(projectPath))
+            } else if !controller.isSwitchingChats {
                 await controller.start()
             }
         }
@@ -261,12 +314,12 @@ struct ChatView: View {
         .onChange(of: coordinator?.pendingResumeSessionID) { _, new in
             guard let sessionID = new else { return }
             coordinator?.pendingResumeSessionID = nil
-            Task { await controller.startResuming(sessionID: sessionID) }
+            Task { await requestSwitch(.resume(sessionID: sessionID)) }
         }
         .onChange(of: coordinator?.pendingProjectChat) { _, new in
             guard let projectPath = new else { return }
             coordinator?.pendingProjectChat = nil
-            Task { await consumePendingProjectChat(projectPath) }
+            Task { await requestSwitch(.projectPath(projectPath)) }
         }
         // React to network reachability transitions. The service
         // updates its `transitionTick` on every `.satisfied <->
@@ -338,7 +391,7 @@ struct ChatView: View {
             set: { newValue in
                 if !newValue { controller.cancelModelPreflight() }
             }
-        )) {
+        ), onDismiss: { presentHeldSwitch() }) {
             IOSModelPreflightSheet(
                 reason: controller.modelPreflightReason ?? "",
                 serverDisplayName: controller.context.displayName,
@@ -351,9 +404,13 @@ struct ChatView: View {
         // Tool-permission prompts. While the Live Voice sheet is up it
         // presents them itself (a view can't present a second sheet over
         // its own), so this presenter stands down.
-        .modifier(ChatPermissionPresenter(controller: controller, isEnabled: !voiceLive.isPresented))
+        .modifier(ChatPermissionPresenter(
+            controller: controller, isEnabled: !voiceLive.isPresented,
+            onDismiss: { presentHeldSwitch() }
+        ))
         .sheet(isPresented: $voiceLive.isPresented, onDismiss: {
             voiceLive.teardown(.sheetDismissed)
+            presentHeldSwitch()
         }) {
             if let session = voiceLive.session {
                 VoiceLiveSessionSheet(
@@ -369,6 +426,7 @@ struct ChatView: View {
         // The one-time Live Voice consent (F4). Cancel or a swipe down
         // starts nothing and bills nothing.
         .sheet(item: $voiceLive.pendingConsent, onDismiss: {
+            defer { presentHeldSwitch() }
             guard startLiveVoiceAfterConsent else { return }
             startLiveVoiceAfterConsent = false
             startLiveVoice()
@@ -386,25 +444,49 @@ struct ChatView: View {
         }
     }
 
-    /// Resolve a project absolute path to a `ProjectEntry` via the
-    /// transport-backed registry, then dispatch `resetAndStartInProject`.
-    /// If the path isn't registered (race with a Mac-app removal, or
-    /// SFTP read failure), fall back to a synthesized entry whose name
-    /// is the path's last component — chat still starts and the user
-    /// sees a usable project chip.
-    private func consumePendingProjectChat(_ path: String) async {
-        let ctx = config.toServerContext(id: Self.sharedContextID)
-        let entry: ProjectEntry = await Task.detached {
-            let registry = ProjectDashboardService(context: ctx).loadRegistry()
-            if let match = registry.projects.first(where: { $0.path == path }) {
-                return match
-            }
-            return ProjectEntry(
-                name: (path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent,
-                path: path
-            )
-        }.value
-        await controller.resetAndStartInProject(entry)
+    /// Every chat switch goes through here: the New Chat picker, a typed
+    /// `/new`, and the coordinator's pending resume / project chat. Asks
+    /// first when the open chat is still replying
+    /// (`ChatController.switchDecision`); while a switch is already
+    /// running, the newer request just replaces its queued one.
+    private func requestSwitch(_ request: ChatController.ChatSwitchRequest) async {
+        if controller.isSwitchingChats {
+            await controller.runSwitch(request, stopTurnFirst: false)
+            return
+        }
+        switch ChatController.switchDecision(
+            request,
+            turnRunning: controller.isTurnRunning,
+            openSessionID: controller.vm.sessionId
+        ) {
+        case .proceed: await controller.runSwitch(request, stopTurnFirst: false)
+        case .confirm:
+            pendingSwitch = request
+            presentHeldSwitch()
+        case .ignore: break
+        }
+    }
+
+    /// A sheet of this view is up. SwiftUI won't present the switch
+    /// dialog over it, so a held request waits for the sheet's onDismiss.
+    private var chatSheetUp: Bool {
+        showProjectPicker || showSlashCommandsSheet || showPhotoPicker
+            || controller.modelPreflightReason != nil
+            || voiceLive.isPresented || voiceLive.pendingConsent != nil
+            || controller.vm.pendingPermission != nil
+    }
+
+    /// Show the held switch's dialog once no sheet is in the way. Called
+    /// when a request is held and from every sheet's onDismiss.
+    private func presentHeldSwitch() {
+        guard let request = pendingSwitch, !chatSheetUp else { return }
+        // The reply may have finished while a sheet held the request.
+        guard controller.isTurnRunning else {
+            pendingSwitch = nil
+            Task { await requestSwitch(request) }
+            return
+        }
+        showSwitchDialog = true
     }
 
     // MARK: - Subviews
@@ -1284,7 +1366,7 @@ struct ChatView: View {
     /// Send is enabled when ready AND we have either text or at least
     /// one attachment. Image-only sends are valid for vision models.
     private var canSendComposer: Bool {
-        guard controller.state == .ready else { return false }
+        guard controller.state == .ready, !controller.isSwitchingChats else { return false }
         if !controller.attachments.isEmpty { return true }
         return !controller.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -1507,7 +1589,7 @@ struct ChatView: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(.tint.opacity(0.1))
             .animation(.spring(response: 0.3, dampingFraction: 0.75), value: hasQueue)
-            .sheet(isPresented: $showSlashCommandsSheet) {
+            .sheet(isPresented: $showSlashCommandsSheet, onDismiss: { presentHeldSwitch() }) {
                 ProjectSlashCommandsBrowser(
                     projectName: projectName,
                     commands: controller.vm.projectScopedCommands
@@ -1801,11 +1883,157 @@ final class ChatController {
         Task { try? await client.cancel(sessionId: sessionId) }
     }
 
+    // MARK: - Switching chats mid-turn
+
+    /// A chat switch the user asked for: a fresh quick chat, a new chat in
+    /// a project, or reopening a stored session.
+    enum ChatSwitchRequest: Equatable {
+        /// `name` is a typed `/new <name>`.
+        case newChat(name: String? = nil)
+        case project(ProjectEntry)
+        case projectPath(String)
+        case resume(sessionID: String)
+    }
+
+    /// Whether a turn THIS controller started is running. A turn Scarf
+    /// only attached to mid-flight isn't ended by switching (and
+    /// `session/cancel` from here can't reach it), so it doesn't count.
+    var isTurnRunning: Bool {
+        promptsInFlight > 0
+    }
+
+    enum SwitchDecision: Equatable {
+        /// Switch now, as before.
+        case proceed
+        /// Ask "This chat is still replying" first.
+        case confirm
+        /// Reopening the chat that is open and replying: leave it alone
+        /// (a reload would end the reply just like a switch).
+        case ignore
+    }
+
+    /// Every start path calls `stop()`, which ends a running reply without
+    /// `session/cancel` (on a gateway host the turn keeps running orphaned).
+    /// So a switch away from a working chat is confirmed first. Reopening
+    /// the chat that is already open is not a switch.
+    nonisolated static func switchDecision(
+        _ request: ChatSwitchRequest,
+        turnRunning: Bool,
+        openSessionID: String?
+    ) -> SwitchDecision {
+        guard turnRunning else { return .proceed }
+        if case .resume(let id) = request, id == openSessionID { return .ignore }
+        return .confirm
+    }
+
+    /// How long a confirmed switch waits on `session/cancel` and the
+    /// cancelled turn before switching anyway. Bounded (charter C10) so a
+    /// wedged host can't hang the switch — the Mac's 2 s. Tests shorten it.
+    @ObservationIgnored var switchCancelTimeout: Duration = .seconds(2)
+
+    /// Where a typed `/new` that needs confirming is handed (the chat view's
+    /// `requestSwitch`). `nil` switches directly, as before.
+    @ObservationIgnored var switchRequestHandler: ((ChatSwitchRequest) -> Void)?
+
+    /// A switch is stopping the old turn or starting the new chat. New
+    /// Chat and Send are disabled meanwhile, and a newer request replaces
+    /// `queuedSwitch` instead of interleaving a second stop()/start().
+    private(set) var isSwitchingChats = false
+    @ObservationIgnored private var queuedSwitch: ChatSwitchRequest?
+
+    /// What a `/new` handed to the confirm dialog had in the composer, put
+    /// back by "Keep Waiting" (`cancelPendingSwitch`).
+    @ObservationIgnored private var stashedSlashDraft: (text: String, attachments: [ChatImageAttachment])?
+
+    /// Run a switch — after the bounded stop when `stopTurnFirst`. While
+    /// one is in flight this only queues; the latest request wins.
+    func runSwitch(_ request: ChatSwitchRequest, stopTurnFirst: Bool) async {
+        queuedSwitch = request
+        stashedSlashDraft = nil
+        guard !isSwitchingChats else { return }
+        isSwitchingChats = true
+        defer { isSwitchingChats = false }
+        if stopTurnFirst { await stopTurnBeforeSwitch() }
+        while let next = queuedSwitch {
+            queuedSwitch = nil
+            await performSwitch(next)
+        }
+    }
+
+    /// "Keep Waiting": a typed `/new` gets its text back.
+    func cancelPendingSwitch() {
+        guard let stash = stashedSlashDraft else { return }
+        stashedSlashDraft = nil
+        draft = stash.text
+        attachments = stash.attachments
+    }
+
+    private func performSwitch(_ request: ChatSwitchRequest) async {
+        switch request {
+        case .newChat(let name): await resetAndStartNewSession(named: name)
+        case .project(let project): await resetAndStartInProject(project)
+        case .projectPath(let path): await resetAndStartInProject(await resolveProject(path: path))
+        case .resume(let sessionID): await startResuming(sessionID: sessionID)
+        }
+    }
+
+    /// Resolve a project absolute path to a `ProjectEntry` via the
+    /// transport-backed registry. If the path isn't registered (race with
+    /// a Mac-app removal, or SFTP read failure), fall back to a
+    /// synthesized entry whose name is the path's last component — chat
+    /// still starts and the user sees a usable project chip.
+    private func resolveProject(path: String) async -> ProjectEntry {
+        let ctx = context
+        return await Task.detached {
+            let registry = ProjectDashboardService(context: ctx).loadRegistry()
+            if let match = registry.projects.first(where: { $0.path == path }) {
+                return match
+            }
+            return ProjectEntry(
+                name: (path as NSString).lastPathComponent.isEmpty ? path : (path as NSString).lastPathComponent,
+                path: path
+            )
+        }.value
+    }
+
+    /// "Stop and Switch": cancel the running turn the way Stop does
+    /// (`session/cancel`), then wait for the turn's `session/prompt` to
+    /// return — at most `switchCancelTimeout`. The caller then switches.
+    /// Mac twin: `ChatViewModel.boundedSessionCancel`.
+    func stopTurnBeforeSwitch() async {
+        guard let client, let sessionId = vm.sessionId, !sessionId.isEmpty else { return }
+        if promptsInFlight > 0 { vm.noteTurnStopRequestedByUser() }
+        let turns = promptTurns.values.compactMap(\.task)
+        let timeout = switchCancelTimeout
+        // Unstructured on purpose: a task group would wait for the wedged
+        // cancel too. Whichever finishes first resumes; the other is dropped.
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let resumed = OSAllocatedUnfairLock(initialState: false)
+            @Sendable func resumeOnce() {
+                let isFirst = resumed.withLock { done -> Bool in
+                    if done { return false }
+                    done = true
+                    return true
+                }
+                if isFirst { cont.resume() }
+            }
+            Task {
+                try? await client.cancel(sessionId: sessionId)
+                for turn in turns { await turn.value }
+                resumeOnce()
+            }
+            Task {
+                try? await Task.sleep(for: timeout)
+                resumeOnce()
+            }
+        }
+    }
+
     /// The name typed with `/new <name>`, applied once the new session's
     /// first turn has stored it (S03-F5). Cleared by any other start.
     /// Keyed by the session it was typed for, so a later resume of
     /// another chat can never receive it.
-    @ObservationIgnored private var pendingSessionTitle: (title: String, sessionId: String)?
+    @ObservationIgnored private(set) var pendingSessionTitle: (title: String, sessionId: String)?
 
     /// Pre-flight: returns true when `config.yaml` has both
     /// `model.default` and `model.provider`. Returns false and stashes
@@ -2263,7 +2491,7 @@ final class ChatController {
     }
 
     private func _sendImpl() async {
-        guard state == .ready, let client else { return }
+        guard state == .ready, !isSwitchingChats, let client else { return }
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         // v0.12+ allows image-only sends — vision models accept "describe
         // this" with no text. Bail only when both fields are empty.
@@ -2280,18 +2508,21 @@ final class ChatController {
            let intercept = RichChatViewModel.clientSideSlashCommand(
                for: text, capabilities: vm.capabilitiesGate
            ) {
+            let typedAttachments = attachments
             draft = ""
             clearStoredDraft()
             attachments = []
             switch intercept {
             case .newSession(let name):
-                await resetAndStartNewSession()
-                // `/new <name>` (S03-F5): Hermes stores an ACP session
-                // only after its first turn, so the name is applied then
-                // (`applyPendingSessionTitle`).
-                let title = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if !title.isEmpty, let newId = vm.sessionId, !newId.isEmpty {
-                    pendingSessionTitle = (title, newId)
+                // Mid-reply, `/new` asks first like any other switch.
+                let request = ChatSwitchRequest.newChat(name: name)
+                if let switchRequestHandler,
+                   Self.switchDecision(request, turnRunning: isTurnRunning, openSessionID: vm.sessionId) != .proceed {
+                    switchRequestHandler(request)
+                    // After the hand-off: a newer request clears the stash.
+                    stashedSlashDraft = (text, typedAttachments)
+                } else {
+                    await resetAndStartNewSession(named: name)
                 }
             case .cliOnly(let name):
                 // gh#147: never sent — the model would get the literal text.
@@ -3163,6 +3394,16 @@ final class ChatController {
         }
     }
 
+    /// `/new <name>` (S03-F5): Hermes stores an ACP session only after
+    /// its first turn, so the name is applied then (`applyPendingSessionTitle`).
+    func resetAndStartNewSession(named name: String?) async {
+        await resetAndStartNewSession()
+        let title = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !title.isEmpty, let newId = vm.sessionId, !newId.isEmpty {
+            pendingSessionTitle = (title, newId)
+        }
+    }
+
     /// User tapped "New chat". Stop, reset the VM, start again.
     func resetAndStartNewSession() async {
         await stop()
@@ -3590,6 +3831,8 @@ final class ChatController {
 struct ChatPermissionPresenter: ViewModifier {
     let controller: ChatController
     let isEnabled: Bool
+    /// Lets the chat view show a switch dialog held behind the prompt.
+    var onDismiss: (() -> Void)?
 
     func body(content: Content) -> some View {
         content
@@ -3605,7 +3848,7 @@ struct ChatPermissionPresenter: ViewModifier {
             .sheet(item: Binding(
                 get: { isEnabled ? controller.vm.pendingPermission.map(PermissionWrapper.init) : nil },
                 set: { _ in }
-            )) { wrapper in
+            ), onDismiss: { onDismiss?() }) { wrapper in
                 PermissionSheet(permission: wrapper.value) { optionId in
                     await controller.respondToPermission(
                         requestId: wrapper.value.requestId,
