@@ -504,7 +504,17 @@ public final class RichChatViewModel {
     /// leaving that tool call blocked for the rest of the turn.
     /// Queueing preserves arrival order: the UI presents the head, and
     /// answering it pops to the next.
-    public private(set) var permissionQueue: [PendingPermission] = []
+    public private(set) var permissionQueue: [PendingPermission] = [] {
+        didSet { permissionQueueDidChange?() }
+    }
+
+    /// Called after every change to `permissionQueue` — a request queued,
+    /// answered, settled by Hermes, or dropped with its turn — so the owner
+    /// can follow requests it doesn't route itself (the Mac's "needs your
+    /// answer" notification is posted and withdrawn from here). Nil on iOS
+    /// and in the previews.
+    @ObservationIgnored
+    public var permissionQueueDidChange: (() -> Void)?
 
     /// The request currently on screen — the head of `permissionQueue`.
     /// Read-only on purpose: resolution goes through

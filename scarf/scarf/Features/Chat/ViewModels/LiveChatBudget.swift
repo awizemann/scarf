@@ -78,7 +78,8 @@ final class LiveChatBudget {
     /// `leaving` is a chat its window is about to move off, so it is no
     /// longer "shown" — idle, it may be released.
     ///
-    /// Full: release the least recently used idle chat (`releaseProcess`;
+    /// Full: release the least recently used idle chat, one with a draft
+    /// or an unread reply last (`releaseProcess`;
     /// its transcript stays, it re-attaches when focused). Nothing idle:
     /// `.full`, and the caller asks the user.
     func admit(on key: ControlMasterKey, excluding: ChatSession?, leaving: ChatSession? = nil) -> Admission {
@@ -87,7 +88,9 @@ final class LiveChatBudget {
         guard excess > 0 else { return .granted }
         let releasable = others
             .filter { !$0.isBusyForBudget && (!$0.isShownInWindow || $0 === leaving) }
-            .sorted { $0.lastUsedAt < $1.lastUsedAt }
+            // A chat with a draft or an unread reply is released last:
+            // the user is likely to come back to it.
+            .sorted { ChatSession.forgetFirst($0, $1) }
         guard releasable.count >= excess else {
             return .full(working: others.filter { chat in !releasable.contains { $0 === chat } })
         }

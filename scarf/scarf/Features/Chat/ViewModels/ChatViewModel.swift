@@ -40,19 +40,25 @@ final class ChatViewModel {
     /// The app-wide single-flight ControlMaster recovery its chats share.
     @ObservationIgnored
     let masterRecovery: SSHMasterRecovery
+    /// Where this window's chat notifications go (`ChatNotificationService`;
+    /// tests inject a recorder).
+    @ObservationIgnored
+    let notifier: any ChatNotificationPosting
 
     init(
         context: ServerContext = .local,
         voiceLive: VoiceLiveController? = nil,
         mode: Mode = .window,
         liveChatBudget: LiveChatBudget? = nil,
-        masterRecovery: SSHMasterRecovery? = nil
+        masterRecovery: SSHMasterRecovery? = nil,
+        notifier: (any ChatNotificationPosting)? = nil
     ) {
         self.context = context
         self.mode = mode
         // Nil = the app-wide ones; tests inject their own.
         self.liveChatBudget = liveChatBudget ?? .shared
         self.masterRecovery = masterRecovery ?? .shared
+        self.notifier = notifier ?? ChatNotificationService.shared
         self.voiceLive = voiceLive ?? VoiceLiveController()
         let dataService = HermesDataService(context: context)
         let fileService = HermesFileService(context: context)
@@ -214,6 +220,22 @@ final class ChatViewModel {
     private var sessionStartWatchdogOverride: UInt64?
     @ObservationIgnored
     private var autoAcceptEditsStoreOverride: ProjectAutoAcceptEditsStore?
+
+    /// This window's chat pane is on screen (`ChatTranscriptPane` appears;
+    /// not in another section, not closed). A reply finishing in the
+    /// focused chat then needs no notification while Scarf is frontmost.
+    @ObservationIgnored
+    var isChatPaneVisible = false
+
+    /// The window holding the chat pane is in front — key or main, not
+    /// minimized or behind another app (`controlActiveState`, set by
+    /// `ChatTranscriptPane`).
+    @ObservationIgnored
+    var isWindowVisible = false
+
+    /// Whether Scarf is the active app (tests substitute their own).
+    @ObservationIgnored
+    var appIsActive: () -> Bool = { NSApp?.isActive == true }
 
     /// The embedded terminal's `hermes` process is running (terminal mode).
     /// Kept apart from the chats' ACP state: a terminal is not a chat.
@@ -1018,6 +1040,8 @@ final class ChatViewModel {
             chat.lastUsedAt = Date()
             reapBackgroundChats()
         }
+        // The user has come to read it.
+        markRead(chat)
         if chat.isReleased {
             // A re-attach is a respawn the user asked for: like a resume,
             // it gets a real attempt past an open SSH breaker (gh#138).
@@ -1047,6 +1071,10 @@ final class ChatViewModel {
                 drop(chat)
             }
         }
+        // A chat released while it was the one shown (the budget releases
+        // the chat an open is leaving before focus moves) counts against
+        // the cap only now.
+        trimReleasedChats()
     }
 
     /// Take `chat` out of the window: supersede its start, stop its
@@ -1056,6 +1084,10 @@ final class ChatViewModel {
         if preflightChat === chat { preflightChat = nil }
         chat.supersede()
         chats.removeAll { $0 === chat }
+        chat.wasDropped = true
+        // Its approvals can't be answered any more; a "finished" note still
+        // opens the conversation (the click resumes it).
+        withdrawPermissionNotifications(for: chat)
     }
 
     /// The chat a new start or resume runs in. The focused one when moving
@@ -1140,7 +1172,9 @@ final class ChatViewModel {
 
     /// Most transcripts of released chats a window keeps in memory; past
     /// it the least recently used one is forgotten (its row reopens it).
-    static let maxReleasedChats = 8
+    /// A `var` so tests can lower it.
+    @ObservationIgnored
+    var maxReleasedChats = 8
 
     /// The budget for an open that moves this window to a chat (new, resume,
     /// continue-last), checked BEFORE focus moves so a blocked open leaves
@@ -1204,32 +1238,64 @@ final class ChatViewModel {
             block.replay()
             return
         }
+        // A typed first message still starting, with no session yet: the
+        // stopped chat gets it back in its composer, but the leave rule
+        // drops such a chat as soon as no window shows it — at once in the
+        // background, or when the open below moves focus off it — and an
+        // open that reuses it in place clears its draft. Then the message
+        // comes to the chat the user is in once the open has run.
+        let unsent = chat.richChatViewModel.sessionId == nil && chat.targetSessionId == nil
+            ? chat.unsentAutostartInput : nil
         let stopped = chat.releaseProcess(stoppingTurn: true)
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
             // The process is gone (or the cancel's bound passed) before
             // the open takes its slot.
             await stopped?.value
             block.replay()
+            // Dropped, or reused in place for the open (its draft cleared
+            // with the session boundary): the text survives nowhere else.
+            if let unsent, chat.wasDropped || !chat.composer.text.contains(unsent.text), let self {
+                self.focusedChat.takeUnsentFromStoppedChat(text: unsent.text, images: unsent.images)
+            }
         }
     }
 
-    /// Wait on the budget dialog (or its dismissal): the open is dropped.
+    /// Wait on the budget dialog: the open is dropped.
     func waitForBudget() {
         guard let block = budgetBlocked else { return }
         budgetBlocked = nil
         block.onWait?()
     }
 
+    /// The dialog's binding was written false. SwiftUI may write it BEFORE
+    /// running the button that dismissed it, so a Stop would first be read
+    /// as a Wait (its "Not sent" hint) and then replay the open. Decide on
+    /// the next main-actor turn instead: a button has cleared the block by
+    /// then; only a dismissal with no button (Esc, clicking away) still
+    /// finds it, and that is a Wait.
+    ///
+    /// `blockID` is the block the dialog was presenting, not whatever is
+    /// current: a Stop that ran first may have replayed into a NEW block
+    /// (the chat it named was gone), which this dismissal must not drop.
+    func budgetDialogDismissed(blockID: UUID?) {
+        guard let blockID else { return }
+        Task { @MainActor [weak self] in
+            guard let self, self.budgetBlocked?.id == blockID else { return }
+            self.waitForBudget()
+        }
+    }
+
     /// Bound the released transcripts this window keeps: past
-    /// `maxReleasedChats`, forget the least recently used one. (Nothing
-    /// unread or drafted is tracked per chat yet; a released chat has no
-    /// held send or open approval by construction.)
+    /// `maxReleasedChats`, forget the least recently used one — sparing a
+    /// chat with an unsent draft or an unread reply while there is any
+    /// other to forget (`ChatSession.hasDraftOrUnread`). A released chat
+    /// has no held send or open approval by construction.
     private func trimReleasedChats() {
         guard mode == .window else { return }
         let released = chats
             .filter { $0.isReleased && $0 !== focusedChat }
-            .sorted { $0.lastUsedAt < $1.lastUsedAt }
-        let excess = released.count - Self.maxReleasedChats
+            .sorted { ChatSession.forgetFirst($0, $1) }
+        let excess = released.count - maxReleasedChats
         guard excess > 0 else { return }
         for chat in released.prefix(excess) { drop(chat) }
     }
@@ -2311,6 +2377,7 @@ extension ChatViewModel {
     func stopAllChats() {
         for chat in chats where chat !== focusedChat {
             chat.supersede()
+            chat.wasDropped = true
         }
         focusedChat.stop()
         chats = [focusedChat]
@@ -2407,6 +2474,147 @@ extension ChatViewModel: ChatSessionHost {
     func chatDidReleaseProcess(_ chat: ChatSession) {
         trimReleasedChats()
     }
+
+    func chatDidFinishTurn(_ chat: ChatSession, preview: String) {
+        // Unread unless the user is looking at it: a background chat, or
+        // the shown one in a hidden pane or a window not in front.
+        guard !isUserLooking(at: chat) else { return }
+        chat.hasUnreadCompletion = true
+        let identifier = notificationIdentifier(for: chat, suffix: "done")
+        chat.postedFinishedNotificationId = identifier
+        notifier.post(ChatNotification(
+            kind: .turnFinished,
+            identifier: identifier,
+            title: ChatNotificationPolicy.finishedTitle(chatName: chat.displayTitle),
+            body: ChatNotificationPolicy.trimmedPreview(preview),
+            route: notificationRoute(for: chat)
+        ))
+    }
+
+    func chatPermissionsChanged(
+        _ chat: ChatSession,
+        added: [RichChatViewModel.PendingPermission],
+        removed: [Int]
+    ) {
+        // Answered, settled by Hermes or dropped: its notification goes.
+        let withdrawn = removed.compactMap { chat.postedPermissionNotificationIds.removeValue(forKey: $0) }
+        if !withdrawn.isEmpty { notifier.remove(identifiers: withdrawn) }
+        guard !added.isEmpty, !isUserLooking(at: chat) else { return }
+        for request in added {
+            let identifier = notificationIdentifier(for: chat, suffix: "perm/\(request.requestId)")
+            chat.postedPermissionNotificationIds[request.requestId] = identifier
+            notifier.post(ChatNotification(
+                kind: .needsAnswer,
+                identifier: identifier,
+                title: ChatNotificationPolicy.needsAnswerTitle(chatName: chat.displayTitle),
+                body: ChatNotificationPolicy.needsAnswerBody(requestTitle: request.title),
+                route: notificationRoute(for: chat)
+            ))
+        }
+    }
+}
+
+// MARK: - Unread replies, notifications, the permission sheet (parallel chats P1)
+
+extension ChatViewModel {
+    /// Whether the user is looking at `chat` right now — then nothing is
+    /// posted and nothing is unread (`ChatNotificationPolicy.shouldPost`).
+    private func isUserLooking(at chat: ChatSession) -> Bool {
+        !ChatNotificationPolicy.shouldPost(
+            appIsActive: appIsActive(),
+            isFocusedChat: chat === focusedChat,
+            isChatPaneVisible: isChatPaneVisible,
+            isWindowVisible: isWindowVisible
+        )
+    }
+
+    /// The chat pane came on screen, its window came to the front, or Scarf
+    /// became active: if the user now sees the focused chat, its reply is
+    /// read and its "finished" note withdrawn.
+    func chatPaneVisibilityChanged() {
+        if isUserLooking(at: focusedChat) { markRead(focusedChat) }
+    }
+
+    /// The row for `session`: its live chat (`liveChat(covering:)`), else
+    /// the chat the window shows when it is that conversation — so a
+    /// focused chat whose start or connection failed (no client, not
+    /// live) still shows its error on its row.
+    func rowChat(for session: HermesSession) -> ChatSession? {
+        if let live = liveChat(covering: session.id) { return live }
+        guard displayMode == .richChat else { return nil }
+        return conversationMatcher(for: session.id)(focusedChat) ? focusedChat : nil
+    }
+
+    /// Where a click on `chat`'s notification goes: this window's server
+    /// and the chat's session. None for Bot Chat (`.single`): its
+    /// conversation isn't one a main window should open, so a click only
+    /// activates the app. None either for a chat with no session yet.
+    func notificationRoute(for chat: ChatSession) -> ChatNotificationRoute? {
+        guard mode == .window,
+              let sessionId = chat.richChatViewModel.sessionId ?? chat.targetSessionId
+        else { return nil }
+        return ChatNotificationRoute(serverID: context.id, hermesHome: context.paths.home, sessionId: sessionId)
+    }
+
+    private func notificationIdentifier(for chat: ChatSession, suffix: String) -> String {
+        ChatNotificationPolicy.identifier(
+            serverID: context.id,
+            sessionId: chat.richChatViewModel.sessionId ?? chat.targetSessionId,
+            chatID: chat.id,
+            suffix: suffix
+        )
+    }
+
+    /// The user is looking at `chat`: its reply is read, and the "finished"
+    /// notification for it has done its job.
+    private func markRead(_ chat: ChatSession) {
+        chat.hasUnreadCompletion = false
+        if let posted = chat.postedFinishedNotificationId {
+            chat.postedFinishedNotificationId = nil
+            notifier.remove(identifiers: [posted])
+        }
+    }
+
+    /// `chat` is gone: its approvals can't be answered here any more.
+    private func withdrawPermissionNotifications(for chat: ChatSession) {
+        let identifiers = Array(chat.postedPermissionNotificationIds.values)
+        chat.postedPermissionNotificationIds = [:]
+        if !identifiers.isEmpty { notifier.remove(identifiers: identifiers) }
+    }
+
+    /// The window is going: nothing `chat` posted can be acted on in it.
+    private func withdrawNotifications(for chat: ChatSession) {
+        var identifiers = Array(chat.postedPermissionNotificationIds.values)
+        chat.postedPermissionNotificationIds = [:]
+        if let posted = chat.postedFinishedNotificationId { identifiers.append(posted) }
+        chat.postedFinishedNotificationId = nil
+        if !identifiers.isEmpty { notifier.remove(identifiers: identifiers) }
+    }
+
+    /// A permission request on screen, with the chat it belongs to. Its
+    /// sheet identity includes the chat: JSON-RPC ids restart with every
+    /// `hermes acp` process, so two chats can each have a request 0, and a
+    /// bare-id identity let the sheet carry one chat's card over to the
+    /// other's when focus moved.
+    struct PresentedPermission: Identifiable {
+        let chat: ChatSession
+        let permission: RichChatViewModel.PendingPermission
+
+        var id: String { Self.sheetID(chatID: chat.id, requestId: permission.requestId) }
+
+        static func sheetID(chatID: UUID, requestId: Int) -> String {
+            "\(chatID.uuidString)-\(requestId)"
+        }
+    }
+
+    /// The focused chat's head-of-queue request: background chats' requests
+    /// wait in their own queues (the row shows them, a notification fires)
+    /// until the user focuses that chat.
+    var presentedPermission: PresentedPermission? {
+        focusedChat.richChatViewModel.pendingPermission.map {
+            PresentedPermission(chat: focusedChat, permission: $0)
+        }
+    }
 }
 
 // MARK: - Live Voice (VoiceTurnHost)
@@ -2487,6 +2695,9 @@ extension ChatViewModel: VoiceTurnHost {
     /// attached. Idempotent: a second call finds no ACP client and does
     /// nothing.
     func leaveChat() {
+        // The window (or, on a profile switch, its root) is going: nothing
+        // it posted can be acted on in it, the shown chat's included.
+        for chat in chats { withdrawNotifications(for: chat) }
         stopAllChats()
         leaveChatVoiceLive()
     }

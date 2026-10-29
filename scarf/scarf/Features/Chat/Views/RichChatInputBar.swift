@@ -8,6 +8,10 @@ import AppKit
 #endif
 
 struct RichChatInputBar: View {
+    /// The chat's unsent text and attachments (`ChatSession.composer`).
+    /// Owned by the chat, not this view, so a draft outlives a move to
+    /// another chat (parallel chats P1).
+    @Bindable var draft: ComposerDraft
     /// Send the user's text and any attached images. Empty `images`
     /// preserves the v0.11 wire shape; non-empty images are forwarded
     /// as ACP image content blocks (Hermes v0.12+; the composer hides
@@ -46,7 +50,11 @@ struct RichChatInputBar: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(\.serverContext) private var serverContext
 
-    @State private var text = ""
+    /// The draft's text, read and written in place.
+    private var text: String {
+        get { draft.text }
+        nonmutating set { draft.text = newValue }
+    }
     @State private var showCompressSheet = false
     @State private var compressFocus = ""
     @State private var showMenu = false
@@ -54,8 +62,8 @@ struct RichChatInputBar: View {
     /// Attachments plus the cap they're held against. Slots are reserved
     /// synchronously on accept and released when the encode lands, so a
     /// burst of drops can't overshoot the cap through the async gap
-    /// (`ComposerAttachmentSlots`).
-    @State private var slots = ComposerAttachmentSlots(capacity: RichChatInputBar.maxAttachments)
+    /// (`ComposerAttachmentSlots`). The draft's, so they stay with the chat.
+    private var slots: ComposerAttachmentSlots { draft.slots }
     /// User-visible failure (decode failed, format unsupported). Auto-clears.
     @State private var attachmentError: String?
     /// Vision capability of the session's effective model, resolved
@@ -140,7 +148,7 @@ struct RichChatInputBar: View {
                     attachmentButton
                 }
 
-                TextEditor(text: $text)
+                TextEditor(text: $draft.text)
                     // UI-gate handle for the Live chat journey
                     // (ChatJourneyUITests). Applied HERE, directly on
                     // the TextEditor and before the background/overlay
@@ -723,15 +731,18 @@ struct RichChatInputBar: View {
             scheduleAttachmentErrorClear()
             return
         }
+        // The draft these slots belong to, as of now: a reset meanwhile
+        // (the chat moved to another conversation) voids them.
+        let generation = slots.generation
         for provider in providers.prefix(granted) {
-            ingestProvider(provider)
+            ingestProvider(provider, generation: generation)
         }
     }
 
     /// Consumes exactly ONE reservation taken by `ingestProviders`: either
     /// it reaches `encode` (which commits or releases it) or it releases
     /// the slot itself on the way out.
-    private func ingestProvider(_ provider: NSItemProvider) {
+    private func ingestProvider(_ provider: NSItemProvider, generation: Int) {
         // Prefer file URL when available — gives us the original filename
         // for the attachment chip's tooltip.
         if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
@@ -739,14 +750,14 @@ struct RichChatInputBar: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url, let data = try? Data(contentsOf: url) else {
                     Task { @MainActor in
-                        slots.release()
+                        slots.release(generation: generation)
                         attachmentError = "Couldn't read dropped file"
                         scheduleAttachmentErrorClear()
                     }
                     return
                 }
                 Task { @MainActor in
-                    encode(data: data, filename: url.lastPathComponent)
+                    encode(data: data, filename: url.lastPathComponent, generation: generation)
                 }
             }
             return
@@ -756,24 +767,24 @@ struct RichChatInputBar: View {
                 provider.loadDataRepresentation(forTypeIdentifier: typeId) { data, _ in
                     guard let data else {
                         Task { @MainActor in
-                            slots.release()
+                            slots.release(generation: generation)
                             attachmentError = "Couldn't decode pasted image"
                             scheduleAttachmentErrorClear()
                         }
                         return
                     }
                     Task { @MainActor in
-                        encode(data: data, filename: nil)
+                        encode(data: data, filename: nil, generation: generation)
                     }
                 }
                 return
             }
         }
         // Nothing in this provider we can read — hand its slot back.
-        slots.release()
+        slots.release(generation: generation)
     }
 
-    private func encode(data: Data, filename: String?) {
+    private func encode(data: Data, filename: String?, generation: Int) {
         // `Task {}` inherits this View's @MainActor isolation, so the
         // @State mutations stay on main; only the CPU-bound image encode
         // hops off via an inner `Task.detached` that captures just the
@@ -785,9 +796,9 @@ struct RichChatInputBar: View {
                 let attachment = try await Task.detached(priority: .userInitiated) {
                     try ImageEncoder().encode(rawBytes: data, sourceFilename: filename)
                 }.value
-                slots.commit(attachment)
+                slots.commit(attachment, generation: generation)
             } catch {
-                slots.release()
+                slots.release(generation: generation)
                 attachmentError = (error as? LocalizedError)?.errorDescription ?? "Couldn't encode image"
                 Self.logger.warning("ImageEncoder failed: \(error.localizedDescription, privacy: .public)")
                 scheduleAttachmentErrorClear()
@@ -815,6 +826,7 @@ struct RichChatInputBar: View {
         guard response == .OK else { return }
         // Same synchronous reservation as the drop/paste path.
         let granted = slots.reserve(upTo: panel.urls.count)
+        let generation = slots.generation
         let urls = Array(panel.urls.prefix(granted))
         guard !urls.isEmpty else { return }
         // Read each picked file off-main (disk I/O), then hand to `encode`
@@ -827,10 +839,10 @@ struct RichChatInputBar: View {
                     try? Data(contentsOf: url)
                 }.value
                 guard let data else {
-                    slots.release()
+                    slots.release(generation: generation)
                     continue
                 }
-                encode(data: data, filename: url.lastPathComponent)
+                encode(data: data, filename: url.lastPathComponent, generation: generation)
             }
         }
         #endif

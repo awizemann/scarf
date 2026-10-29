@@ -56,6 +56,18 @@ protocol ChatSessionHost: AnyObject {
     /// `chat` let go of its process (`releaseProcess`): the window bounds
     /// how many such transcripts it keeps.
     func chatDidReleaseProcess(_ chat: ChatSession)
+    /// A turn the user started in `chat` ended with Hermes's answer:
+    /// the window marks it unread when it isn't the chat shown and decides
+    /// whether to notify. `preview` is the reply's text.
+    func chatDidFinishTurn(_ chat: ChatSession, preview: String)
+    /// `chat`'s approval/question queue changed: `added` arrived, `removed`
+    /// (request ids) were answered, settled by Hermes or dropped. The
+    /// window posts and withdraws the "needs your answer" notifications.
+    func chatPermissionsChanged(
+        _ chat: ChatSession,
+        added: [RichChatViewModel.PendingPermission],
+        removed: [Int]
+    )
 }
 
 /// One chat and the `hermes acp` connection it runs on: the transcript
@@ -85,6 +97,44 @@ final class ChatSession {
     /// releases a chat someone is looking at. Set by the window.
     @ObservationIgnored
     var isShownInWindow = false
+
+    /// Its window dropped it (`ChatViewModel.drop`): nothing can show it
+    /// again.
+    @ObservationIgnored
+    var wasDropped = false
+
+    /// What the user typed (and attached) here and hasn't sent. Kept per
+    /// chat, so it survives moving to another chat and back, and a
+    /// release; cleared when the chat is reused for another session.
+    let composer = ComposerDraft()
+
+    /// A reply finished while the window showed another chat; cleared when
+    /// this chat is focused. The list row shows it (`rowState`). Scarf's
+    /// own, beside Hermes's read watermark (`HermesSession.isUnread`).
+    var hasUnreadCompletion = false
+
+    /// The "needs your answer" notification posted for each queued request
+    /// (request id → notification id), so answering it — or Hermes
+    /// settling it — withdraws exactly that one. Kept by the window.
+    @ObservationIgnored
+    var postedPermissionNotificationIds: [Int: String] = [:]
+
+    /// The "finished" notification last posted for this chat, withdrawn
+    /// when the user comes to read it. Kept by the window.
+    @ObservationIgnored
+    var postedFinishedNotificationId: String?
+
+    /// The request ids last seen in the permission queue, to tell the
+    /// window what arrived and what went (`permissionQueueChanged`).
+    @ObservationIgnored
+    private var knownPermissionIds: [Int] = []
+
+    /// The message an autostart is carrying (`autoStartACPAndSend`) and the
+    /// id of its local echo, until it is handed to `sendViaACP`. A Stop on
+    /// the budget dialog before then puts it back in the composer
+    /// (`restoreUnsentAutostart`) instead of losing it.
+    @ObservationIgnored
+    private var autostartInput: (text: String, images: [ChatImageAttachment], echoId: Int?)?
 
     /// The budget took this chat's process to free a slot
     /// (`releaseProcess`): the transcript and session id stay, nothing
@@ -128,7 +178,10 @@ final class ChatSession {
     /// until that text is handed to `sendViaACP`: leaving the chat in that
     /// window must not lose it, so the chat keeps running.
     @ObservationIgnored
-    private var startCarriesUserInput = false
+    private var startCarriesUserInput = false {
+        // Handed over or abandoned: nothing left to put back.
+        didSet { if !startCarriesUserInput { autostartInput = nil } }
+    }
 
     /// A prompt went to Hermes on the attached session. Hermes stores an
     /// ACP session only after its first turn (session.py:329-331 @
@@ -173,6 +226,23 @@ final class ChatSession {
             guard let client = self?.acpClient else { return }
             Task { await client.cancelPermission(requestId: requestId) }
         }
+        // Every way a request comes and goes (queued, answered, settled by
+        // Hermes, dropped with its turn) passes through the queue.
+        richChatViewModel.permissionQueueDidChange = { [weak self] in
+            self?.permissionQueueChanged()
+        }
+    }
+
+    /// Diff the permission queue against what was last seen and tell the
+    /// window (`ChatSessionHost.chatPermissionsChanged`).
+    private func permissionQueueChanged() {
+        let queue = richChatViewModel.permissionQueue
+        let ids = queue.map(\.requestId)
+        let added = queue.filter { !knownPermissionIds.contains($0.requestId) }
+        let removed = knownPermissionIds.filter { !ids.contains($0) }
+        knownPermissionIds = ids
+        guard !added.isEmpty || !removed.isEmpty else { return }
+        host?.chatPermissionsChanged(self, added: added, removed: removed)
     }
 
     /// This chat's `hermes acp` process is attached. The window's terminal
@@ -649,7 +719,8 @@ final class ChatSession {
     /// mode the user picked in it survives the restart — only a different
     /// session clears it.
     func resetForSessionSwitch(continuing sessionId: String? = nil) {
-        let keptMode = sessionId.flatMap { covers($0) ? userPickedApprovalMode : nil }
+        let sameConversation = sessionId.map(covers) ?? false
+        let keptMode = sameConversation ? userPickedApprovalMode : nil
         richChatViewModel.reset()
         targetSessionId = nil
         hasSentPrompt = false
@@ -661,6 +732,11 @@ final class ChatSession {
         userPickedApprovalMode = keptMode
         isReleased = false
         lastStartProjectPath = nil
+        hasUnreadCompletion = false
+        // A draft belongs to its conversation (#62): reused for another
+        // session, the chat starts with an empty composer. Restarting the
+        // same one in place (Reconnect) keeps it.
+        if !sameConversation { composer.clear() }
     }
 
     // MARK: - Parallel chats (P1)
@@ -722,6 +798,51 @@ final class ChatSession {
 
     /// A prompt Scarf started on this chat hasn't returned.
     var hasTurnInFlight: Bool { !promptTurns.isEmpty }
+
+    /// What the chat list row shows for a live chat (parallel chats P1),
+    /// most urgent first.
+    enum RowState: Equatable {
+        /// An approval or question waits for the user.
+        case needsAnswer
+        /// The last turn or the connection failed.
+        case error
+        /// A turn is running, or the session is starting or reconnecting.
+        case replying
+        /// A reply finished while the user was in another chat.
+        case finishedUnread
+        case idle
+    }
+
+    /// This chat's row state. Reads only observed scalars (never the
+    /// transcript), so a row re-renders when its own chat's state moves,
+    /// not on every streamed chunk.
+    var rowState: RowState {
+        if !richChatViewModel.permissionQueue.isEmpty { return .needsAnswer }
+        if acpError != nil
+            || acpStatus == ACPPhase.failed
+            || acpStatus == ACPPhase.connectionLost {
+            return .error
+        }
+        // `promptTurns` isn't observed; its revision is.
+        _ = promptTurnsRevision
+        if hasTurnInFlight || isPreparingSession { return .replying }
+        if hasUnreadCompletion { return .finishedUnread }
+        return .idle
+    }
+
+    /// The order to forget or release chats in: one with nothing to lose
+    /// (`hasDraftOrUnread`) first, then the least recently used.
+    static func forgetFirst(_ a: ChatSession, _ b: ChatSession) -> Bool {
+        if a.hasDraftOrUnread != b.hasDraftOrUnread { return !a.hasDraftOrUnread }
+        return a.lastUsedAt < b.lastUsedAt
+    }
+
+    /// The user would lose something if this chat were forgotten: an
+    /// unsent draft, or a reply they haven't seen. The released-chat cap
+    /// and the budget's release order spare such chats first.
+    var hasDraftOrUnread: Bool {
+        composer.hasContent || hasUnreadCompletion
+    }
 
     /// Whether the window keeps this chat when the user moves to another
     /// one (parallel chats P1, design §6), rather than dropping it:
@@ -1023,7 +1144,7 @@ final class ChatSession {
             replay: { [weak self] in
                 self?.sendRichText(text, images: images, autoStartInterceptor: nil)
             },
-            onWait: { [weak self] in self?.noteSendNotRun() }
+            onWait: { [weak self] in self?.noteSendNotRun(text: text, images: images) }
         ) ?? true
         guard admitted else { return }
         isStartingSession = true
@@ -1035,6 +1156,7 @@ final class ChatSession {
         armStartWatchdog(intent: intent)
         // Show the user message immediately
         richChatViewModel.addUserMessage(text: text)
+        autostartInput = (text, images, richChatViewModel.messages.last?.id)
         // …but keep the replay gate shut until the prompt is actually
         // sent. The echo opens it, and the `session/load` below streams
         // the session's whole stored history as live updates before it
@@ -1518,20 +1640,15 @@ final class ChatSession {
                 // Re-fetch session from DB to pick up cost/token data Hermes may have written
                 await richChatViewModel.refreshSessionFromDB()
                 await applyPendingSessionTitle(sessionId: sessionId)
-                // Issue #64 — notify the user that Hermes has
-                // finished if Scarf isn't the foreground app. The
-                // notifier handles the foreground/disabled gating;
-                // we just hand it the latest assistant text and
-                // session title for the body line.
+                // Issue #64 — tell the window a reply finished: it marks
+                // the chat unread when another one is shown, and notifies
+                // unless the user is looking at this chat (parallel chats
+                // P1; the window owns the gating).
                 if !isNonInterruptive {
                     let preview = richChatViewModel.messages
                         .last(where: { $0.isAssistant })?
                         .content ?? ""
-                    let title = richChatViewModel.currentSession?.title
-                    ChatNotificationService.shared.postPromptCompleted(
-                        sessionTitle: title,
-                        preview: preview
-                    )
+                    host?.chatDidFinishTurn(self, preview: preview)
                 }
             } catch is CancellationError {
                 // Routine when `stop()` tears down a superseded
@@ -1902,7 +2019,9 @@ final class ChatSession {
                     self.startACPSession(resume: sessionId, projectPath: projectPath, initialPrompt: initialPrompt)
                 }
             },
-            onWait: heldSend == nil ? nil : { [weak self] in self?.noteSendNotRun() }
+            onWait: heldSend.map { send in
+                { [weak self] in self?.noteSendNotRun(text: send.text, images: send.images) }
+            }
         ) ?? true
         guard admitted else {
             disarmStartWatchdog()
@@ -2835,12 +2954,20 @@ final class ChatSession {
     @discardableResult
     func releaseProcess(stoppingTurn: Bool = false) -> Task<Void, Never>? {
         guard holdsProcess || isReattaching else { return nil }
+        // A typed message an autostart hadn't sent yet: the user stopped
+        // it, so it goes back in the composer rather than vanishing. (If
+        // the window then drops this chat, the budget dialog hands the text
+        // on: `ChatViewModel.stopChatForBudget`.)
+        let unsent = stoppingTurn && startCarriesUserInput ? autostartInput : nil
         // Nothing to come back to — a new chat stopped before its session
         // existed: a released chat could never re-attach (a dead row that
         // swallows sends). Supersede it like any start left with nothing,
-        // and let the window's leave rule drop it.
+        // and let the window's leave rule drop it. (A background chat is
+        // then dropped with its restored draft: it has no row to reach it
+        // by. The one a window shows keeps it.)
         guard richChatViewModel.sessionId != nil || targetSessionId != nil else {
             let teardown = supersede()
+            if let unsent { restoreUnsentAutostart(unsent) }
             host?.chatSettledWithoutConnection(self)
             return teardown
         }
@@ -2868,6 +2995,7 @@ final class ChatSession {
             scheduleHintClear()
         }
         let teardown = tearDownConnection(cancelledHint: nil)
+        if let unsent { restoreUnsentAutostart(unsent) }
         isReleased = true
         acpStatus = ""
         logger.info("released this chat's hermes acp process to the live-chat budget")
@@ -2902,10 +3030,54 @@ final class ChatSession {
             reattaching: true, heldSend: send)
     }
 
-    /// A send the budget dialog's Wait dropped: it was never echoed, so say
-    /// it wasn't sent.
-    private func noteSendNotRun() {
-        showHint(String(localized: "Not sent — every live chat on \(context.displayName) is in use. Stop one, or send again later."))
+    /// The typed message an autostart is still carrying (not yet handed to
+    /// `sendViaACP`), for the budget dialog's Stop to hand to another chat.
+    var unsentAutostartInput: (text: String, images: [ChatImageAttachment])? {
+        guard startCarriesUserInput, let input = autostartInput else { return nil }
+        return (input.text, input.images)
+    }
+
+    /// Put an autostart's message that was stopped before it went out back
+    /// in the composer, and say so — when the chat has no session yet, so
+    /// its echo can go too. With a session the echo is in the session's
+    /// pending-echo cache and stays (as a dropped held send's does); putting
+    /// the text back as well would invite sending it twice, so the hint
+    /// alone says it wasn't sent.
+    private func restoreUnsentAutostart(_ unsent: (text: String, images: [ChatImageAttachment], echoId: Int?)) {
+        // The echo marked the chat working; no turn ever ran.
+        richChatViewModel.cancelPendingSend()
+        guard richChatViewModel.sessionId == nil else {
+            showHint(String(localized: "Not sent — you stopped this chat before it started. The last message above didn't go out."))
+            return
+        }
+        if let echoId = unsent.echoId {
+            richChatViewModel.messages.removeAll { $0.id == echoId }
+        }
+        composer.restoreUnsent(text: unsent.text, images: unsent.images)
+        showHint(String(localized: "Not sent — you stopped this chat before it started. Your message is back in the composer."))
+    }
+
+    /// A message typed into ANOTHER chat (no window showed it) that the
+    /// budget dialog's Stop ended before it went out — that chat is dropped
+    /// — lands here, in the chat the user is in. Into an empty composer;
+    /// never over a draft: then the hint quotes it, so it isn't lost
+    /// without a word.
+    func takeUnsentFromStoppedChat(text: String, images: [ChatImageAttachment]) {
+        if !composer.hasContent {
+            composer.restoreUnsent(text: text, images: images)
+            showHint(String(localized: "Not sent — you stopped that chat before it started. Your message is back in the composer."))
+        } else {
+            let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let quoted = line.count > 40 ? String(line.prefix(40)) + "…" : line
+            showHint(String(localized: "Not sent — you stopped that chat before it started: “\(quoted)”"))
+        }
+    }
+
+    /// A send the budget dialog's Wait dropped: it was never echoed, so put
+    /// it back in the composer and say it wasn't sent.
+    private func noteSendNotRun(text: String, images: [ChatImageAttachment]) {
+        composer.restoreUnsent(text: text, images: images)
+        showHint(String(localized: "Not sent — every live chat on \(context.displayName) is in use. Your message is back in the composer: stop a chat, or send it again later."))
     }
 
     /// Best-effort `session/cancel`, then wait for the cancelled turn to
@@ -3057,6 +3229,7 @@ final class ChatSession {
         hasSentPrompt = false
         userPickedApprovalMode = nil
         isReleased = false
+        hasUnreadCompletion = false
         setInspectorFocus(.none)
         // Full teardown: bounded best-effort `session/cancel` if a turn
         // is in flight (lets Hermes finalize the orphaned turn before

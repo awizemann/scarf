@@ -17,6 +17,9 @@ struct ChatTranscriptPane: View {
     @Environment(\.hermesCapabilities) private var capabilitiesStore
     @Environment(AppCoordinator.self) private var coordinator
     @Environment(\.scenePhase) private var scenePhase
+    /// Key or main window (`.key` / `.active`) vs. behind, minimized, or in
+    /// an inactive app (`.inactive`): whether the user can see this pane.
+    @Environment(\.controlActiveState) private var controlActiveState
 
     /// Live-count badge for the Kanban chip. Created lazily so the VM
     /// is per-context (not per-window) and a re-rendered view doesn't
@@ -119,17 +122,17 @@ struct ChatTranscriptPane: View {
                 canRestart: chatViewModel.canHostVoiceTurns
                     && !chatViewModel.voiceLive.isBlockedByAnotherWindow
             )
-            // Issue #62: bind composer identity to the active session
-            // ID so SwiftUI rebuilds `RichChatInputBar` (and its
-            // `@State` `text`/`attachments`) when the user switches
-            // conversations. Without this the composer is structurally
-            // identical across sessions and SwiftUI happily reuses the
-            // instance, leaking the unsent draft into the new session.
-            // A stable fallback id covers the brief "no session
-            // selected" window — using `UUID()` here would mint a
-            // fresh value per render and trash the composer on every
-            // body re-eval.
+            // The draft belongs to the chat (`ChatSession.composer`), so
+            // moving to another chat shows that chat's draft and moving
+            // back restores this one (parallel chats P1). The composer's
+            // identity follows the CHAT, not its session id: the id is nil
+            // until a start is ready, and a session change used to rebuild
+            // the view and drop what was typed meanwhile. Issue #62 (a
+            // draft leaking into another conversation) is kept by the chat
+            // clearing its draft when it is reused for another session
+            // (`resetForSessionSwitch`).
             RichChatInputBar(
+                draft: chatViewModel.focusedChat.composer,
                 onSend: onSend,
                 isEnabled: isEnabled,
                 commands: richChat.availableCommands,
@@ -141,12 +144,27 @@ struct ChatTranscriptPane: View {
                 canStop: richChat.isAgentWorking && chatViewModel.canStopCurrentTurn,
                 onStop: { chatViewModel.stopCurrentTurn() }
             )
-            .id(richChat.sessionId ?? "scarf.chat.no-session")
+            .id(chatViewModel.focusedChat.id)
         }
         // Leaving the chat (another sidebar section, terminal mode, window
         // close) takes the panel — and the web view WebKit needs for audio
         // — with it, so the session ends here rather than billing unseen.
-        .onDisappear { chatViewModel.leaveChatVoiceLive() }
+        .onDisappear {
+            chatViewModel.isChatPaneVisible = false
+            chatViewModel.leaveChatVoiceLive()
+        }
+        // Whether the focused chat is on screen: a reply finishing in it
+        // then is neither unread nor notified. Coming on screen (the pane,
+        // or its window to the front) reads what finished meanwhile.
+        .onAppear {
+            chatViewModel.isChatPaneVisible = true
+            chatViewModel.isWindowVisible = controlActiveState != .inactive
+            chatViewModel.chatPaneVisibilityChanged()
+        }
+        .onChange(of: controlActiveState) { _, state in
+            chatViewModel.isWindowVisible = state != .inactive
+            chatViewModel.chatPaneVisibilityChanged()
+        }
         // The one-time Live Voice consent (F4): raised by the first start
         // on this Mac; Cancel starts nothing and bills nothing.
         .sheet(item: Binding(

@@ -35,6 +35,14 @@ struct ScarfApp: App {
         // the registries below are built.
         Analytics.installCoreBridge()
 
+        // The chat notifications' delegate (shows them while Scarf is
+        // frontmost, routes a click to its chat). Set here, before launch
+        // finishes, so a click that launches the app is delivered. Not in
+        // a unit-test or preview host, which never posts.
+        if !Analytics.isSyntheticHost {
+            ChatNotificationService.shared.installAsDelegate()
+        }
+
         let registry = ServerRegistry()
         let live = ServerLiveStatusRegistry(registry: registry)
         // Re-fan-out statuses whenever the user adds/removes/renames a
@@ -474,6 +482,9 @@ private struct ContextBoundRoot: View {
     /// Refreshes once on init; explicit `refresh()` call rerun after a
     /// `hermes update`.
     @State private var capabilities: HermesCapabilitiesStore
+    /// Captured for the chat notification directory: a click brings this
+    /// window forward (or opens one for its server) through it.
+    @Environment(\.openWindow) private var openWindow
 
     init(context: ServerContext) {
         self.context = context
@@ -508,7 +519,19 @@ private struct ContextBoundRoot: View {
             // geometry; new servers fall back to WindowGroup's `.defaultSize`
             // until first resize.
             .windowFrameAutosave("Scarf.Window.\(context.id)")
-            .onAppear { fileWatcher.startWatching() }
+            .onAppear {
+                fileWatcher.startWatching()
+                // A chat notification click can land in this window (and a
+                // click staged before it opened is taken now).
+                let openWindow = openWindow
+                ChatWindowDirectory.shared.register(
+                    chat: chatViewModel,
+                    coordinator: coordinator,
+                    serverID: context.id,
+                    hermesHome: context.paths.home,
+                    openWindow: { openWindow(value: $0) }
+                )
+            }
             // The `/scarf-*` commands are installed on this Mac at launch;
             // a remote host gets them the first time a window connects to
             // it (S03-F5). Off-main and once per host per app session.
@@ -517,6 +540,7 @@ private struct ContextBoundRoot: View {
             }
             .onDisappear {
                 fileWatcher.stopWatching()
+                ChatWindowDirectory.shared.unregister(chat: chatViewModel)
                 // Window close, or a server/profile switch rebuilding this
                 // root: the `hermes acp` process belongs to this root and
                 // nothing can reach it afterwards, so it is stopped here —

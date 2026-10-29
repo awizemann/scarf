@@ -316,7 +316,7 @@ struct ChatComposerF2bTests {
     /// VoiceOver to announce and nothing for Voice Control to hear.
     @Test @MainActor func composerTextAreaCarriesAnAccessibilityLabel() async throws {
         let labels = MacChatF2bSource.axLabels(of:
-            RichChatInputBar(onSend: { _, _, _ in }, isEnabled: true)
+            RichChatInputBar(draft: ComposerDraft(), onSend: { _, _, _ in }, isEnabled: true)
                 .frame(width: 600)
         )
         #expect(labels.contains("Message Hermes"),

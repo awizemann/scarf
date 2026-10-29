@@ -49,6 +49,12 @@ struct ChatSessionListPane: View {
                             // the new tip while the chat keeps its ACP id.
                             isActive: chatViewModel.isAttached(to: session),
                             isLive: chatViewModel.isAttached(to: session) && richChat.isAgentWorking,
+                            // The window's live chat on this conversation,
+                            // focused or not, or the shown chat when it is
+                            // this one (its error stays visible after its
+                            // client is gone): the row reads its state
+                            // (parallel chats P1).
+                            liveChat: chatViewModel.rowChat(for: session),
                             onSelect: { chatViewModel.resumeSession(session.id) }
                         )
                         .contextMenu {
@@ -487,10 +493,20 @@ private struct ChatSessionRow: View {
     let preview: String
     let projectName: String?
     let isActive: Bool
+    /// The shown chat is working (terminal mode has no live chat to read).
     let isLive: Bool
+    /// This conversation's live chat in the window, if any. Its row state
+    /// is read HERE, in the row's own body, so a state change re-renders
+    /// this row only (and nothing reads the transcript).
+    let liveChat: ChatSession?
     let onSelect: () -> Void
 
     @State private var hover = false
+
+    private var state: ChatSession.RowState {
+        if let liveChat { return liveChat.rowState }
+        return isLive ? .replying : .idle
+    }
 
     var body: some View {
         Button(action: onSelect) {
@@ -538,6 +554,13 @@ private struct ChatSessionRow: View {
                     }
                 }
                 HStack(spacing: 6) {
+                    // An approval or question waits in this chat, maybe in
+                    // the background: its sheet opens when the chat is
+                    // focused.
+                    if state == .needsAnswer {
+                        ScarfBadge("Needs answer", kind: .warning)
+                            .help("Hermes is waiting for your answer in this chat")
+                    }
                     if let projectName, !projectName.isEmpty {
                         HStack(spacing: 3) {
                             Image(systemName: "folder.fill")
@@ -611,23 +634,60 @@ private struct ChatSessionRow: View {
         .accessibilityValue(Text(isActive ? "active" : ""))
     }
 
+    /// What the status glyph says, for VoiceOver (nil: nothing to say).
+    private var stateLabel: Text? {
+        switch state {
+        case .needsAnswer: return Text("Needs your answer")
+        case .error: return Text("Error")
+        case .replying: return Text("Replying")
+        case .finishedUnread: return Text("Finished, unread")
+        case .idle: return nil
+        }
+    }
+
     private var rowBackground: Color {
         if isActive { return ScarfColor.accentTint }
         if hover { return ScarfColor.border.opacity(0.5) }
         return .clear
     }
 
+    /// The leading status mark. Replying keeps the green live dot; the
+    /// other live states are small glyphs in the same slot. Finished-unread
+    /// is a check here, never a second dot beside Hermes's own unread dot
+    /// (trailing, v0.20.4).
     @ViewBuilder
     private var statusDot: some View {
-        if isLive {
-            Circle()
-                .fill(ScarfColor.success)
-                .frame(width: 7, height: 7)
-                .overlay(Circle().stroke(ScarfColor.successHue.opacity(0.20), lineWidth: 2))
-        } else {
-            Circle()
-                .fill(ScarfColor.foregroundFaint.opacity(0.4))
-                .frame(width: 6, height: 6)
+        Group {
+            switch state {
+            case .replying:
+                Circle()
+                    .fill(ScarfColor.success)
+                    .frame(width: 7, height: 7)
+                    .overlay(Circle().stroke(ScarfColor.successHue.opacity(0.20), lineWidth: 2))
+            case .needsAnswer:
+                statusGlyph("questionmark.circle.fill", ScarfColor.warning)
+            case .error:
+                statusGlyph("exclamationmark.circle.fill", ScarfColor.danger)
+            case .finishedUnread:
+                statusGlyph("checkmark.circle.fill", ScarfColor.success)
+            case .idle:
+                Circle()
+                    .fill(ScarfColor.foregroundFaint.opacity(0.4))
+                    .frame(width: 6, height: 6)
+            }
         }
+        // Fixed slot (the live dot's width, which the second line's
+        // leading padding lines up with), so the title doesn't shift as
+        // the state changes; a glyph may overhang it by a point.
+        .frame(width: 7, height: 7)
+        .accessibilityElement()
+        .accessibilityLabel(stateLabel ?? Text(""))
+        .accessibilityHidden(stateLabel == nil)
+    }
+
+    private func statusGlyph(_ name: String, _ color: Color) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundStyle(color)
     }
 }

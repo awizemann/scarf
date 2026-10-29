@@ -654,7 +654,11 @@ struct ChatView: View {
             }
         }
         // Permission approval sheet
-        .sheet(item: permissionBinding) { permission in
+        .sheet(item: permissionBinding) { presented in
+            let permission = presented.permission
+            // Answers go to the chat the card belongs to, not whatever chat
+            // is focused when the button is pressed.
+            let chat = presented.chat
             PermissionApprovalView(
                 title: permission.title,
                 kind: permission.kind,
@@ -664,7 +668,7 @@ struct ChatView: View {
                 // cards style `skip` / `deny` by option kind.
                 optionAllows: permission.prompt == .toolApproval ? nil : permission.optionAllows,
                 onRespond: { optionId in
-                    viewModel.respondToPermission(
+                    chat.respondToPermission(
                         requestId: permission.requestId,
                         optionId: optionId
                     )
@@ -685,11 +689,11 @@ struct ChatView: View {
                 // `edit_policy` is never deferred to the turn's end.
                 onAllowForSession: Self.offersAllowEditsForSession(viewModel.capabilitiesStore?.capabilities ?? .empty)
                     ? { optionId in
-                        viewModel.respondToPermission(
+                        chat.respondToPermission(
                             requestId: permission.requestId,
                             optionId: optionId
                         )
-                        viewModel.switchApprovalMode(.acceptEdits)
+                        chat.switchApprovalMode(.acceptEdits)
                     }
                     : nil
             )
@@ -778,7 +782,8 @@ struct ChatView: View {
         caps.hasSessionEditAutoApproval && !caps.hasGatewayBackedACP
     }
 
-    /// Presents the HEAD of the permission queue. The setter is
+    /// Presents the HEAD of the focused chat's permission queue, identified
+    /// by chat AND request id (`ChatViewModel.PresentedPermission`). The setter is
     /// deliberately inert: a permission request is resolved only by
     /// answering it (`respondToPermission`), which pops it by id. If we
     /// popped on SwiftUI's dismissal write instead, the write that
@@ -787,19 +792,24 @@ struct ChatView: View {
     /// NEXT queued request without ever showing it. An Esc dismissal
     /// therefore re-presents the same sheet, which is the honest
     /// outcome: the agent is still blocked waiting for an answer.
-    private var permissionBinding: Binding<RichChatViewModel.PendingPermission?> {
+    private var permissionBinding: Binding<ChatViewModel.PresentedPermission?> {
         Binding(
-            get: { viewModel.richChatViewModel.pendingPermission },
+            get: { viewModel.presentedPermission },
             set: { _ in }
         )
     }
 
-    /// The dialog's own dismissal (Esc, clicking away) is a Wait; after a
-    /// button the VM has already cleared the block, so it is a no-op.
+    /// The dialog's own dismissal (Esc, clicking away) is a Wait. SwiftUI
+    /// can write this before running the button pressed, so the VM settles
+    /// it a turn later (`budgetDialogDismissed`): a Stop is never also a
+    /// Wait.
     private var budgetBlockedBinding: Binding<Bool> {
-        Binding(
+        // The block on screen when this binding was made (the body re-runs
+        // whenever it changes): a later write dismisses that one only.
+        let presented = viewModel.budgetBlocked?.id
+        return Binding(
             get: { viewModel.budgetBlocked != nil },
-            set: { if !$0 { viewModel.waitForBudget() } }
+            set: { if !$0 { viewModel.budgetDialogDismissed(blockID: presented) } }
         )
     }
 
@@ -815,13 +825,8 @@ struct ChatView: View {
 
 // MARK: - Permission Approval View
 
-// `@retroactive` acknowledges that we're declaring conformance for a
-// type (`PendingPermission`) and protocol (`Identifiable`) we don't own
-// — the Swift 6 compiler flags this otherwise so that downstream
-// breakage is loud if `ScarfCore` ever adds the conformance upstream.
-extension RichChatViewModel.PendingPermission: @retroactive Identifiable {
-    public var id: Int { requestId }
-}
+// The sheet's identity is `ChatViewModel.PresentedPermission` (chat id +
+// request id); a bare request id collides across chats.
 
 /// A centered flow: children keep their intrinsic size and wrap onto new
 /// rows when the available width runs out. Used for the approval buttons so
