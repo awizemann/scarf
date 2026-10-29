@@ -47,7 +47,8 @@ struct ModelSurfaceUngatingP49Tests {
 
     @Test("a project's bound preset is applied at session boot on every host")
     func chatViewModelAppliesTheBoundPreset() throws {
-        let source = try Self.source("scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift")
+        // `applyProjectModelPreset` lives on `ChatSession` (parallel chats P0).
+        let source = try Self.source("scarf/scarf/Features/Chat/ViewModels/ChatSession.swift")
         #expect(!Self.codeLines(source).contains { $0.contains("hasACPSetSessionModel") })
         // The old early return logged and dropped the preset.
         #expect(!source.contains("preset '\\(preset.name)' bound but not applied"))

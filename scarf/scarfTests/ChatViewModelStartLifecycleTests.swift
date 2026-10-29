@@ -288,6 +288,42 @@ import ScarfCore
         #expect(vm.isPreparingSession == false)
     }
 
+    /// A start still in flight when its window's view model goes away
+    /// (window closed, Bot Chat dismissed) must abandon, not boot a
+    /// session nobody owns. Since the ChatSession extraction the start
+    /// pipeline holds only the chat, whose `host` is weak; without the
+    /// host check the resumed pipeline carried on with no factory
+    /// override (Bot Chat's pinned profile) and no capability reads.
+    @Test @MainActor func startAbandonsWhenItsWindowIsGone() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        var vm: ChatViewModel? = ChatViewModel(context: home.context)
+        let chat = try #require(vm?.focusedChat)
+        let ch = ScriptedACPChannel(behavior: .happy(sessionId: "sess-gone"))
+        let (gate, gateCont) = AsyncStream<Void>.makeStream()
+        let (entered, enteredCont) = AsyncStream<Void>.makeStream()
+        vm?.acpClientFactory = { ctx, _ in
+            ACPClient(context: ctx) { _ in
+                enteredCont.yield(())
+                for await _ in gate { break }
+                return ch
+            }
+        }
+
+        vm?.startNewSession()
+        // Wait until the pipeline is inside the spawn, then drop the window.
+        for await _ in entered { break }
+        vm = nil
+        #expect(chat.host == nil, "the window view model was not released")
+
+        gateCont.yield(())
+        gateCont.finish()
+        let abandoned = await Self.waitUntil { await ch.closed }
+        #expect(abandoned, "the orphaned start didn't stop its client")
+        #expect(await ch.sentMethods.contains("session/new") == false)
+        #expect(chat.richChatViewModel.sessionId == nil)
+    }
+
     // MARK: - (a) Supersede
 
     /// While start A is wedged inside its channel factory, a second

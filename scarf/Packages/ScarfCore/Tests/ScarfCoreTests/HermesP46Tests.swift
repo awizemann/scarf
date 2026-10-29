@@ -224,7 +224,7 @@ struct IdleSteerP46Tests {
     /// in a `switch` inside a SwiftUI view / a view model method.
     @Test func bothSendPathsGateTheSteerArmOnTheWorkingState() throws {
         for relative in [
-            "scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift",
+            "scarf/scarf/Features/Chat/ViewModels/ChatSession.swift",
             "scarf/Scarf iOS/Chat/ChatView.swift",
         ] {
             let source = try String(
@@ -246,7 +246,7 @@ struct IdleSteerP46Tests {
     @Test func theMacPathMakesTheIdleSteerInterruptible() throws {
         let source = try String(
             contentsOf: P44Repo.root.appendingPathComponent(
-                "scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift"),
+                "scarf/scarf/Features/Chat/ViewModels/ChatSession.swift"),
             encoding: .utf8)
         let decl = try #require(source.range(of: "let isNonInterruptive = "))
         let tail = source[decl.upperBound...].prefix(400)

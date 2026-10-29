@@ -252,45 +252,48 @@ struct ChatConfigReadOffMainF2bTests {
     /// `ChatViewModel` sits inside an off-main hop (`OffPool.run` or
     /// `Task.detached`), never on the main actor.
     @Test func everyChatViewModelConfigReadSitsInsideAnOffMainHop() throws {
-        let path = MacChatF2bSource.repoRoot
-            .appendingPathComponent("scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift")
-        let lines = try String(contentsOf: path, encoding: .utf8).components(separatedBy: "\n")
-
         var offenders: [String] = []
         var sites = 0
-        for (index, line) in lines.enumerated() where line.contains("loadConfig()") {
-            // Skip prose — only real call sites count.
-            let code = line.trimmingCharacters(in: .whitespaces)
-            if code.hasPrefix("//") || code.hasPrefix("///") { continue }
-            sites += 1
-            // Walk back to the nearest hop that leaves the main actor. A
-            // `MainActor.run` / `await MainActor` in between means we came
-            // BACK on-main before the read.
-            // The common shape is the read INSIDE the hop's own closure on
-            // one line (`await OffPool.run { svc.loadConfig() }`). Comments
-            // never count as a hop — this file documents `OffPool.run` in
-            // prose directly above the sites, and prose must not be able to
-            // vouch for code.
-            func isComment(_ text: String) -> Bool {
-                text.trimmingCharacters(in: .whitespaces).hasPrefix("//")
-            }
-            func opensOffMainHop(_ text: String) -> Bool {
-                guard !isComment(text) else { return false }
-                return text.contains("OffPool.run {") || text.contains("Task.detached")
-            }
-            var hopped = opensOffMainHop(line)
-            var backOnMain = false
-            for previous in stride(from: index - 1, through: max(0, index - 40), by: -1) where !hopped {
-                let text = lines[previous]
-                if isComment(text) { continue }
-                if text.contains("MainActor.run") { backOnMain = true }
-                if opensOffMainHop(text) {
-                    hopped = !backOnMain
-                    break
+        // The chat's own reads moved to `ChatSession` (parallel chats P0).
+        for file in ["ChatViewModel.swift", "ChatSession.swift"] {
+            let path = MacChatF2bSource.repoRoot
+                .appendingPathComponent("scarf/scarf/Features/Chat/ViewModels/\(file)")
+            let lines = try String(contentsOf: path, encoding: .utf8).components(separatedBy: "\n")
+
+            for (index, line) in lines.enumerated() where line.contains("loadConfig()") {
+                // Skip prose — only real call sites count.
+                let code = line.trimmingCharacters(in: .whitespaces)
+                if code.hasPrefix("//") || code.hasPrefix("///") { continue }
+                sites += 1
+                // Walk back to the nearest hop that leaves the main actor. A
+                // `MainActor.run` / `await MainActor` in between means we came
+                // BACK on-main before the read.
+                // The common shape is the read INSIDE the hop's own closure on
+                // one line (`await OffPool.run { svc.loadConfig() }`). Comments
+                // never count as a hop — this file documents `OffPool.run` in
+                // prose directly above the sites, and prose must not be able to
+                // vouch for code.
+                func isComment(_ text: String) -> Bool {
+                    text.trimmingCharacters(in: .whitespaces).hasPrefix("//")
                 }
-            }
-            if !hopped {
-                offenders.append("line \(index + 1): \(code)")
+                func opensOffMainHop(_ text: String) -> Bool {
+                    guard !isComment(text) else { return false }
+                    return text.contains("OffPool.run {") || text.contains("Task.detached")
+                }
+                var hopped = opensOffMainHop(line)
+                var backOnMain = false
+                for previous in stride(from: index - 1, through: max(0, index - 40), by: -1) where !hopped {
+                    let text = lines[previous]
+                    if isComment(text) { continue }
+                    if text.contains("MainActor.run") { backOnMain = true }
+                    if opensOffMainHop(text) {
+                        hopped = !backOnMain
+                        break
+                    }
+                }
+                if !hopped {
+                    offenders.append("\(file) line \(index + 1): \(code)")
+                }
             }
         }
 

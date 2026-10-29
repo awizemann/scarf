@@ -183,7 +183,7 @@ struct IdleQueueFallbackP44bTests {
     @Test func bothPlatformsGateTheMirrorAndTheWire() throws {
         let root = P44Repo.root
         let sites = [
-            "scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift",
+            "scarf/scarf/Features/Chat/ViewModels/ChatSession.swift",
             "scarf/Scarf iOS/Chat/ChatView.swift",
         ]
         for rel in sites {

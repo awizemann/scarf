@@ -137,10 +137,11 @@ struct HermesP55GoalArmTests {
         #expect(!src.contains("Goal locked"))
         #expect(!src.contains("goalChip"))
         #expect(src.contains("RichChatViewModel.acpUnhandledSlashNotice(\n                name: parsedSlash.name, capabilities: vm.capabilitiesGate"))
-        // And the Mac side's `default:` arm calls the same helper.
+        // And the Mac side's `default:` arm calls the same helper
+        // (`ChatSession.sendViaACP`, parallel chats P0).
         let mac = try String(
             contentsOf: repoRoot.appendingPathComponent(
-                "scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift"
+                "scarf/scarf/Features/Chat/ViewModels/ChatSession.swift"
             ),
             encoding: .utf8
         )
