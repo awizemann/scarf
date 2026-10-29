@@ -5,10 +5,10 @@ permalink: scarf/architecture/scarf-projects-mcp-server-bundled-helper-scarfcore
 tags: [projects, mcp, phase-5, agents, stdio]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit, scarf/Packages/ScarfCore/Sources/scarf-projects-mcp/main.swift, scarf/Packages/ScarfCore/Package.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/DashboardWidgetCatalog.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDashboardService.swift]
 source_paths_inferred: false
-source_sha: f6fdb87f6cbf0de6dc3f7b0140ac9b4f6317ede8
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-03
 updated: 2026-09-27
-reviewed: 2026-09-26
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -54,3 +54,7 @@ reviewed_by: audit:claude-code (background)
 
 
 - [decision] (R16c, 2026-09-27) Direct providers whose own API serves `vendor/model` ids skip the mismatch too, via a SEPARATE `ModelPreflight.vendorNamespacedProviders` set (not `aggregatorProviders`, which check-hermes-tables lane 2 diffs). Today only `nvidia` (NIM serves `nvidia/…`, `meta/…`, `z-ai/…`): nvidia is in no prefix-stripping set at any tag and `_repair_prefix_from_catalogue` only touches bare ids (`hermes_cli/model_normalize.py:72-82,171-175,257-258` @ v2026.9.24; file first appears v2026.4.8, ids went out as typed before), so the skip is unfloored. #nvidia
+
+## v0.22 re-verification (2026-10-25, post-v0.22.5 targeting)
+- [decision] HERMES_TARGET_TAG bumped to v0.22.5 (commit 57a14bae, 2026-10-25); provider alias tables reconciled (commit 12de91b0, "fix(providers): Hermes v0.22.5 provider aliases, solstice, krea-3, rentahuman"). New canonicalization: `local`, `vllm`, `llamacpp`, `llama.cpp`, `llama-cpp` all resolve to `custom` (v0.22.5 providers.py:141, auth.py:1478), ending false mismatch banners for Scarf-written `provider: vllm` configs. Solstice / solstice-oauth routable from v0.21.6 (new capability floor). Krea-3 image model (v0.22.3) and rentahuman optional MCP (v0.22.3) added to overlays. #reconciliation
+- [todo] Verify check-hermes-tables.py --tag v0.22.5 now passes against v0.22.5 tables (lanes 1-8, aliasing `solstice`/`solstice-oauth` if added). #maintenance

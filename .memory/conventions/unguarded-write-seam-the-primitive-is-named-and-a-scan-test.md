@@ -5,10 +5,10 @@ permalink: scarf/conventions/unguarded-write-seam-the-primitive-is-named-and-a-s
 tags: [writes, guards, testing, gw-enforcement]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/ServerTransport.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/UnguardedWriteScanTests.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ServerContext.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-04
 updated: 2026-09-07
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

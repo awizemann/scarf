@@ -5,10 +5,10 @@ permalink: scarf/architecture/session-branch-marking-145-isbranch-rides-the-list
 tags: [sessions, branch, hermes-lineage, issue-145]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesSession.swift]
 source_paths_inferred: false
-source_sha: 4beace9d6d71c2aae455ed7eae5b600642f0f3b0
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

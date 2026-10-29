@@ -5,11 +5,11 @@ permalink: scarf/conventions/ui-gate-section-root-identifiers-and-the-smoke-full
 tags: [testing, xcuitest, a11y, release, test-plans]
 source_paths: [scarf/scarf/ContentView.swift, scarf/scarfUITests/UITestIsolation.swift]
 source_paths_inferred: false
-source_sha: 09bc6bed5dd25c3aa33c4d09c861cd37c8bc0383
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-09-08
-reviewed_by: claude-fable-5-1
+reviewed: 2026-10-28
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

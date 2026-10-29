@@ -5,10 +5,10 @@ permalink: scarf/conventions/a-scarfcore-test-that-blocks-the-main-thread-or-a-p
 tags: [testing, flake, concurrency, main-actor, cooperative-pool, scarfcore]
 source_paths: [scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesP55Tests.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/M1ACPTests.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/ShellTestRunner.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/KanbanChatBadgeStateTests.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-18
 updated: 2026-09-21
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

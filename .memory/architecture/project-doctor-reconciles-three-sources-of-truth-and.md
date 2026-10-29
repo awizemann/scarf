@@ -5,10 +5,10 @@ permalink: scarf/architecture/project-doctor-reconciles-three-sources-of-truth-a
 tags: [projects, doctor, phase-4, registry, reconciliation]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectDoctorService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ProjectDoctorFinding.swift, scarf/scarf/Features/Projects/ViewModels/ProjectDoctorViewModel.swift, scarf/scarf/Features/Projects/ViewModels/ProjectHealthCache.swift, scarf/scarf/Features/Projects/Views/ProjectDoctorSheet.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-03
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

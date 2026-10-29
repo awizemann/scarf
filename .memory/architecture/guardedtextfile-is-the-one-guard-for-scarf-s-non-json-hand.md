@@ -5,10 +5,10 @@ permalink: scarf/architecture/guardedtextfile-is-the-one-guard-for-scarf-s-non-j
 tags: [guarded-write, dataloss, config, architecture]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedJSONStore.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/SkillsViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanToolsetEnabler.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Transport/TransportPrivateMode.swift, scarf/scarf/Core/Services/HermesEnvService.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-04
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -3,12 +3,12 @@ title: ScarfGo Live Voice (P5b): gate, mic exclusivity, teardown and the shared 
 type: note
 permalink: scarf/architecture/scarfgo-live-voice-p5b-gate-mic-exclusivity-teardown-and
 tags: [voice, gpt-live, ios, scarfgo]
-source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Scarf iOS/Settings/SettingsView.swift]
+source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Scarf iOS/Chat/VoiceLive/VoiceLiveSessionModel.swift, scarf/Scarf iOS/Chat/VoiceLive/ChatController+VoiceTurnHost.swift, scarf/Scarf iOS/Info.plist]
 source_paths_inferred: false
-source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-18
 updated: 2026-09-19
-reviewed: 2026-09-21
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

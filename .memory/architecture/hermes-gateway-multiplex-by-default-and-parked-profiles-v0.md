@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-gateway-multiplex-by-default-and-parked-pro
 tags: [hermes, gateway, v0.21.5]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesProfileRoutes.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Features/Gateway/ViewModels/GatewayViewModel.swift, scarf/scarf/Features/Settings/Views/Components/ProfileRoutesSection.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesGatewayStateProjection.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesGatewayProcessMatch.swift]
 source_paths_inferred: false
-source_sha: 373e7e5bdb8897064ceb4be05294544dcac279f1
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-26
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

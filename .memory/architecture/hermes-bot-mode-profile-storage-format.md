@@ -12,7 +12,7 @@ reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 
-On-disk format of a Hermes bot, source-verified at tag v2026.8.31 (0.21.0). A bot IS a profile: no separate store exists. Identity lives in `<profile_dir>/profile.yaml` — top-level `display_name` / `description` / `description_auto` (owned by `hermes profile describe`/`rename`) plus `ui_meta['hermes-bots']` (owned by the desktop plugin). Avatar bytes live at `<profile_dir>/assets/avatar.{png,jpg,webp}`. The roster is the profile roster: root `~/.hermes` as `"default"` plus sorted directories under `<root>/profiles/`.
+On-disk format of a Hermes bot, source-verified at tag v2026.8.31 (0.21.0) with v0.21.6+ constraints applied. A bot IS a profile: no separate store exists. Identity lives in `<profile_dir>/profile.yaml` — top-level `display_name` / `description` / `description_auto` (owned by `hermes profile describe`/`rename`) plus `ui_meta['hermes-bots']` (owned by the desktop plugin). Avatar bytes live at `<profile_dir>/assets/avatar.{png,jpg,webp}`. The roster is the profile roster: root `~/.hermes` as `"default"` plus sorted directories under `<root>/profiles/`.
 
 ## Observations
 - [fact] Bot is a profile with no separate storage; identity lives in profile.yaml containing display_name, description, description_auto, and ui_meta['hermes-bots'] #bot-identity
@@ -38,6 +38,7 @@ A bot's *agent* configuration lives beside its identity in the same profile dire
 - [gotcha] `image` is a data URL the desktop STRIPS before `profiles.configure` and ships via `profiles.set_asset` instead, so a real install keeps the avatar in assets/, not the YAML. Scarf deliberately does not model it — a multi-KB base64 scalar is the last value you want a line-oriented writer reformatting #avatars
 - [constraint] Two server-side caps Scarf mirrors: `ui_meta` payload rejected over 65536 bytes of json.dumps (methods_profiles.py:789-791, because it rides profiles.list on every roster paint), and an avatar rejected over 2_000_000 bytes (error 4069). Avatar extension probe order is png, jpg, webp — the gateway's own dict order #caps
 - [gotcha] Hermes' own `write_profile_meta` (hermes_cli/profiles.py:951-991) round-trips profile.yaml through yaml.safe_load + atomic_yaml_write(sort_keys=False): unspecified top-level keys survive but every COMMENT is destroyed. Scarf's surgical line writer is strictly more conservative — it preserves comments, key order, and blank lines outside the three regions it edits #preservation
+- [constraint] From v0.21.6: profile.yaml is read by the strict loader (`hermes_yaml.safe_load`), and duplicate keys cause `read_profile_meta` to fall back to empty defaults, making the bot vanish from the roster. Scarf enforces duplicate-key write refusal via `HermesYAML.duplicateKeyWriteRefusal()` at write time (BotsService.swift) #v0-21-6-constraint
 - [fact] A profile's AGENT config is per-profile with NO root inheritance: `<profile_dir>/config.yaml` is the only user layer Hermes merges for it (`config.py:3936-4080`), alongside `<profile_dir>/.env`, `<profile_dir>/SOUL.md` and `<profile_dir>/skills/`. Hermes' own `capability_fingerprint` (`tools/bot_mode_probe.py:320-380`) enumerates exactly that set #agent-config #phase-b
 
 ## Relations

@@ -3,12 +3,12 @@ title: Hermes stores an UNKNOWN cost as 0.0 — cost_status is the only discrimi
 type: note
 permalink: scarf/architecture/hermes-stores-an-unknown-cost-as-0-0-cost-status-is-the
 tags: [hermes, state-db, cost, tokens, acp, display-fidelity]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesSession.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift, scarf/scarf/Features/Chat/Views/SessionInfoBar.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Models/SessionCostDisplay.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesSession.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/scarf/Features/Sessions/Views/SessionsView.swift, scarf/scarf/Features/Chat/Views/SessionInfoBar.swift]
 source_paths_inferred: false
-source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-21
 updated: 2026-09-22
-reviewed: 2026-10-05
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 Found validating t-b10d9fa6 against Hermes tag v2026.9.21 (v0.21.4) and the live `~/.hermes/state.db`; FIXED in t-fc311bef on branch `fix/unknown-session-cost` (2026-09-21), and CORRECTED in t-ba08805b on branch `fix/nil-cost-status` (2026-09-21) — the first pass got the `'unknown'` status right but mis-read a NULL `cost_status` as proof of an old host. Read the `[invariant]` on the column-vs-value discriminator before touching this rule.

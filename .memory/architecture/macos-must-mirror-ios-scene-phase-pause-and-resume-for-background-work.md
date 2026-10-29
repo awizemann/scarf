@@ -5,10 +5,10 @@ permalink: scarf/architecture/macos-must-mirror-ios-scene-phase-pause-and-resume
 tags: [lifecycle, performance, macos, architecture, audit-2026-06-13]
 source_paths: [scarf/scarf/scarfApp.swift, scarf/Scarf iOS/App/ScarfGoCoordinator.swift, scarf/Scarf iOS/App/ScarfGoTabRoot.swift, scarf/Scarf iOS/Chat/ChatView.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-06-13
 updated: 2026-06-13
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

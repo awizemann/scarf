@@ -5,10 +5,10 @@ permalink: scarf/architecture/mac-live-voice-p5a-gate-voiceturnhost-on-chatviewm
 tags: [voice, gpt-live, macos, architecture]
 source_paths: [scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/scarf/Features/Chat/Views/ChatTranscriptPane.swift, scarf/scarf/scarfApp.swift]
 source_paths_inferred: false
-source_sha: 81d1d901c47ee48398443c99b9f457d69ebaa49a
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-18
 updated: 2026-09-19
-reviewed: 2026-10-05
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

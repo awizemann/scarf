@@ -5,10 +5,10 @@ permalink: scarf/decisions/setup-forms-write-the-resolved-default-settings-treat
 tags: [platforms, settings, config, hermes]
 source_paths: [scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift, scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-10
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

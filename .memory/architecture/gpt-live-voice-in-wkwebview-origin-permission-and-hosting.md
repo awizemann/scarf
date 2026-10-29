@@ -5,10 +5,10 @@ permalink: scarf/architecture/gpt-live-voice-in-wkwebview-origin-permission-and-
 tags: [voice, webkit, webrtc, gpt-live]
 source_paths: [scarf/scarf/scarf.entitlements, scarf/scarf/Info.plist, scarf/Scarf iOS/Info.plist]
 source_paths_inferred: false
-source_sha: 0efaac8432c1f749c3e6e28427375e9c22e4ff00
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-18
 updated: 2026-09-18
-reviewed: 2026-09-21
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 

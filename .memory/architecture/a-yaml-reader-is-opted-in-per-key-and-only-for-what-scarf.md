@@ -12,8 +12,6 @@ reviewed: 2026-09-29
 reviewed_by: audit:claude-code (background)
 ---
 
-P41 of the round-4 whole-surface audit (commits 2fb7cc08, d4a3ab4d, 402442a1, 151cdd3e on `fix/whole-surface-audit-r4`). Scarf emits every config.yaml scalar through ONE rule (`YAMLScalar.quoteIfNeeded`) but reads config.yaml through TWO decoders on purpose — and which one a key gets is now an explicit list rather than an accident.
-
 ## Observations
 - [invariant] A quote-escaping WRITER needs its un-escaping reader in the same place, but that reader cannot be widened globally: `HermesYAML.stripYAMLQuotes` reads arbitrary HERMES-written values, where a backslash-n inside double quotes means two literal characters. So `YAMLScalar.unquote` is opted in per KEY (`HermesYAML.scarfWrittenMapPaths` / `scarfWrittenListPaths`) and only for paths Scarf itself writes #yaml
 - [gotcha] A per-key map opt-in has FOUR decode sites, not one: the list item, the map VALUE, the map KEY (a double-quoted key was taken verbatim, so a key Scarf wrote grew one backslash per save) and the folded-continuation re-strip. Miss the last and one key decodes differently folded than on one line #yaml
@@ -86,11 +84,6 @@ gets the key out of the line. P51 fixed the TRIM that runs on both.
   `reasoning_effort: high\u{A0}` IS `high` to Hermes. Narrowing there would have made Scarf
   claim the host ignores a value it honours — the unsafe direction, again. A test pins the two
   rules disagreeing on one input #config-parsing
-- [todo] **Two readers still carry the wide trim**, filed as `t-295ef4d2` with line numbers:
-  `GatewayConfigWriter` (`:502`, `:594`, `:641`, `:644-645`) and `ProfileRoutesYAML` (ten
-  sites). The latter matters more than it looks — `profile_routes` entries ARE Scarf-written
-  through `YAMLScalar.quoteIfNeeded`, so its round trip is lossy in the rewriting direction.
-  Both should take `HermesYAML.yamlWhitespace` rather than a private copy
 
 
 

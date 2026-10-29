@@ -3,12 +3,12 @@ title: Live Voice core (ScarfCore/VoiceLive): the engine-agnostic surface both a
 type: note
 permalink: scarf/architecture/live-voice-core-scarfcore-voicelive-the-engine-agnostic
 tags: [voice, gpt-live, architecture, api]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceConversationEngine.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceLiveReadiness.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/GPTLiveEngine.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceConversationEngine.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceLiveReadiness.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/GPTLiveEngine.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/VoiceLive/VoiceDataConsent.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-09-18
 updated: 2026-09-19
-reviewed: 2026-09-29
+reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
 Built in P4 (task t-a4665c6e, branch feat/voice-p4). The macOS panel (P5a) and the ScarfGo sheet (P5b) bind only to these types, and a free chained engine (P7) can sit behind the same protocol. The design source is documents/plans/2026-09-18-live-voice-spike.md.
