@@ -23,10 +23,14 @@ import ScarfCore
     /// `session/load`, it must stop its own client and leave B attached.
     /// Pre-fix it installed itself: `acpClient` and the transcript flipped
     /// back to the dead session A, and B's client was orphaned.
+    ///
+    /// `.single` mode (Bot Chat), where B reuses A's chat. In the main
+    /// window (parallel chats P1) a reconnecting chat is kept in the
+    /// background instead and its ladder is allowed to finish.
     @Test @MainActor func staleReconnectDoesNotReplaceANewerSession() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
-        let vm = ChatViewModel(context: home.context)
+        let vm = ChatViewModel(context: home.context, mode: .single)
 
         let chA = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
         let chReconnect = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))

@@ -25,25 +25,69 @@ protocol ChatSessionHost: AnyObject {
     func renameSession(_ sessionId: String, to newTitle: String) async -> Bool
     /// Why the last rename failed (`/title`'s failure hint).
     var renameError: String? { get }
-    /// `/new`: the window's full start-new-session path.
-    func startNewSessionFromChat()
+    /// `/new` sent from `chat`: the window's full start-new-session path.
+    /// `pendingTitle` is `/new <name>`'s name, handed to whichever chat the
+    /// window starts (with parallel chats usually not `chat` itself). The
+    /// window ignores it from a chat it isn't showing (a held `/new`
+    /// released in the background).
+    func startNewSessionFromChat(_ chat: ChatSession, pendingTitle: String?)
     /// A `/goal <target>` was sent: maybe raise the kanban teaching sheet.
     func offerKanbanOnboarding()
-    /// The start preflight found no model configured: raise the window's sheet.
-    func presentModelPreflight(reason: String?, customProviders: ModelPreflight.CustomProviders)
-    /// A deliberate teardown (`ChatSession.stop`) removes the Live Voice turn host.
-    func chatWillTearDown()
-    /// The ACP connection died: end Live Voice for a lost connection.
-    func chatConnectionDied()
+    /// The start preflight found no model configured: raise the window's
+    /// sheet. `chat` is the one that bailed; its `pendingStartArgs` are what
+    /// a pick replays, whichever chat is focused by then.
+    func presentModelPreflight(for chat: ChatSession, reason: String?, customProviders: ModelPreflight.CustomProviders)
+    /// A deliberate teardown (`ChatSession.stop`) removes the Live Voice turn
+    /// host — when `chat` is the one the window shows.
+    func chatWillTearDown(_ chat: ChatSession)
+    /// The ACP connection died: end Live Voice for a lost connection, when
+    /// `chat` is the one the window shows.
+    func chatConnectionDied(_ chat: ChatSession)
+    /// `chat` ended up with no connection and nothing running: its start
+    /// failed or timed out, or its reconnect ladder gave up. The window
+    /// drops it when it isn't the one shown (`ChatViewModel.leave`).
+    func chatSettledWithoutConnection(_ chat: ChatSession)
 }
 
 /// One chat and the `hermes acp` connection it runs on: the transcript
 /// (`RichChatViewModel`), the ACP client, its event loop, health monitor
 /// and reconnect ladder, the prompt turns in flight, held sends, and the
 /// session-start pipeline. Extracted from `ChatViewModel` (parallel chats
-/// P0); the window-level `ChatViewModel` owns one and forwards to it.
+/// P0); the window-level `ChatViewModel` holds several (P1) and forwards to
+/// the one it shows (`focusedChat`).
 @Observable
 final class ChatSession {
+    /// Identity within the window. Not the session id: that is nil until
+    /// the start is ready, changes on a #146 fallback and on a compression
+    /// rotation (`covers(_:)` is the session lookup).
+    let id = UUID()
+
+    /// When the window last showed this chat; the newest one seeds a new
+    /// chat's ACP commands. Set by `ChatViewModel.focus(_:)`.
+    @ObservationIgnored
+    var lastFocusedAt = Date()
+
+    /// The session a resume was asked to open, set when the resume starts
+    /// (before the transcript knows any id) and kept through a #146
+    /// fallback, so a second click on the same row finds this chat
+    /// instead of opening the session twice. Cleared on reset.
+    @ObservationIgnored
+    var targetSessionId: String?
+
+    /// True from the start of a start that carries something the user typed
+    /// or a kickoff prompt (`autoStartACPAndSend`, or an `initialPrompt`)
+    /// until that text is handed to `sendViaACP`: leaving the chat in that
+    /// window must not lose it, so the chat keeps running.
+    @ObservationIgnored
+    private var startCarriesUserInput = false
+
+    /// A prompt went to Hermes on the attached session. Hermes stores an
+    /// ACP session only after its first turn (session.py:329-331 @
+    /// v2026.9.24), so until then a new chat has no row anywhere and the
+    /// user can't come back to it. Cleared on reset.
+    @ObservationIgnored
+    private var hasSentPrompt = false
+
     /// Same category the code logged under before the extraction, so log
     /// filters keep matching.
     private let logger = Logger(subsystem: "com.scarf", category: "ChatViewModel")
@@ -82,8 +126,8 @@ final class ChatSession {
         }
     }
 
-    /// A `hermes` process is attached: the ACP client, or the window's
-    /// terminal-mode process (`ChatViewModel.launchTerminal` sets it too).
+    /// This chat's `hermes acp` process is attached. The window's terminal
+    /// process is tracked apart (`ChatViewModel.terminalProcessRunning`).
     var hasActiveProcess = false
     let richChatViewModel: RichChatViewModel
 
@@ -197,9 +241,10 @@ final class ChatSession {
 
     /// The name typed with `/new <name>`, waiting for the new session's
     /// first completed turn (see `sendViaACP`). Cleared on any session
-    /// switch.
+    /// switch. Set by the window on the chat `/new` started
+    /// (`ChatViewModel.startNewSessionFromChat`), and by `/title`.
     @ObservationIgnored
-    private(set) var pendingSessionTitle: String?
+    var pendingSessionTitle: String?
 
     // ACP state
     private var acpClient: ACPClient?
@@ -502,6 +547,17 @@ final class ChatSession {
             self.clearACPErrorState()
             self.acpError = "Session start timed out after \(seconds) seconds."
             self.acpErrorHint = "The agent never finished starting — the process may be wedged. Click the chat again (or start a new one) to retry."
+            // Sends held for the wedged start's client will never go out.
+            if !self.heldSends.isEmpty {
+                let dropped = self.heldSends.count
+                self.heldSends = []
+                self.heldSendsClient = nil
+                self.richChatViewModel.transientHint = String(
+                    localized: "^[\(dropped) message](inflect: true) couldn't be sent — the connection didn't come up."
+                )
+                self.scheduleHintClear()
+            }
+            self.host?.chatSettledWithoutConnection(self)
         }
     }
 
@@ -526,16 +582,82 @@ final class ChatSession {
         // until the Task body runs, which on remote contexts is
         // multiple seconds after the click. v2.8.
         isStartingSession = true
+        startCarriesUserInput = false
         return beginStartIntent()
     }
 
     /// Blank the transcript for the next session.
     func resetForSessionSwitch() {
         richChatViewModel.reset()
+        targetSessionId = nil
+        hasSentPrompt = false
         // A new session boundary: the badge must not carry the last
         // chat's model (S03-F2). The start sets it from the session.
         currentModelPreset = nil
         pendingSessionTitle = nil
+    }
+
+    // MARK: - Parallel chats (P1)
+
+    /// Whether this chat is (or is becoming) the conversation `sessionId`
+    /// names: a row its transcript spans (compression lineage, the #146
+    /// continuation), or the session a resume in progress was asked for.
+    /// A brand-new chat has neither until its start is ready, so the
+    /// window finds it by identity only.
+    func covers(_ sessionId: String) -> Bool {
+        targetSessionId == sessionId || richChatViewModel.transcriptCovers(sessionId)
+    }
+
+    /// Something is running or about to: a client is attached, a start is
+    /// in progress, or the reconnect ladder is bringing the client back.
+    /// A chat that is none of these has nothing to focus — reopening its
+    /// session is a fresh resume.
+    var isLive: Bool {
+        acpClient != nil || isStartingSession || holdingForReconnect
+    }
+
+    /// A prompt Scarf started on this chat hasn't returned.
+    var hasTurnInFlight: Bool { !promptTurns.isEmpty }
+
+    /// Whether the window keeps this chat when the user moves to another
+    /// one (parallel chats P1, design §6), rather than dropping it:
+    /// - a turn in flight, a pending approval or question, or sends held
+    ///   for a reconnect or a load replay — keep running in the background;
+    /// - a start carrying something typed (autostart) or a kickoff prompt,
+    ///   or a start parked on the model preflight sheet — keep it;
+    /// - a live, idle session the user can come back to — one that was
+    ///   resumed (it has a row), or that has had a turn (Hermes stored it):
+    ///   keep its process (the budget that releases idle processes is
+    ///   step 2);
+    /// - otherwise (blank, errored with no client, a start with nothing
+    ///   typed, or a new session with no turn — unreachable, there is no
+    ///   row to click) — no: the window supersedes it, as a switch always
+    ///   did.
+    var keepsRunningWhenLeft: Bool {
+        // Scarf's own turn bookkeeping, not `isAgentWorking`: an autostart's
+        // echo raises that flag and a failed start never lowers it.
+        if hasTurnInFlight { return true }
+        if !richChatViewModel.permissionQueue.isEmpty { return true }
+        if !heldSends.isEmpty { return true }
+        if pendingStartArgs != nil { return true }
+        // Ready but the typed message or kickoff prompt not sent yet: the
+        // start still awaits the sidebar reload / replay drain (autostart)
+        // or the project setup (`initialPrompt`) before it sends.
+        if startCarriesUserInput && (isStartingSession || acpClient != nil) { return true }
+        if isStartingSession { return false }
+        if holdingForReconnect { return true }
+        guard acpClient != nil, richChatViewModel.sessionId != nil else { return false }
+        return hasSentPrompt || targetSessionId != nil || richChatViewModel.currentSession != nil
+    }
+
+    /// Drop this chat: supersede any start in progress (its pipeline
+    /// abandons at its next `startStillCurrent` check and stops its own
+    /// client) and tear the connection down. The window removes it from
+    /// its list afterwards; only call it for a chat that doesn't
+    /// `keepsRunningWhenLeft`, or one the window is closing.
+    func supersede() {
+        beginStartIntent()
+        stop()
     }
 
     /// The rich-chat half of `ChatViewModel.resumeSession`.
@@ -777,6 +899,7 @@ final class ChatSession {
     /// failure with no UI feedback.
     private func autoStartACPAndSend(text: String, images: [ChatImageAttachment] = []) {
         isStartingSession = true
+        startCarriesUserInput = true
         let intent = beginStartIntent()
         // Bound the whole auto-start pipeline (pre-spawn attribution
         // read included) — S3, t-5451bd1b.
@@ -908,6 +1031,9 @@ final class ChatSession {
                 // Now send the queued prompt. The optimistic echo was
                 // appended above (before session setup), so suppress
                 // the second one explicitly.
+                // Handed over: from here the turn (or, for a client-side
+                // command like `/new`, nothing) is what keeps the chat.
+                startCarriesUserInput = false
                 sendViaACP(client: client, text: text, images: images, localEchoAlreadyAdded: true)
                 releaseHeldSends(for: client, turnAlreadyRunning: true)
             } catch {
@@ -941,6 +1067,7 @@ final class ChatSession {
                 if startStillCurrent(intent, client: nil) {
                     hasActiveProcess = false
                     acpClient = nil
+                    host?.chatSettledWithoutConnection(self)
                 }
                 await recoverRemoteTransportAfterFailure()
             }
@@ -991,14 +1118,15 @@ final class ChatSession {
                 // it silently for v1 — the slash menu's argument hint
                 // still discoverably advertises the syntax for when
                 // Mac's startNewSession gains support.
-                host?.startNewSessionFromChat()
                 // `/new <name>` (S03-F5): the name is applied with the same
                 // `hermes sessions rename` the sidebar uses, once Hermes
                 // has stored the session — its row only exists after the
                 // first turn (session.py:329-331 @ v2026.9.24 keeps an
                 // empty ACP session unsaved), so a rename now would fail.
+                // The window hands it to the chat it starts, which with
+                // parallel chats is a new one, not this one.
                 let title = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                pendingSessionTitle = title.isEmpty ? nil : title
+                host?.startNewSessionFromChat(self, pendingTitle: title.isEmpty ? nil : title)
             case .renameSession, .cliOnly:
                 _ = handleLocalSlashCommand(intercept)
             }
@@ -1201,6 +1329,7 @@ final class ChatSession {
         promptTurns[token] = PromptTurn(
             sessionId: sessionId, origin: origin, isNonInterruptive: isNonInterruptive, task: nil
         )
+        hasSentPrompt = true
         if !isNonInterruptive { busyTurnOrigins.insert(origin) }
         let task = Task { @MainActor in
             defer { settlePromptTurn(token) }
@@ -1583,6 +1712,7 @@ final class ChatSession {
         // helper used by disconnect paths too). Re-arm it here so the
         // session-list overlay stays up through the entire boot.
         isStartingSession = true
+        startCarriesUserInput = !(initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         // The spawn stage is a fresh start intent: entry points bumped
         // before their pre-spawn awaits, and bumping again here makes a
         // preflight-sheet replay (confirmModelPreflight → this method,
@@ -1641,15 +1771,21 @@ final class ChatSession {
         if preflight.isConfigured {
             Analytics.record(.modelPreflightResult(outcome: .passed))
         } else {
+            // Settle first: the host decides from this chat's state whether
+            // to keep it (a background chat bailing while the focused one
+            // already waits on the sheet is dropped), so it must not still
+            // read as a start in progress.
             pendingStartArgs = (sessionId, projectPath, initialPrompt)
-            host?.presentModelPreflight(
-                reason: preflight.reason,
-                customProviders: ModelPreflight.CustomProviders(config)
-            )
             acpStatus = ""
             hasActiveProcess = false
             isStartingSession = false
+            startCarriesUserInput = false
             disarmStartWatchdog()
+            host?.presentModelPreflight(
+                for: self,
+                reason: preflight.reason,
+                customProviders: ModelPreflight.CustomProviders(config)
+            )
             return
         }
 
@@ -1935,6 +2071,7 @@ final class ChatSession {
                 if let prompt = initialPrompt,
                    !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     richChatViewModel.addUserMessage(text: prompt)
+                    startCarriesUserInput = false
                     sendViaACP(client: client, text: prompt, images: [], localEchoAlreadyAdded: true)
                 }
             } catch {
@@ -1955,6 +2092,7 @@ final class ChatSession {
                 if startStillCurrent(intent, client: nil) {
                     hasActiveProcess = false
                     acpClient = nil
+                    host?.chatSettledWithoutConnection(self)
                 }
                 await recoverRemoteTransportAfterFailure()
             }
@@ -2095,7 +2233,7 @@ final class ChatSession {
         // reconnect (which may never come) would fail. End it now rather
         // than bill through the reconnect ladder; the panel says why.
         // (`stop()`, the other teardown, isn't on this path.)
-        host?.chatConnectionDied()
+        host?.chatConnectionDied(self)
 
         // Clean up the dead client. No `session/cancel` here — the
         // process is already gone; just drop the in-flight turns so a
@@ -2115,6 +2253,7 @@ final class ChatSession {
         guard let savedSessionId else {
             showConnectionFailure()
             isHandlingDisconnect = false
+            host?.chatSettledWithoutConnection(self)
             return
         }
         attemptReconnect(sessionId: savedSessionId)
@@ -2279,6 +2418,7 @@ final class ChatSession {
             showConnectionFailure()
             dropReconnectHeldSends(announce: true)
             isHandlingDisconnect = false
+            host?.chatSettledWithoutConnection(self)
         }
     }
 
@@ -2289,12 +2429,18 @@ final class ChatSession {
         acpError = "Connection lost. Use the Session menu to reconnect."
     }
 
-    func stop() {
+    /// Tear this chat's ACP connection down. `reason` is the composer hint
+    /// painted when a turn was in flight (and cancelled): plain "Turn
+    /// cancelled." unless the caller knows better (a delete). Switching
+    /// chats no longer comes through here for a working chat — it keeps
+    /// running in the background (parallel chats P1).
+    func stop(reason: String = "Turn cancelled.") {
         // Every deliberate ACP teardown (session switch, delete, terminal
-        // mode, the start watchdog) removes the voice session's turn host.
+        // mode, the start watchdog) removes the voice session's turn host
+        // — the window ends it only when this is the chat it shows.
         // A connection that DIES doesn't come through here:
         // `handleConnectionDied` ends the voice session itself.
-        host?.chatWillTearDown()
+        host?.chatWillTearDown(self)
         disarmStartWatchdog()
         reconnectTask?.cancel()
         reconnectTask = nil
@@ -2357,9 +2503,9 @@ final class ChatSession {
                     )
                 }
                 // Composer-level feedback that survives the transcript
-                // swap when the user switched sessions mid-turn (reset()
+                // swap when the chat was restarted mid-turn (reset()
                 // already wiped the old transcript by the time we run).
-                richChatViewModel.transientHint = "Turn cancelled — switched sessions."
+                richChatViewModel.transientHint = reason
                 scheduleHintClear()
             }
         }
@@ -2367,6 +2513,7 @@ final class ChatSession {
         hasActiveProcess = false
         isHandlingDisconnect = false
         isStartingSession = false
+        startCarriesUserInput = false
     }
 
     /// Best-effort `session/cancel`, then wait for the cancelled turn to
@@ -2506,10 +2653,6 @@ final class ChatSession {
     /// delete surface, t-5f1d9008). Callers must have verified the
     /// deleted id is the attached one.
     func tearDownDeletedActiveSession() {
-        // Capture the in-flight turn BEFORE reset/stop() so the
-        // delete-specific hint below can replace stop()'s generic
-        // "switched sessions" wording.
-        let turnWasInFlight = inFlightPromptSessionId != nil
         // Supersede any in-flight start pipeline: a stale await
         // resuming later must abandon at its `startStillCurrent` check
         // instead of re-attaching plumbing for the deleted session.
@@ -2518,20 +2661,19 @@ final class ChatSession {
         // points) — stop()'s attachment-gated "cancelled" bubble then
         // can't paint into the freshly-blanked transcript.
         richChatViewModel.reset()
+        targetSessionId = nil
+        hasSentPrompt = false
         setInspectorFocus(.none)
         // Full teardown: bounded best-effort `session/cancel` if a turn
         // is in flight (lets Hermes finalize the orphaned turn before
         // the kill), then `client.stop()`. Also disarms the start
         // watchdog, cancels reconnects, and clears `isStartingSession`.
-        stop()
+        // A cancelled turn's hint names the delete.
+        stop(reason: "Turn cancelled — session deleted.")
         // stop() leaves `acpStatus` at its last painted phase; the
         // pane is now an idle blank chat, so park the pill at idle the
         // same way the preflight bail does.
         acpStatus = ""
-        if turnWasInFlight {
-            richChatViewModel.transientHint = "Turn cancelled — session deleted."
-            scheduleHintClear()
-        }
     }
 
     /// A `session/load` answered with an internal head this transcript does

@@ -13,22 +13,42 @@ final class ChatViewModel {
     /// recording transport — the only honest way to prove WHERE a config
     /// read ran (charter C10). Never reassigned in app code.
     var fileService: HermesFileService {
-        // The chat reads config through the same service (tests swap it).
-        didSet { focusedChat.fileService = fileService }
+        // Every chat reads config through the same service (tests swap it).
+        didSet {
+            for chat in chats { chat.fileService = fileService }
+        }
     }
+
+    /// How many chats the window holds (parallel chats P1).
+    enum Mode {
+        /// The main Chat window: one chat per open conversation, the
+        /// focused one shown, the others kept running in the background
+        /// (`chats`).
+        case window
+        /// Exactly one chat for the VM's lifetime, reused by every switch
+        /// (`reset()`), as before P1. Bot Chat: its conversation is one
+        /// canonical session, verified by polling this VM's chat.
+        case single
+    }
+
+    let mode: Mode
 
     init(
         context: ServerContext = .local,
-        voiceLive: VoiceLiveController? = nil
+        voiceLive: VoiceLiveController? = nil,
+        mode: Mode = .window
     ) {
         self.context = context
+        self.mode = mode
         self.voiceLive = voiceLive ?? VoiceLiveController()
         let dataService = HermesDataService(context: context)
         let fileService = HermesFileService(context: context)
         self.dataService = dataService
         self.fileService = fileService
-        self.focusedChat = ChatSession(context: context, dataService: dataService, fileService: fileService)
-        focusedChat.host = self
+        let first = ChatSession(context: context, dataService: dataService, fileService: fileService)
+        self.focusedChat = first
+        self.chats = [first]
+        wire(first)
 
         // Probe hermes binary existence once off-main, then cache. Doing
         // this synchronously inside `hermesBinaryExists`'s getter would
@@ -144,11 +164,46 @@ final class ChatViewModel {
     var displayMode: ChatDisplayMode = .richChat
 
     /// The chat this window shows: its transcript, its `hermes acp`
-    /// connection and everything that runs on it. P0 of parallel chats: one
-    /// per window for the VM's whole lifetime, never reassigned; a session
-    /// switch reuses it (and its `RichChatViewModel`, via `reset()`).
-    let focusedChat: ChatSession
+    /// connection and everything that runs on it. Observed, so every
+    /// forwarder below (and the views reading them) follows a focus change.
+    /// Changed only by `focus(_:)`.
+    private(set) var focusedChat: ChatSession
     var richChatViewModel: RichChatViewModel { focusedChat.richChatViewModel }
+
+    /// Every chat this window holds, the focused one included, oldest
+    /// first. In `.single` mode always just `focusedChat`. Ordered, not
+    /// keyed by session id: a chat has none until its start is ready, and
+    /// the id changes on a #146 fallback and on a compression rotation
+    /// (`liveChat(covering:)` is the lookup).
+    private(set) var chats: [ChatSession] = []
+
+    /// The chat whose start bailed into the model preflight sheet: a pick
+    /// replays its `pendingStartArgs` on it, whichever chat is focused by
+    /// then.
+    @ObservationIgnored
+    private weak var preflightChat: ChatSession?
+
+    /// Bumped by every user routing action (focus, new, resume,
+    /// continue-last), so the continue-last lookup — a state.db read that
+    /// can take seconds on a remote — abandons if the user moved on.
+    @ObservationIgnored
+    private var routeGeneration = 0
+
+    /// True while `continueLastSession` looks up the latest session, before
+    /// any chat has started; the preparing overlay covers it.
+    private(set) var isResolvingContinueLast = false
+
+    /// Test seams that every chat gets, not just the focused one
+    /// (`sessionStartWatchdogNanos`, `autoAcceptEditsStore`): set through
+    /// the forwarders, applied to existing chats and to each new one.
+    @ObservationIgnored
+    private var sessionStartWatchdogOverride: UInt64?
+    @ObservationIgnored
+    private var autoAcceptEditsStoreOverride: ProjectAutoAcceptEditsStore?
+
+    /// The embedded terminal's `hermes` process is running (terminal mode).
+    /// Kept apart from the chats' ACP state: a terminal is not a chat.
+    private(set) var terminalProcessRunning = false
 
     /// This window's Live Voice session (GPT-Live). This VM is its
     /// `VoiceTurnHost`: spoken requests become ordinary ACP turns in the
@@ -185,7 +240,9 @@ final class ChatViewModel {
     @MainActor
     func attachCapabilitiesStore(_ store: HermesCapabilitiesStore?) {
         capabilitiesStore = store
-        richChatViewModel.publishCapabilities(store?.capabilities ?? .empty)
+        for chat in chats {
+            chat.richChatViewModel.publishCapabilities(store?.capabilities ?? .empty)
+        }
     }
 
     /// Right-side inspector pane mode. The inspector renders different
@@ -653,7 +710,7 @@ final class ChatViewModel {
     /// interrupted chat-start to replay.
     @MainActor
     func chooseModelForUnroutableProvider(_ provider: String) {
-        focusedChat.pendingStartArgs = nil
+        clearPreflightChat()
         modelPreflightReason = String(localized: "This version of Hermes can't route the configured provider (\(provider)).")
     }
 
@@ -661,7 +718,7 @@ final class ChatViewModel {
     /// model/provider mismatch banner.
     @MainActor
     func chooseModelForMismatch(_ mismatch: ModelPreflight.Mismatch) {
-        focusedChat.pendingStartArgs = nil
+        clearPreflightChat()
         modelPreflightReason = "The configured model (\(mismatch.modelDefault)) and provider (\(mismatch.activeProvider)) don't match."
     }
 
@@ -695,16 +752,23 @@ final class ChatViewModel {
             mode: .new,
             origin: projectPath == nil ? .chat : .project
         ))
-        focusedChat.beginSessionSwitch()
-        voiceEnabled = false
-        ttsEnabled = false
-        isRecording = false
+        beginRoute()
+        openNewSession(projectPath: projectPath, initialPrompt: initialPrompt)
+    }
+
+    /// The routing half of `startNewSession`, without its analytics event
+    /// (continue-last records its own).
+    private func openNewSession(projectPath: String?, initialPrompt: String?) {
+        // Rich chat: the focused chat when it is blank (or only starting),
+        // else a new one — a working or live chat keeps running.
+        let chat = displayMode == .richChat ? chatForNewWork() : focusedChat
+        chat.beginSessionSwitch()
         // A voice session belongs to the chat it was started in.
-        voiceLive.endImmediately()
-        focusedChat.resetForSessionSwitch()
+        endVoiceForChatChange()
+        chat.resetForSessionSwitch()
 
         if displayMode == .richChat {
-            focusedChat.startACPSession(resume: nil, projectPath: projectPath, initialPrompt: initialPrompt)
+            chat.startACPSession(resume: nil, projectPath: projectPath, initialPrompt: initialPrompt)
         } else {
             // Terminal mode doesn't surface project attribution today —
             // `hermes chat` uses the shell's cwd, so starting a terminal
@@ -727,7 +791,9 @@ final class ChatViewModel {
         startNewSession(projectPath: projectPath, initialPrompt: text)
     }
 
-    /// Resume an existing session.
+    /// Resume an existing session — or, when a live chat in this window
+    /// already is that session, just focus it (parallel chats P1): no
+    /// respawn, no SSH gate reset, no resume event.
     ///
     /// `origin` is the analytics attribution for the resulting
     /// `chat_session_started{mode: resume}`. It defaults to `"chat"` — a
@@ -740,6 +806,15 @@ final class ChatViewModel {
     /// from the attribution sidecar), and would describe the session rather
     /// than where the user was.
     func resumeSession(_ sessionId: String, origin: UsageEvent.ChatSessionOrigin = .chat) {
+        beginRoute()
+        // The error banner's Reconnect retries the chat it sits on, in
+        // place: a restart even when that chat still reads as live, never
+        // a focus and never a second chat on the same session.
+        let isRetry = origin == .errorRetry
+        if !isRetry, let live = liveChat(covering: sessionId) {
+            focus(live)
+            return
+        }
         Analytics.record(.chatSessionStarted(mode: .resume, origin: origin))
         // Explicit user action: clear any open SSH circuit breaker for
         // this host (gh#138) so the resume gets a real attempt instead of
@@ -747,37 +822,257 @@ final class ChatViewModel {
         if case .ssh(let cfg) = context.kind {
             SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: cfg.host, port: cfg.port))
         }
-        focusedChat.beginSessionSwitch()
-        voiceEnabled = false
-        ttsEnabled = false
-        isRecording = false
+        openResume(sessionId, inPlace: isRetry)
+    }
+
+    /// The opening half of `resumeSession`: no lookup, no analytics, no
+    /// gate reset (continue-last never reset the gate). `inPlace` restarts
+    /// the focused chat whatever its state (Reconnect).
+    private func openResume(_ sessionId: String, inPlace: Bool = false) {
+        let chat = displayMode == .richChat && !inPlace ? chatForNewWork() : focusedChat
+        chat.beginSessionSwitch()
         // A voice session belongs to the chat it was started in.
-        voiceLive.endImmediately()
-        focusedChat.resetForSessionSwitch()
+        endVoiceForChatChange()
+        chat.resetForSessionSwitch()
 
         if displayMode == .richChat {
-            focusedChat.resumeACPSession(sessionId)
+            chat.targetSessionId = sessionId
+            chat.resumeACPSession(sessionId)
         } else {
-            richChatViewModel.setSessionId(sessionId)
+            stopBackgroundChats(covering: sessionId)
+            chat.richChatViewModel.setSessionId(sessionId)
             launchTerminal(arguments: ["chat", "--resume", sessionId])
         }
     }
 
     func continueLastSession() {
         Analytics.record(.chatSessionStarted(mode: .continueLast, origin: .chat))
-        let intent = focusedChat.beginSessionSwitch()
-        voiceEnabled = false
-        ttsEnabled = false
-        isRecording = false
-        // A voice session belongs to the chat it was started in.
-        voiceLive.endImmediately()
-        focusedChat.resetForSessionSwitch()
+        let terminal = displayMode == .terminal
+        // Terminal mode with no background chat that could be on the
+        // latest session, and Bot Chat's single chat: the pre-P1 path.
+        let hasBackgroundLiveChat = chats.contains { $0 !== focusedChat && $0.isLive }
+        guard mode == .window, !terminal || hasBackgroundLiveChat else {
+            continueLastInFocusedChat()
+            return
+        }
+        // Resolve the latest session first, then route it like a click:
+        // a live chat already on it is focused, never opened twice — and in
+        // terminal mode, stopped before `hermes chat --continue` takes it.
+        let route = beginRoute()
+        isResolvingContinueLast = true
+        let data = dataService
+        let budget = focusedChat.sessionStartWatchdogNanos
+        Task { @MainActor [weak self] in
+            let opened = await data.open()
+            let sessionId = opened ? await data.fetchMostRecentlyActiveSessionId() : nil
+            if opened { await data.close() }
+            guard let self, self.routeGeneration == route else { return }
+            self.isResolvingContinueLast = false
+            if terminal {
+                // Open exactly the session found, as a row click would
+                // (`--resume`), so the background chat stopped for it and
+                // the terminal's session are the same one: `--continue`
+                // picks by Hermes's own rule. No id (lookup failed, or no
+                // session yet): `--continue` as before, nothing stopped.
+                if let sessionId {
+                    self.openResume(sessionId)
+                } else {
+                    self.continueLastInFocusedChat()
+                }
+                return
+            }
+            guard opened else {
+                self.showContinueLastFailure()
+                return
+            }
+            if let sessionId {
+                if let live = self.liveChat(covering: sessionId) {
+                    self.focus(live)
+                } else {
+                    self.openResume(sessionId)
+                }
+            } else {
+                self.openNewSession(projectPath: nil, initialPrompt: nil)
+            }
+        }
+        // The state.db open is a log-proven wedge site on a remote: bound
+        // the lookup the way a chat's start watchdog bounds its own.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: budget)
+            guard let self, self.routeGeneration == route, self.isResolvingContinueLast else { return }
+            self.beginRoute()
+            if terminal {
+                self.continueLastInFocusedChat()
+            } else {
+                self.showContinueLastFailure()
+            }
+        }
+    }
 
+    /// The pre-P1 continue-last: terminal mode's `hermes chat --continue`,
+    /// or (Bot Chat's single chat) the lookup inside the reset chat.
+    private func continueLastInFocusedChat() {
+        let intent = focusedChat.beginSessionSwitch()
+        // A voice session belongs to the chat it was started in.
+        endVoiceForChatChange()
+        focusedChat.resetForSessionSwitch()
         if displayMode == .richChat {
             focusedChat.continueLastACPSession(intent: intent)
         } else {
             launchTerminal(arguments: ["chat", "--continue"])
         }
+    }
+
+    /// The continue-last lookup couldn't read state.db: say so in a blank
+    /// chat, as the pre-P1 path did in the reset one.
+    private func showContinueLastFailure() {
+        let chat = chatForNewWork()
+        // A chat reused in place may have a start of its own in flight:
+        // supersede it, or it carries on under the error banner.
+        chat.supersede()
+        endVoiceForChatChange()
+        chat.resetForSessionSwitch()
+        chat.acpError = context.isRemote
+            ? "Couldn't reach \(context.displayName). Check the SSH connection and try again."
+            : "Couldn't open the Hermes state database."
+        chat.acpErrorHint = nil
+        chat.acpErrorDetails = nil
+    }
+
+    // MARK: - Chats (parallel chats P1)
+
+    /// The live chat in this window that is `sessionId`'s conversation
+    /// (`ChatSession.covers`), preferring the focused one. Only a chat with
+    /// something running counts (`isLive`): an errored or idle-dead chat
+    /// is reopened by a fresh resume, the Reconnect button included.
+    /// Always nil in `.single` mode and terminal mode, which reopen as
+    /// before.
+    func liveChat(covering sessionId: String) -> ChatSession? {
+        guard mode == .window, displayMode == .richChat else { return nil }
+        let isOn = conversationMatcher(for: sessionId)
+        if focusedChat.isLive, isOn(focusedChat) { return focusedChat }
+        return chats.first { $0.isLive && isOn($0) }
+    }
+
+    /// Whether a chat is `sessionId`'s conversation: the chat covers it,
+    /// or covers another segment of its compression chain. The sidebar
+    /// lists a rotated chain under its tip while a chat that didn't follow
+    /// the rotation is still on an older segment (R14-2, as `isAttached`).
+    private func conversationMatcher(for sessionId: String) -> (ChatSession) -> Bool {
+        let lineage = transcriptLineage(for: sessionId)
+        return { chat in chat.covers(sessionId) || lineage.contains(where: chat.covers) }
+    }
+
+    /// Terminal mode is about to run `hermes chat` on `sessionId`: a
+    /// background chat with that session live would be a second agent
+    /// writing the same conversation. Stop it (the bounded `session/cancel`
+    /// of a turn in flight included) and drop it. Other background chats
+    /// are left alone; the focused chat is `launchTerminal`'s to stop.
+    private func stopBackgroundChats(covering sessionId: String) {
+        let isOn = conversationMatcher(for: sessionId)
+        for chat in chats where chat !== focusedChat && chat.isLive && isOn(chat) {
+            drop(chat)
+        }
+    }
+
+    /// Show `chat`. The light path: ends Live Voice and terminal voice as
+    /// any chat change does, and nothing else — no respawn, no SSH gate
+    /// reset, no resume event. The chat left behind follows the leave
+    /// rules (`reapBackgroundChats`).
+    func focus(_ chat: ChatSession) {
+        guard chat !== focusedChat else { return }
+        endVoiceForChatChange()
+        if !chats.contains(where: { $0 === chat }) { chats.append(chat) }
+        focusedChat = chat
+        chat.lastFocusedAt = Date()
+        reapBackgroundChats()
+    }
+
+    /// The leave rule, in one place: every chat the window isn't showing
+    /// is kept only while it has work or a live session the user can come
+    /// back to (`ChatSession.keepsRunningWhenLeft`); any other is
+    /// superseded and dropped, exactly as switching away from it always
+    /// did. Idempotent, so it runs wherever a background chat's state can
+    /// settle — a focus change, a start that failed or bailed, a pick or
+    /// cancel on the preflight sheet, a `/new` that wasn't run — not only
+    /// when the user leaves.
+    private func reapBackgroundChats() {
+        guard mode == .window else { return }
+        for chat in chats where chat !== focusedChat && !chat.keepsRunningWhenLeft {
+            drop(chat)
+        }
+    }
+
+    /// Take `chat` out of the window: supersede its start, stop its
+    /// connection, forget it. For the leave rule and for forced drops (a
+    /// terminal taking its session); never the focused chat.
+    private func drop(_ chat: ChatSession) {
+        if preflightChat === chat { preflightChat = nil }
+        chat.supersede()
+        chats.removeAll { $0 === chat }
+    }
+
+    /// The chat a new start or resume runs in. The focused one when moving
+    /// off it would drop it anyway (blank, errored, or a start with nothing
+    /// typed — restarting it in place supersedes that start, as P0 did);
+    /// otherwise a new chat, focused, the old one kept running. `.single`
+    /// always reuses its one chat.
+    private func chatForNewWork() -> ChatSession {
+        if mode == .single || !focusedChat.keepsRunningWhenLeft { return focusedChat }
+        let chat = makeChat()
+        focus(chat)
+        return chat
+    }
+
+    /// A new chat wired like the first: this window as its host, the
+    /// window's capabilities, file service and test seams, the global Scarf
+    /// slash commands, and the window's last known ACP commands (Hermes
+    /// doesn't re-advertise them on `session/load`).
+    private func makeChat() -> ChatSession {
+        let chat = ChatSession(context: context, dataService: dataService, fileService: fileService)
+        wire(chat)
+        chat.richChatViewModel.loadGlobalScopedCommands()
+        if let known = lastKnownACPCommands {
+            chat.richChatViewModel.seedACPCommands(known)
+        }
+        chats.append(chat)
+        return chat
+    }
+
+    private func wire(_ chat: ChatSession) {
+        chat.host = self
+        chat.fileService = fileService
+        chat.richChatViewModel.publishCapabilities(capabilitiesStore?.capabilities ?? .empty)
+        if let sessionStartWatchdogOverride {
+            chat.sessionStartWatchdogNanos = sessionStartWatchdogOverride
+        }
+        if let autoAcceptEditsStoreOverride {
+            chat.autoAcceptEditsStore = autoAcceptEditsStoreOverride
+        }
+    }
+
+    /// The ACP commands of the most recently focused chat that has any.
+    private var lastKnownACPCommands: [HermesSlashCommand]? {
+        chats.sorted { $0.lastFocusedAt > $1.lastFocusedAt }
+            .map(\.richChatViewModel.acpCommands)
+            .first { !$0.isEmpty }
+    }
+
+    /// Start a new routing action; supersedes a continue-last lookup.
+    @discardableResult
+    private func beginRoute() -> Int {
+        routeGeneration &+= 1
+        isResolvingContinueLast = false
+        return routeGeneration
+    }
+
+    /// Every chat change ends the window's voice: Live Voice belongs to the
+    /// chat it was started in, terminal voice to the terminal.
+    private func endVoiceForChatChange() {
+        voiceEnabled = false
+        ttsEnabled = false
+        isRecording = false
+        voiceLive.endImmediately()
     }
 
     // MARK: - Send Message
@@ -932,9 +1227,16 @@ final class ChatViewModel {
     /// the user originally tried to open finally lands.
     @MainActor
     func confirmModelPreflight(model: String, provider: String, local: LocalModelSelection? = nil) {
-        let pending = focusedChat.pendingStartArgs
+        // The chat that bailed, not the focused one: the user may have
+        // moved to another chat since (parallel chats P1).
+        // `pendingStartArgs` stays set until the write has landed: it is
+        // what keeps the chat when the user leaves it meanwhile. The chat
+        // leaves the `preflightChat` slot now, so neither the sheet's own
+        // dismissal (which reports a cancel) nor a newer bail can clear it.
+        let pendingChat = preflightChat
+        let pending = pendingChat?.pendingStartArgs
         modelPreflightReason = nil
-        focusedChat.pendingStartArgs = nil
+        preflightChat = nil
 
         let svc = fileService
         let apply: @Sendable ([LocalModelConfigPlan.Operation]) -> Bool =
@@ -989,16 +1291,35 @@ final class ChatViewModel {
                     self.modelProviderMismatch = nil
                     self.unroutableProvider = nil
                     self.refreshConfigDiagnostics()
-                    if let pending {
-                        self.focusedChat.startACPSession(
-                            resume: pending.sessionId,
-                            projectPath: pending.projectPath,
-                            initialPrompt: pending.initialPrompt
-                        )
+                    // Replay only while the chat is still waiting on this
+                    // pick: a cancel, a delete or a newer preflight cleared it.
+                    if let pending, let pendingChat, pendingChat.pendingStartArgs != nil,
+                       self.chats.contains(where: { $0 === pendingChat }) {
+                        self.settlePreflight(pendingChat)
+                        let hasPrompt = !(pending.initialPrompt?
+                            .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                        // A chat the user has since left is replayed only if
+                        // it carries a prompt: the leave rule keeps nothing
+                        // else that is merely starting (a blank new chat, or a
+                        // resume with nothing typed), so the reap below drops
+                        // it instead.
+                        if pendingChat === self.focusedChat || hasPrompt {
+                            pendingChat.targetSessionId = pending.sessionId
+                            pendingChat.startACPSession(
+                                resume: pending.sessionId,
+                                projectPath: pending.projectPath,
+                                initialPrompt: pending.initialPrompt
+                            )
+                        }
                     }
                 } else {
                     self.acpError = "Couldn't save model+provider to config.yaml. Open Settings to retry."
+                    // Nothing will replay the start that bailed.
+                    if let pendingChat, pendingChat.pendingStartArgs != nil {
+                        self.settlePreflight(pendingChat)
+                    }
                 }
+                self.reapBackgroundChats()
             }
         }
     }
@@ -1008,9 +1329,30 @@ final class ChatViewModel {
     /// — no error banner, since this isn't a failure, just a deferral.
     @MainActor
     func cancelModelPreflight() {
+        // The sheet reports its own dismissal through the same binding
+        // after a pick (`ChatModelPreflightSheet` calls `dismiss()` after
+        // `onSelect`), once `confirmModelPreflight` has cleared the reason:
+        // that is not a cancel, and must not drop the replay.
+        guard modelPreflightReason != nil else { return }
         Analytics.record(.modelPreflightResult(outcome: .cancelled))
         modelPreflightReason = nil
-        focusedChat.pendingStartArgs = nil
+        clearPreflightChat()
+        reapBackgroundChats()
+    }
+
+    /// Forget the start parked on the preflight sheet: nothing will replay
+    /// it. A background chat left blank by that is dropped, as leaving it
+    /// would have.
+    private func clearPreflightChat() {
+        guard let chat = preflightChat else { return }
+        settlePreflight(chat)
+        reapBackgroundChats()
+    }
+
+    /// `chat` no longer waits on the preflight sheet.
+    private func settlePreflight(_ chat: ChatSession) {
+        chat.pendingStartArgs = nil
+        if preflightChat === chat { preflightChat = nil }
     }
 
     /// Collapse an agent-supplied permission option id onto the taxonomy's
@@ -1063,7 +1405,14 @@ final class ChatViewModel {
         }
     }
 
+    /// Tests only: awaited at the top of every sidebar reload, so a test
+    /// can hold a start between "ready" and its first send (both start
+    /// paths reload the sidebar there). Nil in the app.
+    @ObservationIgnored
+    var sessionListLoadHook: (@MainActor () async -> Void)?
+
     func loadRecentSessions() async {
+        if let sessionListLoadHook { await sessionListLoadHook() }
         // L2 (v2.8) — coalesce against an in-flight load. If one's
         // already running, await its completion instead of spawning a
         // parallel one. Drops the 2-3× contention seen during file-
@@ -1189,7 +1538,9 @@ final class ChatViewModel {
             recentSessions[idx] = recentSessions[idx].withTitle(trimmed)
         }
         sessionPreviews[sessionId] = trimmed
-        focusedChat.applyRenameToAttachedSession(sessionId: sessionId, title: trimmed)
+        for chat in chats {
+            chat.applyRenameToAttachedSession(sessionId: sessionId, title: trimmed)
+        }
         // Broadcast so every OTHER surface showing this session — the
         // Sessions tab, another window's chat header — updates without
         // waiting for its next reload. Mirrors `SessionDeletedSignal`.
@@ -1214,7 +1565,9 @@ final class ChatViewModel {
             recentSessions[idx] = recentSessions[idx].withTitle(title)
         }
         sessionPreviews[sessionId] = title
-        focusedChat.applyRenameToAttachedSession(sessionId: sessionId, title: title)
+        for chat in chats {
+            chat.applyRenameToAttachedSession(sessionId: sessionId, title: title)
+        }
     }
 
     /// Why the last sidebar rename failed; `nil` once one succeeds or a
@@ -1302,9 +1655,7 @@ final class ChatViewModel {
             sessionPreviews.removeValue(forKey: id)
             sessionProjectNames.removeValue(forKey: id)
         }
-        if richChatViewModel.transcriptSessionIds.contains(where: deleted.contains) {
-            focusedChat.tearDownDeletedActiveSession()
-        }
+        tearDownChats(where: { chat in deleted.contains(where: chat.covers) })
         if outcome.failed != nil {
             // Some segments went, the rest are still there (and chained):
             // reload so the list shows the shorter conversation, and say so.
@@ -1367,13 +1718,23 @@ final class ChatViewModel {
     ) {
         guard deletedContext.id == context.id,
               deletedContext.paths.home == context.paths.home,
-              richChatViewModel.sessionId != nil,
-              richChatViewModel.transcriptCovers(sessionId) else { return }
+              chats.contains(where: { $0.covers(sessionId) }) else { return }
         // Same cache purge deleteSession does for the row it removed.
         recentSessions.removeAll { $0.id == sessionId }
         sessionPreviews.removeValue(forKey: sessionId)
         sessionProjectNames.removeValue(forKey: sessionId)
-        focusedChat.tearDownDeletedActiveSession()
+        tearDownChats(where: { $0.covers(sessionId) })
+    }
+
+    /// The delete teardown for every chat in this window on a deleted
+    /// session, focused or not (`ChatSession.tearDownDeletedActiveSession`:
+    /// a working chat gets its bounded `session/cancel` first). A
+    /// background chat is dropped; the focused one stays, now a blank chat.
+    private func tearDownChats(where isDeleted: (ChatSession) -> Bool) {
+        for chat in chats where isDeleted(chat) {
+            chat.tearDownDeletedActiveSession()
+            if chat !== focusedChat { drop(chat) }
+        }
     }
 
     /// The compression chain `sessionId` belongs to (root first), from the
@@ -1579,8 +1940,18 @@ final class ChatViewModel {
         tv.send(source: tv, data: bytes[0..<bytes.count])
     }
 
+    /// Tests only: stands in for spawning the terminal's `hermes` process
+    /// and receives the arguments `launchTerminal` would run. Nil in the app.
+    @ObservationIgnored
+    var terminalLaunchOverride: (([String]) -> Void)?
+
     private func launchTerminal(arguments: [String]) {
         stopACP()
+        if let terminalLaunchOverride {
+            terminalLaunchOverride(arguments)
+            terminalProcessRunning = true
+            return
+        }
 
         if let existing = terminalView {
             existing.terminate()
@@ -1593,7 +1964,7 @@ final class ChatViewModel {
         terminal.nativeForegroundColor = NSColor(red: 0.85, green: 0.87, blue: 0.91, alpha: 1.0)
 
         let coord = Coordinator(onTerminated: { [weak self] in
-            self?.hasActiveProcess = false
+            self?.terminalProcessRunning = false
             self?.voiceEnabled = false
             self?.isRecording = false
             Task { await self?.richChatViewModel.refreshMessages() }
@@ -1651,7 +2022,7 @@ final class ChatViewModel {
         )
 
         self.terminalView = terminal
-        self.hasActiveProcess = true
+        self.terminalProcessRunning = true
     }
 
     final class Coordinator: NSObject, LocalProcessTerminalViewDelegate {
@@ -1680,9 +2051,11 @@ final class ChatViewModel {
 // the window's VM unchanged.
 
 extension ChatViewModel {
+    /// A `hermes` process is attached to what the window shows: the
+    /// embedded terminal's in terminal mode, else the focused chat's ACP
+    /// client.
     var hasActiveProcess: Bool {
-        get { focusedChat.hasActiveProcess }
-        set { focusedChat.hasActiveProcess = newValue }
+        displayMode == .terminal ? terminalProcessRunning : focusedChat.hasActiveProcess
     }
     var isACPConnected: Bool { focusedChat.isACPConnected }
     var acpStatus: String {
@@ -1693,15 +2066,23 @@ extension ChatViewModel {
         get { focusedChat.isStartingSession }
         set { focusedChat.isStartingSession = newValue }
     }
-    var isPreparingSession: Bool { focusedChat.isPreparingSession }
+    var isPreparingSession: Bool { focusedChat.isPreparingSession || isResolvingContinueLast }
+    /// Every chat's start watchdog budget (tests shrink it).
     var sessionStartWatchdogNanos: UInt64 {
         get { focusedChat.sessionStartWatchdogNanos }
-        set { focusedChat.sessionStartWatchdogNanos = newValue }
+        set {
+            sessionStartWatchdogOverride = newValue
+            for chat in chats { chat.sessionStartWatchdogNanos = newValue }
+        }
     }
     var environmentHintSlot: EnvironmentHintSlot { focusedChat.environmentHintSlot }
+    /// Every chat's auto-accept-edits store (tests point it at a scratch one).
     var autoAcceptEditsStore: ProjectAutoAcceptEditsStore {
         get { focusedChat.autoAcceptEditsStore }
-        set { focusedChat.autoAcceptEditsStore = newValue }
+        set {
+            autoAcceptEditsStoreOverride = newValue
+            for chat in chats { chat.autoAcceptEditsStore = newValue }
+        }
     }
 
     var focusedToolCallId: String? {
@@ -1745,41 +2126,90 @@ extension ChatViewModel {
 
     /// Tear down the focused chat's ACP connection (`ChatSession.stop`):
     /// the bounded `session/cancel` of a turn in flight, `client.stop()`,
-    /// and the "Turn cancelled — switched sessions." hint. P1 splits this
-    /// from `stopAllChats()`, which in P0 is the same single chat.
+    /// and the "Turn cancelled." hint. Background chats are untouched
+    /// (terminal mode, Bot Chat's teardown).
     func stopACP() {
         focusedChat.stop()
     }
 
     /// Tear down every chat this window holds (window close, server
-    /// switch). In P0 the window holds one chat, so this is `stopACP()`.
+    /// switch): the focused one as `stopACP` does, the background ones
+    /// superseded and dropped — nothing can reach them afterwards.
     func stopAllChats() {
+        for chat in chats where chat !== focusedChat {
+            chat.supersede()
+        }
         focusedChat.stop()
+        chats = [focusedChat]
+        if preflightChat !== focusedChat { preflightChat = nil }
     }
 }
 
 // MARK: - ChatSessionHost
 
 extension ChatViewModel: ChatSessionHost {
-    func startNewSessionFromChat() {
+    func startNewSessionFromChat(_ chat: ChatSession, pendingTitle: String?) {
+        // A `/new` held for a reconnect or a load replay can be released
+        // after the user moved to another chat: running it then would
+        // replace the chat they are in. Say so where it was typed instead.
+        guard chat === focusedChat else {
+            chat.richChatViewModel.transientHint = String(
+                localized: "/new wasn't run — this chat was in the background. Start a new chat from the list."
+            )
+            chat.scheduleHintClear()
+            // The chat may have nothing left to keep it now (a blank chat
+            // that came up only to run `/new`).
+            reapBackgroundChats()
+            return
+        }
         startNewSession()
+        // On the chat the start landed in, which the reset inside it has
+        // already cleared.
+        focusedChat.pendingSessionTitle = pendingTitle
     }
 
     func offerKanbanOnboarding() {
         maybeTriggerKanbanOnboarding()
     }
 
-    func presentModelPreflight(reason: String?, customProviders: ModelPreflight.CustomProviders) {
+    func presentModelPreflight(for chat: ChatSession, reason: String?, customProviders: ModelPreflight.CustomProviders) {
+        // One sheet per window. The chat on screen keeps it: a background
+        // chat bailing while the focused one waits is dropped (nothing will
+        // replay it), so the sheet the user sees replays what they asked
+        // for. Otherwise the newer bail replaces the older wait.
+        if let previous = preflightChat, previous !== chat {
+            if previous === focusedChat {
+                chat.pendingStartArgs = nil
+                reapBackgroundChats()
+                return
+            }
+            settlePreflight(previous)
+        }
+        preflightChat = chat
         self.customProviders = customProviders
         modelPreflightReason = reason
+        reapBackgroundChats()
     }
 
-    func chatWillTearDown() {
+    /// Live Voice runs on the focused chat; a background chat's teardown
+    /// is not its business.
+    func chatWillTearDown(_ chat: ChatSession) {
+        guard chat === focusedChat else { return }
         voiceLive.endImmediately()
     }
 
-    func chatConnectionDied() {
+    func chatConnectionDied(_ chat: ChatSession) {
+        guard chat === focusedChat else { return }
         voiceLive.endForLostConnection()
+    }
+
+    /// A background chat that failed to start, timed out, or lost its
+    /// connection for good has nothing left to run and no row it could be
+    /// reopened from that isn't a fresh resume: the leave rules drop it
+    /// (its process is already stopped). The focused chat keeps its error.
+    func chatSettledWithoutConnection(_ chat: ChatSession) {
+        guard chat !== focusedChat else { return }
+        reapBackgroundChats()
     }
 }
 

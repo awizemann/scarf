@@ -176,7 +176,10 @@ final class BotConversationViewModel {
         self.profileName = profileName
         let pinned = context.pinnedToProfile(profileName)
         self.context = pinned
-        let vm = chat ?? ChatViewModel(context: pinned)
+        // `.single`: one chat for the conversation's lifetime, reused by
+        // every resolve, so `verifyCanonicalBinding` always polls the chat
+        // the resume landed in.
+        let vm = chat ?? ChatViewModel(context: pinned, mode: .single)
         // Pin the ACP subprocess to the bot's profile. Without this the
         // context alone would point reads at the bot while the AGENT ran as
         // the user's active profile — the transcript and the entity writing

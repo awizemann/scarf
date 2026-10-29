@@ -569,6 +569,54 @@ import ScarfCore
         #expect(VoiceLivePresentation.endedMessage(.userEnded, endNote: vm.voiceLive.endNote) != nil)
     }
 
+    /// Parallel chats (P1): Live Voice runs on the focused chat. A
+    /// background chat's connection dying, or its deliberate teardown (a
+    /// delete), must not end it.
+    @Test @MainActor func aBackgroundChatsTeardownLeavesTheFocusedChatsVoiceRunning() async throws {
+        let home = try Self.configuredHome()
+        defer { home.cleanup() }
+        let chA = VoiceScriptedChannel(sessionId: "sess-bg")
+        let chB = VoiceScriptedChannel(sessionId: "sess-fg")
+        var engines: [FakeEngine] = []
+        let vm = await Self.connectedChat(home: home, channel: chA) { engines.append($0) }
+        defer { vm.stopAllChats() }
+        vm.sessionDeleteRunner = { _, _ in 0 }
+        let chatA = vm.focusedChat
+        // B first; then A's reconnect ladder gets a channel of its own.
+        let chReconnect = VoiceScriptedChannel(sessionId: "sess-bg")
+        let calls = ChatViewModelStartLifecycleTests.CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            let channel = calls.next() == 1 ? chB : chReconnect
+            return ACPClient(context: ctx) { _ in channel }
+        }
+        vm.sendText("long job") // A works on, so it stays in the background
+        _ = await Self.waitUntil { await chA.sentMethods.contains("session/prompt") }
+        vm.startNewSession()
+        _ = await Self.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready && vm.richChatViewModel.sessionId == "sess-fg"
+        }
+        #expect(vm.focusedChat !== chatA)
+        #expect(vm.chats.contains { $0 === chatA })
+
+        Self.startGPTLive(vm)
+        _ = await Self.waitUntil { engines.first?.phase == .connecting }
+        #expect(vm.voiceLive.holdsSession)
+
+        // The background chat's process dies: its reconnect ladder runs,
+        // the voice on the focused chat is not its business.
+        await chA.close()
+        _ = await Self.waitUntil { chatA.acpStatus.hasPrefix("Reconnecting") }
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(engines.first?.immediateEnds == [], "a background chat's lost connection ended the voice")
+        #expect(vm.voiceLive.endNote == nil)
+
+        // Its session is deleted: the full teardown runs on it.
+        await vm.deleteSession("sess-bg")
+        #expect(!vm.chats.contains { $0 === chatA })
+        #expect(engines.first?.immediateEnds == [], "a background chat's teardown ended the voice")
+        #expect(vm.voiceLive.holdsSession)
+    }
+
     // MARK: - F2a: turn identity
 
     /// Hermes answers a prompt sent mid-turn at once and runs it inside the

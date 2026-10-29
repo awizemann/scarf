@@ -35,6 +35,9 @@ import ScarfCore
         enum Behavior: Sendable {
             /// Answer initialize/session ops successfully; hold prompts.
             case happy(sessionId: String)
+            /// Like `happy`, but answers `session/prompt` at once with
+            /// `end_turn` — a turn that completes, leaving the chat idle.
+            case answeringPrompts(sessionId: String)
             /// Like `happy`, but ALSO never answers `session/cancel` —
             /// a wedged mid-turn process. Pins `boundedSessionCancel`'s
             /// deadline: teardown must proceed anyway.
@@ -104,10 +107,13 @@ import ScarfCore
                 reply(["jsonrpc": "2.0", "id": id,
                        "error": ["code": -32603, "message": "scripted initialize failure"]])
             case .happy(let sessionId), .happyHoldingCancel(let sessionId),
-                 .busyOnSetModel(let sessionId):
+                 .busyOnSetModel(let sessionId), .answeringPrompts(let sessionId):
                 let holdCancel: Bool = if case .happyHoldingCancel = behavior { true } else { false }
                 let busyOnSetModel: Bool = if case .busyOnSetModel = behavior { true } else { false }
+                let answerPrompts: Bool = if case .answeringPrompts = behavior { true } else { false }
                 switch method {
+                case "session/prompt" where answerPrompts:
+                    reply(["jsonrpc": "2.0", "id": id, "result": ["stopReason": "end_turn"]])
                 case "session/set_model" where busyOnSetModel:
                     reply(["jsonrpc": "2.0", "id": id,
                            "error": ["code": -32603,
@@ -501,8 +507,11 @@ import ScarfCore
         #expect(methods.lastIndex(of: "session/cancel") != nil)
 
         // Feedback: composer toast + system bubble via the synthesized
-        // promptComplete (transcript still attached to sess-1 here).
-        #expect(vm.richChatViewModel.transientHint == "Turn cancelled — switched sessions.")
+        // promptComplete (transcript still attached to sess-1 here). Plain
+        // wording: since parallel chats (P1) a switch never cancels a turn,
+        // so "switched sessions" would be wrong here (terminal mode, Bot
+        // Chat teardown).
+        #expect(vm.richChatViewModel.transientHint == "Turn cancelled.")
         let paintedBubble = vm.richChatViewModel.messages.contains {
             $0.role == "system" && $0.content.contains("cancelled")
         }
@@ -510,16 +519,12 @@ import ScarfCore
         #expect(vm.richChatViewModel.isAgentWorking == false)
     }
 
-    /// The flagship S4 trigger: SWITCHING SESSIONS mid-turn. Every
-    /// sidebar-click path (`startNewSession` / `resumeSession` /
-    /// `continueLastSession`) runs `richChatViewModel.reset()` at the
-    /// click — which wipes `isAgentWorking` and `sessionId` — BEFORE
-    /// `startACPSession` reaches `stopACP()`. The mid-turn teardown
-    /// must therefore key off ChatViewModel-owned turn state, not the
-    /// already-reset transcript VM, or the `session/cancel` is never
-    /// sent on exactly the path S4 was diagnosed from (the duplicated
-    /// DB row came from switching away and re-sending later).
-    @Test @MainActor func switchingSessionsMidTurnSendsSessionCancel() async throws {
+    /// Parallel chats (P1) replaced the S4 flagship path: SWITCHING away
+    /// from a chat mid-turn no longer stops it. The old chat keeps its
+    /// `hermes acp` process and its turn — no `session/cancel`, channel
+    /// open, still working — while a second chat opens and takes focus.
+    /// Going back to it is a focus, not a resume: nothing respawns.
+    @Test @MainActor func switchingChatsMidTurnKeepsTheOldChatRunning() async throws {
         let home = try Self.configuredHome()
         defer { home.cleanup() }
         let vm = ChatViewModel(context: home.context)
@@ -537,38 +542,48 @@ import ScarfCore
                 && vm.richChatViewModel.sessionId == "sess-A"
         }
         #expect(ready)
+        let chatA = vm.focusedChat
 
         vm.sendText("long-running turn") // held open by the scripted channel
         let promptInFlight = await Self.waitUntil {
             await chA.sentMethods.contains("session/prompt")
         }
         #expect(promptInFlight)
-        #expect(vm.richChatViewModel.isAgentWorking)
+        #expect(chatA.richChatViewModel.isAgentWorking)
 
-        // Sidebar click mid-turn: reset() runs first, then stopACP.
+        // Sidebar "New" mid-turn: a second chat, A left running.
         vm.startNewSession()
-
-        let cancelSent = await Self.waitUntil {
-            await chA.sentMethods.contains("session/cancel")
-        }
-        #expect(cancelSent, "mid-turn session switch killed the old process without session/cancel (S4's flagship path)")
-        let aClosed = await Self.waitUntil { await chA.closed }
-        #expect(aClosed)
 
         let bReady = await Self.waitUntil {
             vm.richChatViewModel.sessionId == "sess-B"
                 && vm.acpStatus == ChatViewModel.ACPPhase.ready
         }
         #expect(bReady)
-        // Composer feedback for the cancelled turn survives the swap…
-        #expect(vm.richChatViewModel.transientHint == "Turn cancelled — switched sessions.")
-        // …but the old turn's synthesized "cancelled" bubble must NOT
-        // leak into the fresh transcript (it belongs to sess-A, which
-        // is no longer attached).
-        let strayBubble = vm.richChatViewModel.messages.contains {
-            $0.role == "system" && $0.content.contains("cancelled")
-        }
-        #expect(strayBubble == false, "old session's cancellation bubble leaked into the new transcript")
+        #expect(vm.chats.count == 2)
+        #expect(vm.focusedChat !== chatA)
+        // Give a stray teardown time to show itself.
+        try? await Task.sleep(nanoseconds: 300_000_000)
+        #expect(await chA.sentMethods.contains("session/cancel") == false,
+                "switching chats cancelled the old chat's turn")
+        #expect(await chA.closed == false, "switching chats killed the old chat's process")
+        #expect(chatA.richChatViewModel.isAgentWorking, "the background chat stopped working")
+        #expect(chatA.richChatViewModel.sessionId == "sess-A")
+        // The fresh chat carries nothing of A's.
+        #expect(vm.richChatViewModel.messages.isEmpty)
+        #expect(vm.richChatViewModel.transientHint == nil)
+
+        // Back to A by its row: a focus. No spawn.
+        let spawned = calls.count
+        vm.resumeSession("sess-A")
+        #expect(vm.focusedChat === chatA)
+        // B never had a turn: Hermes has no row for it, nothing could bring
+        // the user back, so it is dropped rather than kept as a leak.
+        #expect(vm.chats.count == 1)
+        #expect(await Self.waitUntil { await chB.closed })
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(calls.count == spawned, "re-focusing a live chat spawned a process")
+        #expect(await chA.sentMethods.filter { $0 == "session/load" }.isEmpty)
+        #expect(vm.richChatViewModel.isAgentWorking)
     }
 
     /// A stale prompt task resuming AFTER its client was superseded
@@ -584,10 +599,14 @@ import ScarfCore
     /// `CancellationError` resume is therefore GUARANTEED to land
     /// well after B reached Ready, which is exactly the window where
     /// the clobber bites.
+    ///
+    /// `.single` mode (Bot Chat): since parallel chats (P1) only a chat
+    /// that is reused in place supersedes its own working turn; the main
+    /// window keeps a working chat running instead.
     @Test @MainActor func stalePromptTaskDoesNotClobberSupersedingSessionStatus() async throws {
         let home = try Self.configuredHome()
         defer { home.cleanup() }
-        let vm = ChatViewModel(context: home.context)
+        let vm = ChatViewModel(context: home.context, mode: .single)
         let chA = ScriptedACPChannel(behavior: .happyHoldingCancel(sessionId: "sess-A"))
         let chB = ScriptedACPChannel(behavior: .happy(sessionId: "sess-B"))
         let calls = CallCounter()

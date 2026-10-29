@@ -140,6 +140,49 @@ import ScarfCore
         #expect(vm.richChatViewModel.transientHint == "Turn cancelled — session deleted.")
     }
 
+    /// Parallel chats (P1): the deleted session can be a BACKGROUND chat
+    /// still working in this window. It gets the same teardown (bounded
+    /// `session/cancel`, channel closed) and leaves the window's list; the
+    /// focused chat — a different session — is not touched.
+    @Test @MainActor func sessionsTabDeleteOfABackgroundWorkingChatTearsOnlyItDown() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let chA = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        let vm = await Self.attachedMidTurnChat(home: home, channel: chA, sessionId: "sess-A")
+        let chatA = vm.focusedChat
+        let chB = ScriptedACPChannel(behavior: .happy(sessionId: "sess-B"))
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in chB } }
+
+        vm.startNewSession() // A keeps working in the background
+        let bReady = await Lifecycle.waitUntil {
+            vm.acpStatus == ChatViewModel.ACPPhase.ready
+                && vm.richChatViewModel.sessionId == "sess-B"
+        }
+        #expect(bReady)
+        #expect(vm.chats.count == 2)
+        #expect(chatA.richChatViewModel.isAgentWorking)
+
+        let deletes = Lifecycle.DeleteRecorder()
+        let svm = Self.sessionsVM(
+            context: home.context, deleting: "sess-A", exitCode: 0, deletes: deletes)
+        svm.confirmDelete()
+        await svm.inFlightDelete?.value
+
+        let cancelSent = await Lifecycle.waitUntil { await chA.sentMethods.contains("session/cancel") }
+        #expect(cancelSent, "the deleted background chat's turn was never cancelled")
+        let closed = await Lifecycle.waitUntil { await chA.closed }
+        #expect(closed, "the deleted background chat's client leaked")
+        #expect(!vm.chats.contains { $0 === chatA }, "the deleted background chat stayed in the window")
+        #expect(vm.chats.count == 1)
+
+        // The focused chat is a different session: untouched.
+        #expect(await chB.closed == false)
+        #expect(await chB.sentMethods.contains("session/cancel") == false)
+        #expect(vm.richChatViewModel.sessionId == "sess-B")
+        #expect(vm.acpStatus == ChatViewModel.ACPPhase.ready)
+        #expect(vm.richChatViewModel.transientHint == nil)
+    }
+
     /// Deleting a NON-attached session from the Sessions tab must be a
     /// strict no-op for chat: client stays up, the in-flight turn keeps
     /// running, no cancel RPC, transcript untouched.

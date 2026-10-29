@@ -1227,6 +1227,18 @@ public final class RichChatViewModel {
         capabilitiesGate = caps
     }
 
+    /// Seed `acpCommands` from another chat's last known set (Mac parallel
+    /// chats: a window holds several chats, each with its own view model).
+    /// Hermes advertises its commands once per process and does not re-emit
+    /// them on `session/load`, which is why `reset()` keeps them; a fresh
+    /// view model would otherwise sit on the fallback list for a resumed
+    /// session. Only fills an empty list — anything the agent advertised to
+    /// this chat wins, and a later `available_commands_update` replaces it.
+    public func seedACPCommands(_ commands: [HermesSlashCommand]) {
+        guard acpCommands.isEmpty else { return }
+        acpCommands = commands
+    }
+
     /// Append an optimistically-queued prompt to the local mirror
     /// (driven by `/queue <text>`). No-op for empty / whitespace input.
     public func recordQueuedPrompt(text: String) {
