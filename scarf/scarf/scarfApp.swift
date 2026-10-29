@@ -939,6 +939,12 @@ final class ServerLiveStatusRegistry {
     /// their ControlMasters off-main (each probe is up to ~15s of
     /// subprocess I/O). Healthy masters are left alone — only one whose
     /// TCP session died during sleep gets `-O exit`.
+    ///
+    /// Through `SSHMasterRecovery`, like every chat's own recovery: a chat
+    /// whose stream died with the sleep recovers the same master at the
+    /// same moment, and two `-O exit`s would tear down the channels the
+    /// first one's reconnects just opened. Two entries for one master
+    /// probe it once.
     private func recoverRemoteControlMastersAfterWake() {
         let remotes: [(ServerID, SSHConfig, String)] = registry.entries.compactMap { entry in
             guard case .ssh(let config) = entry.kind else { return nil }
@@ -956,24 +962,36 @@ final class ServerLiveStatusRegistry {
             for (id, config, name) in remotes {
                 let transport = SSHTransport(contextID: id, config: config, displayName: name)
                 let started = Date()
-                switch transport.recoverControlMasterIfDead() {
+                let key = ControlMasterKey.of(ServerContext(id: id, displayName: name, kind: .ssh(config)))
+                let result = await SSHMasterRecovery.shared.recover(key: key) {
+                    transport.recoverControlMasterIfDead()
+                }
+                switch result.outcome {
                 case .noMaster:
                     outcomes.append(.noMaster)   // nothing was connected
                 case .alive:
                     outcomes.append(.healthy)    // master fine; no reconnect happened
+                case .recovered where !result.probedHere:
+                    // A chat (or another entry for the same master) ran this
+                    // recovery: its reconnects may already have built a new
+                    // master, which a verify here would misread — or, on a
+                    // slow network, `-O exit`. Not this sweep's to report.
+                    continue
                 case .recovered:
                     // `recoverControlMasterIfDead` returns `.recovered` as soon
                     // as it has *issued* `-O exit`; it never checks whether the
                     // socket actually went away. Re-check to find out: a second
                     // call returning `.noMaster` means the master is genuinely
                     // gone (the next ssh handshakes fresh — that's the success
-                    // the metric is about), while anything else means the
-                    // corpse survived the teardown and the user is still stuck.
+                    // the metric is about), and `.alive` means a fresh master
+                    // is already up and answering (a chat reconnected in
+                    // between) — success too. Only a corpse that survived the
+                    // teardown (`.recovered` again) leaves the user stuck.
                     // Cheap: this only runs for hosts that were actually dead,
                     // and the `-O check` it starts with is a local round-trip.
                     let verify = transport.recoverControlMasterIfDead(probeTimeout: 3)
                     recoverySeconds += Date().timeIntervalSince(started)
-                    outcomes.append(verify == .noMaster ? .recovered : .recoveryFailed)
+                    outcomes.append(verify == .recovered ? .recoveryFailed : .recovered)
                 }
             }
             // Deferred, not dropped: a wake is not proof anyone is there

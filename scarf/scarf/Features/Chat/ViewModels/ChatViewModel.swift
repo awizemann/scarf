@@ -33,19 +33,33 @@ final class ChatViewModel {
 
     let mode: Mode
 
+    /// The app-wide live-chat budget this window's chats count against
+    /// (`LiveChatBudget`); never consulted in `.single` mode.
+    @ObservationIgnored
+    let liveChatBudget: LiveChatBudget
+    /// The app-wide single-flight ControlMaster recovery its chats share.
+    @ObservationIgnored
+    let masterRecovery: SSHMasterRecovery
+
     init(
         context: ServerContext = .local,
         voiceLive: VoiceLiveController? = nil,
-        mode: Mode = .window
+        mode: Mode = .window,
+        liveChatBudget: LiveChatBudget? = nil,
+        masterRecovery: SSHMasterRecovery? = nil
     ) {
         self.context = context
         self.mode = mode
+        // Nil = the app-wide ones; tests inject their own.
+        self.liveChatBudget = liveChatBudget ?? .shared
+        self.masterRecovery = masterRecovery ?? .shared
         self.voiceLive = voiceLive ?? VoiceLiveController()
         let dataService = HermesDataService(context: context)
         let fileService = HermesFileService(context: context)
         self.dataService = dataService
         self.fileService = fileService
         let first = ChatSession(context: context, dataService: dataService, fileService: fileService)
+        first.isShownInWindow = true
         self.focusedChat = first
         self.chats = [first]
         wire(first)
@@ -759,6 +773,9 @@ final class ChatViewModel {
     /// The routing half of `startNewSession`, without its analytics event
     /// (continue-last records its own).
     private func openNewSession(projectPath: String?, initialPrompt: String?) {
+        guard admitOpen(inPlace: false, replay: { [weak self] in
+            self?.openNewSession(projectPath: projectPath, initialPrompt: initialPrompt)
+        }) else { return }
         // Rich chat: the focused chat when it is blank (or only starting),
         // else a new one — a working or live chat keeps running.
         let chat = displayMode == .richChat ? chatForNewWork() : focusedChat
@@ -829,11 +846,16 @@ final class ChatViewModel {
     /// gate reset (continue-last never reset the gate). `inPlace` restarts
     /// the focused chat whatever its state (Reconnect).
     private func openResume(_ sessionId: String, inPlace: Bool = false) {
+        guard admitOpen(inPlace: inPlace, replay: { [weak self] in
+            self?.openResume(sessionId, inPlace: inPlace)
+        }) else { return }
         let chat = displayMode == .richChat && !inPlace ? chatForNewWork() : focusedChat
         chat.beginSessionSwitch()
         // A voice session belongs to the chat it was started in.
         endVoiceForChatChange()
-        chat.resetForSessionSwitch()
+        // In place (Reconnect) on the same conversation keeps the approval
+        // mode picked in it; the start re-sends it.
+        chat.resetForSessionSwitch(continuing: inPlace ? sessionId : nil)
 
         if displayMode == .richChat {
             chat.targetSessionId = sessionId
@@ -850,7 +872,8 @@ final class ChatViewModel {
         let terminal = displayMode == .terminal
         // Terminal mode with no background chat that could be on the
         // latest session, and Bot Chat's single chat: the pre-P1 path.
-        let hasBackgroundLiveChat = chats.contains { $0 !== focusedChat && $0.isLive }
+        // (A released one counts: refocused later, it would re-attach.)
+        let hasBackgroundLiveChat = chats.contains { $0 !== focusedChat && ($0.isLive || $0.isReleased) }
         guard mode == .window, !terminal || hasBackgroundLiveChat else {
             continueLastInFocusedChat()
             return
@@ -943,15 +966,16 @@ final class ChatViewModel {
 
     /// The live chat in this window that is `sessionId`'s conversation
     /// (`ChatSession.covers`), preferring the focused one. Only a chat with
-    /// something running counts (`isLive`): an errored or idle-dead chat
-    /// is reopened by a fresh resume, the Reconnect button included.
-    /// Always nil in `.single` mode and terminal mode, which reopen as
-    /// before.
+    /// something running counts (`isLive`), or one the budget released
+    /// (focusing it re-attaches): an errored or idle-dead chat is reopened
+    /// by a fresh resume, the Reconnect button included. Always nil in
+    /// `.single` mode and terminal mode, which reopen as before.
     func liveChat(covering sessionId: String) -> ChatSession? {
         guard mode == .window, displayMode == .richChat else { return nil }
         let isOn = conversationMatcher(for: sessionId)
-        if focusedChat.isLive, isOn(focusedChat) { return focusedChat }
-        return chats.first { $0.isLive && isOn($0) }
+        let isReachable: (ChatSession) -> Bool = { $0.isLive || $0.isReleased }
+        if isReachable(focusedChat), isOn(focusedChat) { return focusedChat }
+        return chats.first { isReachable($0) && isOn($0) }
     }
 
     /// Whether a chat is `sessionId`'s conversation: the chat covers it,
@@ -970,7 +994,9 @@ final class ChatViewModel {
     /// are left alone; the focused chat is `launchTerminal`'s to stop.
     private func stopBackgroundChats(covering sessionId: String) {
         let isOn = conversationMatcher(for: sessionId)
-        for chat in chats where chat !== focusedChat && chat.isLive && isOn(chat) {
+        // A released chat too: focusing it later would re-attach a second
+        // agent to the conversation the terminal now runs.
+        for chat in chats where chat !== focusedChat && (chat.isLive || chat.isReleased) && isOn(chat) {
             drop(chat)
         }
     }
@@ -978,14 +1004,28 @@ final class ChatViewModel {
     /// Show `chat`. The light path: ends Live Voice and terminal voice as
     /// any chat change does, and nothing else — no respawn, no SSH gate
     /// reset, no resume event. The chat left behind follows the leave
-    /// rules (`reapBackgroundChats`).
+    /// rules (`reapBackgroundChats`). A chat the budget released
+    /// re-attaches (`ChatSession.reattach`), even when it is already the
+    /// one shown (released from another window's budget dialog).
     func focus(_ chat: ChatSession) {
-        guard chat !== focusedChat else { return }
-        endVoiceForChatChange()
-        if !chats.contains(where: { $0 === chat }) { chats.append(chat) }
-        focusedChat = chat
-        chat.lastFocusedAt = Date()
-        reapBackgroundChats()
+        if chat !== focusedChat {
+            endVoiceForChatChange()
+            if !chats.contains(where: { $0 === chat }) { chats.append(chat) }
+            focusedChat.isShownInWindow = false
+            focusedChat = chat
+            chat.isShownInWindow = true
+            chat.lastFocusedAt = Date()
+            chat.lastUsedAt = Date()
+            reapBackgroundChats()
+        }
+        if chat.isReleased {
+            // A re-attach is a respawn the user asked for: like a resume,
+            // it gets a real attempt past an open SSH breaker (gh#138).
+            if case .ssh(let cfg) = context.kind {
+                SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: cfg.host, port: cfg.port))
+            }
+            chat.reattach()
+        }
     }
 
     /// The leave rule, in one place: every chat the window isn't showing
@@ -999,7 +1039,13 @@ final class ChatViewModel {
     private func reapBackgroundChats() {
         guard mode == .window else { return }
         for chat in chats where chat !== focusedChat && !chat.keepsRunningWhenLeft {
-            drop(chat)
+            // A released chat left mid re-attach goes back to released —
+            // it is reachable; anything else is dropped.
+            if chat.isReattaching {
+                chat.releaseProcess()
+            } else {
+                drop(chat)
+            }
         }
     }
 
@@ -1042,6 +1088,9 @@ final class ChatViewModel {
     private func wire(_ chat: ChatSession) {
         chat.host = self
         chat.fileService = fileService
+        chat.masterRecovery = masterRecovery
+        // Bot Chat's one chat stays outside the budget.
+        if mode == .window { liveChatBudget.register(chat) }
         chat.richChatViewModel.publishCapabilities(capabilitiesStore?.capabilities ?? .empty)
         if let sessionStartWatchdogOverride {
             chat.sessionStartWatchdogNanos = sessionStartWatchdogOverride
@@ -1064,6 +1113,125 @@ final class ChatViewModel {
         routeGeneration &+= 1
         isResolvingContinueLast = false
         return routeGeneration
+    }
+
+    // MARK: - Live-chat budget (parallel chats P1)
+
+    /// An open the live-chat budget blocked: every slot on this host is
+    /// taken by a chat that is working (or shown in a window). `ChatView`
+    /// asks: stop one of `working` (`stopChatForBudget`), then the open
+    /// runs; or wait (`waitForBudget`), and it is dropped.
+    struct BudgetBlock: Identifiable {
+        struct BlockedChat: Identifiable {
+            let id: UUID
+            /// What the user calls it (`ChatSession.displayTitle`): it may
+            /// be in another window.
+            let title: String
+            weak var chat: ChatSession?
+        }
+
+        let id = UUID()
+        let hostName: String
+        let limit: Int
+        let working: [BlockedChat]
+        fileprivate let replay: () -> Void
+        fileprivate let onWait: (() -> Void)?
+    }
+
+    /// Most transcripts of released chats a window keeps in memory; past
+    /// it the least recently used one is forgotten (its row reopens it).
+    static let maxReleasedChats = 8
+
+    /// The budget for an open that moves this window to a chat (new, resume,
+    /// continue-last), checked BEFORE focus moves so a blocked open leaves
+    /// the user where they were. `inPlace`: the focused chat is restarted
+    /// (its own slot is reused) — as `chatForNewWork` decides it; otherwise
+    /// the focused chat is about to be left and, idle, may be released.
+    private func admitOpen(inPlace: Bool, replay: @escaping () -> Void) -> Bool {
+        guard mode == .window, displayMode == .richChat else { return true }
+        let reusing = inPlace || !focusedChat.keepsRunningWhenLeft ? focusedChat : nil
+        let route = routeGeneration
+        switch liveChatBudget.admit(
+            on: ControlMasterKey.of(context),
+            excluding: reusing,
+            leaving: reusing == nil ? focusedChat : nil
+        ) {
+        case .granted:
+            return true
+        case .full(let working):
+            presentBudgetBlock(working: working, replay: { [weak self] in
+                // The user has moved on since: not what they want now.
+                guard let self, self.routeGeneration == route else { return }
+                replay()
+            }, onWait: nil)
+            return false
+        }
+    }
+
+    private func presentBudgetBlock(working: [ChatSession], replay: @escaping () -> Void, onWait: (() -> Void)?) {
+        // One question at a time: a newer blocked open replaces the older,
+        // which is then dropped as a Wait would.
+        let previous = budgetBlocked
+        budgetBlocked = BudgetBlock(
+            hostName: context.displayName,
+            limit: liveChatBudget.limit(for: ControlMasterKey.of(context)),
+            working: working.map { BudgetBlock.BlockedChat(id: $0.id, title: $0.displayTitle, chat: $0) },
+            replay: replay,
+            onWait: onWait
+        )
+        previous?.onWait?()
+    }
+
+    /// The pending open the budget dialog asks about, or nil.
+    private(set) var budgetBlocked: BudgetBlock?
+
+    /// Stop on the budget dialog: end that chat's work and give its process
+    /// back (`ChatSession.releaseProcess(stoppingTurn:)` — bounded
+    /// `session/cancel`, then the client stops), then run the open that
+    /// was waiting. The stopped chat keeps its transcript and re-attaches
+    /// when focused. It may be in another window. `block` is the one the
+    /// dialog showed, handed in by the button (not read back at click time).
+    ///
+    /// The slot reads free as soon as the client is detached, while the
+    /// bounded cancel (≤ 2 s) still runs: another open in that window may
+    /// take it first, and the replay then asks again. Accepted — the
+    /// alternative is counting dying processes.
+    func stopChatForBudget(_ block: BudgetBlock, chatID: UUID) {
+        if budgetBlocked?.id == block.id { budgetBlocked = nil }
+        guard let chat = block.working.first(where: { $0.id == chatID })?.chat else {
+            // Gone meanwhile (its window closed): its slot is free, or not —
+            // the replayed open asks the budget again.
+            block.replay()
+            return
+        }
+        let stopped = chat.releaseProcess(stoppingTurn: true)
+        Task { @MainActor in
+            // The process is gone (or the cancel's bound passed) before
+            // the open takes its slot.
+            await stopped?.value
+            block.replay()
+        }
+    }
+
+    /// Wait on the budget dialog (or its dismissal): the open is dropped.
+    func waitForBudget() {
+        guard let block = budgetBlocked else { return }
+        budgetBlocked = nil
+        block.onWait?()
+    }
+
+    /// Bound the released transcripts this window keeps: past
+    /// `maxReleasedChats`, forget the least recently used one. (Nothing
+    /// unread or drafted is tracked per chat yet; a released chat has no
+    /// held send or open approval by construction.)
+    private func trimReleasedChats() {
+        guard mode == .window else { return }
+        let released = chats
+            .filter { $0.isReleased && $0 !== focusedChat }
+            .sorted { $0.lastUsedAt < $1.lastUsedAt }
+        let excess = released.count - Self.maxReleasedChats
+        guard excess > 0 else { return }
+        for chat in released.prefix(excess) { drop(chat) }
     }
 
     /// Every chat change ends the window's voice: Live Voice belongs to the
@@ -1303,7 +1471,12 @@ final class ChatViewModel {
                         // else that is merely starting (a blank new chat, or a
                         // resume with nothing typed), so the reap below drops
                         // it instead.
-                        if pendingChat === self.focusedChat || hasPrompt {
+                        if pendingChat.isReleased {
+                            // A re-attach that bailed: still released, its
+                            // transcript kept. Shown, it re-attaches now;
+                            // in the background, when next focused.
+                            if pendingChat === self.focusedChat { pendingChat.reattach() }
+                        } else if pendingChat === self.focusedChat || hasPrompt {
                             pendingChat.targetSessionId = pending.sessionId
                             pendingChat.startACPSession(
                                 resume: pending.sessionId,
@@ -2210,6 +2383,29 @@ extension ChatViewModel: ChatSessionHost {
     func chatSettledWithoutConnection(_ chat: ChatSession) {
         guard chat !== focusedChat else { return }
         reapBackgroundChats()
+    }
+
+    func admitSpawn(for chat: ChatSession, replay: @escaping () -> Void, onWait: (() -> Void)?) -> Bool {
+        guard mode == .window else { return true }
+        switch liveChatBudget.admit(chat) {
+        case .granted:
+            return true
+        case .full(let working):
+            let route = routeGeneration
+            presentBudgetBlock(working: working, replay: { [weak self] in
+                // The user has moved on since: not what they want now.
+                guard let self, self.routeGeneration == route else {
+                    onWait?()
+                    return
+                }
+                replay()
+            }, onWait: onWait)
+            return false
+        }
+    }
+
+    func chatDidReleaseProcess(_ chat: ChatSession) {
+        trimReleasedChats()
     }
 }
 

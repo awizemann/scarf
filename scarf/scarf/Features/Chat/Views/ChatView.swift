@@ -724,6 +724,24 @@ struct ChatView: View {
             )
             .environment(\.serverContext, viewModel.context)
         }
+        // Live-chat budget: every chat holding a process on this host is
+        // working or shown in a window. Stop one (its turn is cancelled, its transcript kept) and
+        // the chat the user asked for opens; or wait, and nothing opens.
+        .confirmationDialog(
+            "Every live chat on \(viewModel.budgetBlocked?.hostName ?? viewModel.context.displayName) is in use",
+            isPresented: budgetBlockedBinding,
+            titleVisibility: .visible,
+            presenting: viewModel.budgetBlocked
+        ) { block in
+            ForEach(block.working) { chat in
+                Button("Stop “\(chat.title)”", role: .destructive) {
+                    viewModel.stopChatForBudget(block, chatID: chat.id)
+                }
+            }
+            Button("Wait", role: .cancel) { viewModel.waitForBudget() }
+        } message: { block in
+            Text("Scarf keeps up to \(block.limit) chats connected to \(block.hostName) at once. Stop one to open this chat, or wait until one finishes.")
+        }
         // Kanban toolset onboarding — fires on the user's first `/goal`
         // when Scarf's chats lack kanban tools. On 0.21.5+ it offers to add
         // `kanban` to `platform_toolsets.acp`; below that it explains that
@@ -773,6 +791,15 @@ struct ChatView: View {
         Binding(
             get: { viewModel.richChatViewModel.pendingPermission },
             set: { _ in }
+        )
+    }
+
+    /// The dialog's own dismissal (Esc, clicking away) is a Wait; after a
+    /// button the VM has already cleared the block, so it is a no-op.
+    private var budgetBlockedBinding: Binding<Bool> {
+        Binding(
+            get: { viewModel.budgetBlocked != nil },
+            set: { if !$0 { viewModel.waitForBudget() } }
         )
     }
 

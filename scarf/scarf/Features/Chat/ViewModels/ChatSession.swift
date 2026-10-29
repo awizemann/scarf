@@ -47,6 +47,15 @@ protocol ChatSessionHost: AnyObject {
     /// failed or timed out, or its reconnect ladder gave up. The window
     /// drops it when it isn't the one shown (`ChatViewModel.leave`).
     func chatSettledWithoutConnection(_ chat: ChatSession)
+    /// The live-chat budget (`LiveChatBudget`) for a spawn `chat` is about
+    /// to make. True: go ahead. False: every slot on its host is taken by a
+    /// working chat; the window asks the user to stop one or wait, runs
+    /// `replay` once one is stopped, `onWait` if they wait. Bot Chat's
+    /// single chat is always admitted.
+    func admitSpawn(for chat: ChatSession, replay: @escaping () -> Void, onWait: (() -> Void)?) -> Bool
+    /// `chat` let go of its process (`releaseProcess`): the window bounds
+    /// how many such transcripts it keeps.
+    func chatDidReleaseProcess(_ chat: ChatSession)
 }
 
 /// One chat and the `hermes acp` connection it runs on: the transcript
@@ -66,6 +75,46 @@ final class ChatSession {
     /// chat's ACP commands. Set by `ChatViewModel.focus(_:)`.
     @ObservationIgnored
     var lastFocusedAt = Date()
+
+    /// When the user last showed this chat or it last finished a turn: the
+    /// budget releases the least recently used idle chat first.
+    @ObservationIgnored
+    var lastUsedAt = Date()
+
+    /// The window shows this chat (its `focusedChat`). The budget never
+    /// releases a chat someone is looking at. Set by the window.
+    @ObservationIgnored
+    var isShownInWindow = false
+
+    /// The budget took this chat's process to free a slot
+    /// (`releaseProcess`): the transcript and session id stay, nothing
+    /// runs, and focusing it (or typing into it) re-attaches (`reattach`).
+    private(set) var isReleased = false
+
+    /// A re-attach of a released chat is in progress. Leaving it before it
+    /// is ready puts it back to released rather than dropping it — it is
+    /// reachable, it has a row.
+    @ObservationIgnored
+    private(set) var isReattaching = false
+
+    /// The project the latest `startACPSession` was asked to run in, kept
+    /// for a chat released before that start was ready (`currentProjectPath`
+    /// is only set at ready). Cleared at a session boundary.
+    @ObservationIgnored
+    private var lastStartProjectPath: String?
+
+    /// The approval mode the user picked in this chat's header, once Hermes
+    /// accepted it. Legacy Hermes keeps it in memory only (server.py
+    /// :1057-1069 @ v2026.9.24), so a re-attach or reconnect comes back at
+    /// the default; the start pipeline and the reconnect ladder re-send it
+    /// (`reassertPickedApprovalMode`). Cleared at a session boundary.
+    @ObservationIgnored
+    private(set) var userPickedApprovalMode: ACPApprovalMode?
+
+    /// Single-flight ControlMaster recovery shared by every chat on a host
+    /// (`SSHMasterRecovery`). The window sets its own (tests inject one).
+    @ObservationIgnored
+    var masterRecovery: SSHMasterRecovery = .shared
 
     /// The session a resume was asked to open, set when the resume starts
     /// (before the transcript knows any id) and kept through a #146
@@ -484,13 +533,14 @@ final class ChatSession {
     /// Do explicitly what remove-and-re-add did as a side effect: probe
     /// the master and tell a dead one to exit so the next attempt
     /// handshakes fresh. No-op on Local and when no master exists.
+    ///
+    /// Through `SSHMasterRecovery`: every chat on the host shares the
+    /// master, so one recovery serves them all — a second `-O exit` would
+    /// tear down the channels the first one's reconnects just opened.
     private func recoverRemoteTransportAfterFailure() async {
-        let ctx = context
-        guard ctx.isRemote else { return }
-        // Spawns `ssh -O check/exit` and waits on them: a thread of its own.
-        await OffPool.run {
-            _ = (ctx.makeTransport() as? SSHTransport)?.recoverControlMasterIfDead()
-        }
+        guard context.isRemote else { return }
+        // The probe spawns `ssh -O check/exit` on a thread of its own.
+        await masterRecovery.recover(context: context)
     }
 
     // MARK: - Start watchdog + supersede (t-5451bd1b)
@@ -538,18 +588,24 @@ final class ChatSession {
             guard intent == self.sessionStartGeneration, self.isPreparingSession else { return }
             let seconds = Int(budget / 1_000_000_000)
             self.logger.error("session-start watchdog fired after \(seconds)s — tearing down the wedged start")
+            let wasReattaching = self.isReattaching
+            // Counted before `stop()`, which drops sends held for a client
+            // not spawned yet (a re-attach's) without a word.
+            let dropped = self.heldSends.count
             // Self-supersede so the wedged pipeline's generation checks
             // abandon silently if its awaits ever resume, instead of
             // stomping the error state painted below.
             self.beginStartIntent()
             self.stop()
+            // A released chat that failed to come back is still the chat
+            // it was: kept, transcript and all, to retry later.
+            if wasReattaching { self.isReleased = true }
             self.acpStatus = ACPPhase.failed
             self.clearACPErrorState()
             self.acpError = "Session start timed out after \(seconds) seconds."
             self.acpErrorHint = "The agent never finished starting — the process may be wedged. Click the chat again (or start a new one) to retry."
             // Sends held for the wedged start's client will never go out.
-            if !self.heldSends.isEmpty {
-                let dropped = self.heldSends.count
+            if dropped > 0 {
                 self.heldSends = []
                 self.heldSendsClient = nil
                 self.richChatViewModel.transientHint = String(
@@ -587,7 +643,13 @@ final class ChatSession {
     }
 
     /// Blank the transcript for the next session.
-    func resetForSessionSwitch() {
+    ///
+    /// `continuing`: the session the chat restarts on (the error banner's
+    /// Reconnect). When the chat already is that conversation, the approval
+    /// mode the user picked in it survives the restart — only a different
+    /// session clears it.
+    func resetForSessionSwitch(continuing sessionId: String? = nil) {
+        let keptMode = sessionId.flatMap { covers($0) ? userPickedApprovalMode : nil }
         richChatViewModel.reset()
         targetSessionId = nil
         hasSentPrompt = false
@@ -595,6 +657,10 @@ final class ChatSession {
         // chat's model (S03-F2). The start sets it from the session.
         currentModelPreset = nil
         pendingSessionTitle = nil
+        // The picked mode belonged to the session being left.
+        userPickedApprovalMode = keptMode
+        isReleased = false
+        lastStartProjectPath = nil
     }
 
     // MARK: - Parallel chats (P1)
@@ -613,7 +679,45 @@ final class ChatSession {
     /// A chat that is none of these has nothing to focus — reopening its
     /// session is a fresh resume.
     var isLive: Bool {
-        acpClient != nil || isStartingSession || holdingForReconnect
+        acpClient != nil || isStartingSession || holdingForPendingClient
+    }
+
+    /// Takes a slot in the live-chat budget: a `hermes acp` process is
+    /// attached, being started, or being brought back by the reconnect
+    /// ladder. A released chat holds none.
+    var holdsProcess: Bool {
+        acpClient != nil || isStartingSession || holdingForPendingClient
+    }
+
+    /// The budget must not release this chat's process: a turn is in flight,
+    /// an approval or question waits, a start or reconnect is under way, or
+    /// sends are held for a client.
+    var isBusyForBudget: Bool {
+        hasTurnInFlight
+            || !richChatViewModel.permissionQueue.isEmpty
+            || isPreparingSession
+            || holdingForPendingClient
+            || isHandlingDisconnect
+            || !heldSends.isEmpty
+            || startCarriesUserInput
+    }
+
+    /// A name the user recognises for this chat in a window that may not
+    /// be showing it (the budget's Stop/Wait dialog): the session title,
+    /// a `/new <name>` waiting to be applied, else the start of the first
+    /// thing they typed.
+    var displayTitle: String {
+        if let title = richChatViewModel.currentSession?.title?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty {
+            return title
+        }
+        if let pending = pendingSessionTitle, !pending.isEmpty { return pending }
+        if let first = richChatViewModel.messages.first(where: \.isUser)?.content
+            .trimmingCharacters(in: .whitespacesAndNewlines), !first.isEmpty {
+            let line = first.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? first
+            return line.count > 40 ? String(line.prefix(40)) + "…" : line
+        }
+        return String(localized: "New chat")
     }
 
     /// A prompt Scarf started on this chat hasn't returned.
@@ -627,13 +731,16 @@ final class ChatSession {
     ///   or a start parked on the model preflight sheet — keep it;
     /// - a live, idle session the user can come back to — one that was
     ///   resumed (it has a row), or that has had a turn (Hermes stored it):
-    ///   keep its process (the budget that releases idle processes is
-    ///   step 2);
+    ///   keep its process until the budget needs the slot (`LiveChatBudget`);
+    /// - released by the budget — keep it: no process, but reachable;
     /// - otherwise (blank, errored with no client, a start with nothing
     ///   typed, or a new session with no turn — unreachable, there is no
     ///   row to click) — no: the window supersedes it, as a switch always
     ///   did.
     var keepsRunningWhenLeft: Bool {
+        // Released by the budget: no process, but a row the user can come
+        // back to, and a transcript worth keeping.
+        if isReleased { return true }
         // Scarf's own turn bookkeeping, not `isAgentWorking`: an autostart's
         // echo raises that flag and a failed start never lowers it.
         if hasTurnInFlight { return true }
@@ -645,7 +752,7 @@ final class ChatSession {
         // or the project setup (`initialPrompt`) before it sends.
         if startCarriesUserInput && (isStartingSession || acpClient != nil) { return true }
         if isStartingSession { return false }
-        if holdingForReconnect { return true }
+        if holdingForPendingClient { return true }
         guard acpClient != nil, richChatViewModel.sessionId != nil else { return false }
         return hasSentPrompt || targetSessionId != nil || richChatViewModel.currentSession != nil
     }
@@ -655,9 +762,10 @@ final class ChatSession {
     /// client) and tear the connection down. The window removes it from
     /// its list afterwards; only call it for a chat that doesn't
     /// `keepsRunningWhenLeft`, or one the window is closing.
-    func supersede() {
+    @discardableResult
+    func supersede() -> Task<Void, Never>? {
         beginStartIntent()
-        stop()
+        return stop()
     }
 
     /// The rich-chat half of `ChatViewModel.resumeSession`.
@@ -775,6 +883,13 @@ final class ChatSession {
         if let intercept = RichChatViewModel.clientSideSlashCommand(
             for: text, capabilities: richChatViewModel.capabilitiesGate
         ), handleLocalSlashCommand(intercept) { return }
+        // Released by the budget: bring this chat's own session back and
+        // send once it is ready — an autostart would skip the model preset
+        // and project chip.
+        if isReleased {
+            reattach(thenSend: (text, images))
+            return
+        }
         if let client = acpClient {
             if holdSendIfReplayPending(client: client, text: text, images: images) { return }
             sendViaACP(client: client, text: text, images: images)
@@ -807,33 +922,36 @@ final class ChatSession {
     private var heldSends: [(text: String, images: [ChatImageAttachment])] = []
     @ObservationIgnored
     private weak var heldSendsClient: ACPClient?
-    /// True while the reconnect ladder runs with no client installed yet:
-    /// sends typed then are held for the client it installs.
+    /// True while a path that will install a client for THIS session has
+    /// none yet — the reconnect ladder, or the re-attach of a released chat
+    /// (`reattach`) before its spawn: sends typed then are held for the
+    /// client it installs, not auto-started into a second process.
     @ObservationIgnored
-    private var holdingForReconnect = false
+    private var holdingForPendingClient = false
 
     private func beginHoldingSends(for client: ACPClient) {
-        // The ladder's client inherits what was typed while it ran.
-        if !holdingForReconnect { heldSends = [] }
-        holdingForReconnect = false
+        // The new client inherits what was typed while it was coming.
+        if !holdingForPendingClient { heldSends = [] }
+        holdingForPendingClient = false
         heldSendsClient = client
     }
 
-    /// Hold `text` while the reconnect ladder runs. True when held.
+    /// Hold `text` while the reconnect ladder or a re-attach brings the
+    /// client up. True when held.
     private func holdSendDuringReconnect(text: String, images: [ChatImageAttachment]) -> Bool {
-        guard holdingForReconnect else { return false }
+        guard holdingForPendingClient else { return false }
         richChatViewModel.addUserMessage(text: text)
         richChatViewModel.closeReplayGate()
         heldSends.append((text, images))
         return true
     }
 
-    /// The ladder ended without a client (exhausted, or torn down): what
+    /// The ladder (or re-attach) ended without a client: what
     /// was held will never go out. `announce` is false for a deliberate
     /// teardown, whose transcript is being replaced anyway.
     private func dropReconnectHeldSends(announce: Bool) {
-        guard holdingForReconnect else { return }
-        holdingForReconnect = false
+        guard holdingForPendingClient else { return }
+        holdingForPendingClient = false
         let dropped = heldSends.count
         heldSends = []
         if announce && dropped > 0 {
@@ -898,7 +1016,18 @@ final class ChatSession {
     /// between the DB read and ACP `session/load`, producing a silent prompt
     /// failure with no UI feedback.
     private func autoStartACPAndSend(text: String, images: [ChatImageAttachment] = []) {
+        // A spawn: the budget first. Blocked, nothing is echoed; Stop on
+        // the dialog re-sends it through the same routing.
+        let admitted = host?.admitSpawn(
+            for: self,
+            replay: { [weak self] in
+                self?.sendRichText(text, images: images, autoStartInterceptor: nil)
+            },
+            onWait: { [weak self] in self?.noteSendNotRun() }
+        ) ?? true
+        guard admitted else { return }
         isStartingSession = true
+        isReleased = false
         startCarriesUserInput = true
         let intent = beginStartIntent()
         // Bound the whole auto-start pipeline (pre-spawn attribution
@@ -993,14 +1122,20 @@ final class ChatSession {
                 // presets are deliberately not re-applied here; the mode
                 // is cheap, one RPC, and its absence is user-visible as
                 // a dialog per edit.)
+                var autoAcceptApplied = false
                 if let projectPath {
-                    await applyProjectAutoAcceptEdits(
+                    autoAcceptApplied = await applyProjectAutoAcceptEdits(
                         client: client,
                         sessionId: resolvedSessionId,
                         projectPath: projectPath
                     )
                     guard startStillCurrent(intent, client: client) else { return }
                 }
+                // The mode the user picked in this chat, if the session
+                // came back without it (none picked: no-op).
+                await reassertPickedApprovalMode(
+                    client: client, sessionId: resolvedSessionId, autoAcceptApplied: autoAcceptApplied)
+                guard startStillCurrent(intent, client: client) else { return }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 noteLoadedHead(loadedHead)
@@ -1439,6 +1574,7 @@ final class ChatSession {
     /// chat's busy period when it was the last interruptive turn.
     private func settlePromptTurn(_ token: Int) {
         promptTurns[token] = nil
+        lastUsedAt = Date()
         if !promptTurns.values.contains(where: { !$0.isNonInterruptive }) {
             busyTurnOrigins = []
         }
@@ -1591,6 +1727,11 @@ final class ChatSession {
                     sessionId: sessionId,
                     modeId: mode.rawValue
                 )
+                // Accepted: remembered, so a re-attach or reconnect (a
+                // fresh session at the default) can put it back.
+                if self?.richChatViewModel.sessionId == sessionId {
+                    self?.userPickedApprovalMode = mode
+                }
                 self?.logger.info("session edit auto-approval mode switched to \(mode.rawValue)")
             } catch {
                 self?.logger.warning("session/set_mode failed: \(error.localizedDescription)")
@@ -1666,17 +1807,19 @@ final class ChatSession {
     ///
     /// Runs after both `session/new` and `session/load`, because the
     /// mode is scoped to the ACP session and a resume is a fresh one.
+    /// True when the session is now in `accept_edits` by this call.
+    @discardableResult
     private func applyProjectAutoAcceptEdits(
         client: ACPClient,
         sessionId: String,
         projectPath: String
-    ) async {
-        guard autoAcceptEditsStore.isEnabled(projectId: projectPath) else { return }
+    ) async -> Bool {
+        guard autoAcceptEditsStore.isEnabled(projectId: projectPath) else { return false }
 
         let caps = host?.capabilitiesStore?.capabilities ?? .empty
         guard caps.hasSessionEditAutoApproval else {
             logger.info("host doesn't support session/set_mode (pre-v0.15) — project auto-accept edits not applied")
-            return
+            return false
         }
 
         do {
@@ -1688,8 +1831,44 @@ final class ChatSession {
             // chip never claims a posture the session isn't in.
             richChatViewModel.activeApprovalMode = .acceptEdits
             logger.info("applied project auto-accept edits (accept_edits) to session \(sessionId)")
+            return true
         } catch {
             logger.warning("session/set_mode accept_edits failed for project '\(projectPath)': \(error.localizedDescription) — session stays on the default ask-first mode")
+            return false
+        }
+    }
+
+    /// Put back the approval mode the user picked in this chat
+    /// (`userPickedApprovalMode`) when the session just reopened on another
+    /// one — legacy Hermes forgets it with the process. Call after
+    /// `adoptSessionState` and `applyProjectAutoAcceptEdits`, so it wins
+    /// over the project default as the user's later pick did. Nothing
+    /// picked, or a host without `session/set_mode`: no RPC.
+    ///
+    /// "Already in that mode" is what the SESSION is in, not the chip: the
+    /// mode the open reported, or `accept_edits` when the project
+    /// auto-accept just set it (`autoAcceptApplied`). A host that reports no
+    /// mode leaves the chip on its old value, which says nothing about the
+    /// fresh session — unreported is sent. The chip mirrors only what the
+    /// host accepted.
+    private func reassertPickedApprovalMode(client: ACPClient, sessionId: String, autoAcceptApplied: Bool) async {
+        guard let picked = userPickedApprovalMode,
+              host?.capabilitiesStore?.capabilities.hasSessionEditAutoApproval == true
+        else { return }
+        let sessionMode: ACPApprovalMode?
+        if autoAcceptApplied {
+            sessionMode = .acceptEdits
+        } else {
+            sessionMode = await client.lastSessionState.currentModeId.flatMap(ACPApprovalMode.init(rawValue:))
+        }
+        guard picked != sessionMode else { return }
+        do {
+            try await client.setSessionMode(sessionId: sessionId, modeId: picked.rawValue)
+            guard acpClient === client else { return }
+            richChatViewModel.activeApprovalMode = picked
+            logger.info("re-applied the picked approval mode \(picked.rawValue) to session \(sessionId)")
+        } catch {
+            logger.warning("couldn't re-apply the picked approval mode \(picked.rawValue): \(error.localizedDescription)")
         }
     }
 
@@ -1700,12 +1879,37 @@ final class ChatSession {
         await host?.capabilitiesStore?.confirmedCapabilities() ?? .empty
     }
 
+    /// `reattaching`: bring this released chat's own session back
+    /// (`reattach`) — the transcript stays, the load's replay is kept out of
+    /// it, and sends are held (`heldSend` first) until the session is ready.
     func startACPSession(
         resume sessionId: String?,
         projectPath: String? = nil,
-        initialPrompt: String? = nil
+        initialPrompt: String? = nil,
+        reattaching: Bool = false,
+        heldSend: (text: String, images: [ChatImageAttachment])? = nil
     ) {
         ScarfMon.event(.sessionLoad, "mac.startACPSession", count: 1)
+        // A spawn: the budget first. Blocked, the start settles here and
+        // Stop on the dialog replays it.
+        let admitted = host?.admitSpawn(
+            for: self,
+            replay: { [weak self] in
+                guard let self else { return }
+                if reattaching {
+                    self.reattach(thenSend: heldSend)
+                } else {
+                    self.startACPSession(resume: sessionId, projectPath: projectPath, initialPrompt: initialPrompt)
+                }
+            },
+            onWait: heldSend == nil ? nil : { [weak self] in self?.noteSendNotRun() }
+        ) ?? true
+        guard admitted else {
+            disarmStartWatchdog()
+            isStartingSession = false
+            startCarriesUserInput = false
+            return
+        }
         stop()
         clearACPErrorState()
         // stop() clears `isStartingSession` (it's a generic teardown
@@ -1713,6 +1917,21 @@ final class ChatSession {
         // session-list overlay stays up through the entire boot.
         isStartingSession = true
         startCarriesUserInput = !(initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        isReleased = false
+        isReattaching = reattaching
+        lastStartProjectPath = projectPath
+        if reattaching {
+            // The transcript is kept, so the gate an earlier turn opened
+            // must be shut again: `session/load` streams the whole history
+            // as live updates and would paint it as new content (S02-F3).
+            // Sends wait for the session: none can go to a client that
+            // isn't there, and none may auto-start a second one.
+            richChatViewModel.closeReplayGate()
+            holdingForPendingClient = true
+            if let heldSend {
+                _ = holdSendDuringReconnect(text: heldSend.text, images: heldSend.images)
+            }
+        }
         // The spawn stage is a fresh start intent: entry points bumped
         // before their pre-spawn awaits, and bumping again here makes a
         // preflight-sheet replay (confirmModelPreflight → this method,
@@ -1781,6 +2000,13 @@ final class ChatSession {
             isStartingSession = false
             startCarriesUserInput = false
             disarmStartWatchdog()
+            if isReattaching {
+                // Still released: a pick re-attaches it (the window's
+                // replay checks), and nothing typed can wait on a sheet.
+                dropReconnectHeldSends(announce: true)
+                isReattaching = false
+                isReleased = true
+            }
             host?.presentModelPreflight(
                 for: self,
                 reason: preflight.reason,
@@ -1799,6 +2025,10 @@ final class ChatSession {
         // (it reads them from the process cwd, not the ACP session cwd).
         let client = makeACPClient(projectPath: projectPath)
         self.acpClient = client
+        // A re-attach: what was typed since it began, and anything typed
+        // until its load's replay has drained, waits for this client.
+        let reattaching = isReattaching
+        if reattaching { beginHoldingSends(for: client) }
         let attribution = SessionAttributionService(context: context)
 
         // If the caller passed a project path, hand Scarf's project
@@ -1958,6 +2188,7 @@ final class ChatSession {
                 // RPC error). Runs after both new and resumed sessions so
                 // a project's preset survives a reconnect into the same
                 // chat. No-op when no projectPath was passed.
+                var autoAcceptApplied = false
                 if let projectPath {
                     await applyProjectModelPreset(
                         client: client,
@@ -1968,13 +2199,20 @@ final class ChatSession {
 
                     // Then the project's edit-approval posture, if the
                     // user has opted this project into auto-accept.
-                    await applyProjectAutoAcceptEdits(
+                    autoAcceptApplied = await applyProjectAutoAcceptEdits(
                         client: client,
                         sessionId: resolvedSessionId,
                         projectPath: projectPath
                     )
                     guard startStillCurrent(intent, client: client) else { return }
                 }
+
+                // A re-attach (or an in-place restart of this chat's own
+                // session): the approval mode the user picked here, which
+                // legacy Hermes didn't keep. A new session has none.
+                await reassertPickedApprovalMode(
+                    client: client, sessionId: resolvedSessionId, autoAcceptApplied: autoAcceptApplied)
+                guard startStillCurrent(intent, client: client) else { return }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
                 acpStatus = ACPPhase.ready
@@ -2062,6 +2300,15 @@ final class ChatSession {
 
                 logger.info("ACP session ready: \(resolvedSessionId)")
 
+                if reattaching {
+                    // Every replayed update is handled (and dropped by the
+                    // shut gate) before a held send reopens it.
+                    await awaitEventLoopDrain(client: client)
+                    guard startStillCurrent(intent, client: client) else { return }
+                    isReattaching = false
+                    releaseHeldSends(for: client, turnAlreadyRunning: false)
+                }
+
                 // v2.8 wizard handoff: auto-send the kickoff prompt now
                 // that the session is connected. Renders as a normal user
                 // bubble (matches the user's intent — they triggered this
@@ -2075,6 +2322,7 @@ final class ChatSession {
                     sendViaACP(client: client, text: prompt, images: [], localEchoAlreadyAdded: true)
                 }
             } catch {
+                dropHeldSends(for: client)
                 // Superseded start (a newer click, or the watchdog):
                 // the newer path owns the shared state — just make
                 // sure this attempt's spawn doesn't leak.
@@ -2083,6 +2331,12 @@ final class ChatSession {
                 isStartingSession = false
                 disarmStartWatchdog()
                 stopWatchingFailedStart(after: error)
+                // A released chat that failed to come back stays released:
+                // kept, transcript and all, to retry when next focused.
+                if reattaching {
+                    isReattaching = false
+                    isReleased = true
+                }
                 await recordACPFailure(error, client: client, context: "Failed to start ACP session")
                 // Stop the client even though start failed — pre-fix
                 // this path leaked the spawned `hermes acp` process
@@ -2267,7 +2521,7 @@ final class ChatSession {
         // replay never drained) are carried: the ladder reloads the same
         // session, so they go out on its client instead of vanishing.
         heldSendsClient = nil
-        holdingForReconnect = true
+        holdingForPendingClient = true
 
         reconnectTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -2296,6 +2550,23 @@ final class ChatSession {
                 SessionAttributionService(context: ctx).resolveProjectPath(known: knownProject, sessionID: sessionId)
             }
 
+            // After a recovery that left the host without a master, one
+            // chat's spawn brings a new one up and the others wait for it
+            // (`SSHMasterRecovery.reconnectTurn`): N chats handshaking at
+            // once each authenticate on their own (gh#138). A local host,
+            // or no recent recovery: `.free`, no wait.
+            let masterKey = ControlMasterKey.of(ctx)
+            let recovery = self.masterRecovery
+            var ledWave: UUID?
+            if case .leader(let waveId) = await recovery.reconnectTurn(for: masterKey) { ledWave = waveId }
+            // However the ladder ends, a leader never strands its followers
+            // (they also give up waiting on their own after a few seconds).
+            @MainActor func endLead() {
+                if let waveId = ledWave { recovery.leaderStarted(for: masterKey, waveId: waveId) }
+                ledWave = nil
+            }
+            defer { endLead() }
+
             for attempt in 1...Self.maxReconnectAttempts {
                 guard !Task.isCancelled else { return }
 
@@ -2314,7 +2585,14 @@ final class ChatSession {
 
                 let client = makeACPClient(projectPath: projectPath)
                 do {
-                    try await client.start()
+                    do {
+                        try await client.start()
+                    } catch {
+                        // Spawned or not, the followers' wait is over.
+                        endLead()
+                        throw error
+                    }
+                    endLead()
 
                     let cwd = await context.acpSessionCwd(projectPath: projectPath)
                     // session/load ONLY (t-217da62b). NEVER session/resume:
@@ -2375,13 +2653,19 @@ final class ChatSession {
                     // A reconnect is a fresh ACP session, so the
                     // session-scoped edit-approval mode is back at the
                     // default — re-assert the project's opted-in posture.
+                    var autoAcceptApplied = false
                     if let projectPath {
-                        await applyProjectAutoAcceptEdits(
+                        autoAcceptApplied = await applyProjectAutoAcceptEdits(
                             client: client,
                             sessionId: resolvedSessionId,
                             projectPath: projectPath
                         )
                     }
+                    // …and then the mode the user picked in this chat, which
+                    // the reload lost on legacy Hermes (P1: new behaviour —
+                    // before, a reconnect came back at the default).
+                    await reassertPickedApprovalMode(
+                        client: client, sessionId: resolvedSessionId, autoAcceptApplied: autoAcceptApplied)
 
                     // Same check after the reconcile awaits: a teardown in
                     // that window already stopped this client (it was
@@ -2434,14 +2718,26 @@ final class ChatSession {
     /// cancelled." unless the caller knows better (a delete). Switching
     /// chats no longer comes through here for a working chat — it keeps
     /// running in the background (parallel chats P1).
-    func stop(reason: String = "Turn cancelled.") {
+    ///
+    /// Returns the task that cancels a turn in flight (bounded) and stops
+    /// the client, for a caller that must wait for the process to go.
+    @discardableResult
+    func stop(reason: String = "Turn cancelled.") -> Task<Void, Never>? {
         // Every deliberate ACP teardown (session switch, delete, terminal
         // mode, the start watchdog) removes the voice session's turn host
         // — the window ends it only when this is the chat it shows.
         // A connection that DIES doesn't come through here:
         // `handleConnectionDied` ends the voice session itself.
         host?.chatWillTearDown(self)
+        return tearDownConnection(cancelledHint: reason)
+    }
+
+    /// `stop` without the voice teardown: the connection, its watchdog,
+    /// reconnect ladder and turns. `cancelledHint` is the composer hint for
+    /// a turn cancelled here; nil paints none.
+    private func tearDownConnection(cancelledHint: String?) -> Task<Void, Never>? {
         disarmStartWatchdog()
+        isReattaching = false
         reconnectTask?.cancel()
         reconnectTask = nil
         dropReconnectHeldSends(announce: false)
@@ -2466,8 +2762,9 @@ final class ChatSession {
         acpEventTask = nil
         healthMonitorTask?.cancel()
         healthMonitorTask = nil
+        var teardown: Task<Void, Never>?
         if let client = acpClient {
-            Task {
+            teardown = Task {
                 // S4 (t-5451bd1b): killing a mid-turn process without
                 // `session/cancel` left Hermes with an unfinalized turn
                 // — the same prompt re-sent later then got merged into
@@ -2505,8 +2802,10 @@ final class ChatSession {
                 // Composer-level feedback that survives the transcript
                 // swap when the chat was restarted mid-turn (reset()
                 // already wiped the old transcript by the time we run).
-                richChatViewModel.transientHint = reason
-                scheduleHintClear()
+                if let cancelledHint {
+                    richChatViewModel.transientHint = cancelledHint
+                    scheduleHintClear()
+                }
             }
         }
         acpClient = nil
@@ -2514,6 +2813,99 @@ final class ChatSession {
         isHandlingDisconnect = false
         isStartingSession = false
         startCarriesUserInput = false
+        return teardown
+    }
+
+    // MARK: - Release / re-attach (live-chat budget)
+
+    /// Give this chat's process back to the budget (`LiveChatBudget`): stop
+    /// the client — no voice teardown, no "Turn cancelled." hint — and keep
+    /// the transcript, session id, project and model badge. The chat stays
+    /// in its window (`keepsRunningWhenLeft`) but no longer counts; focusing
+    /// it, or typing into it, re-attaches (`reattach`).
+    ///
+    /// `stoppingTurn`: the user chose Stop on the budget dialog for this
+    /// working chat — its turn ends as Stop ends one (bounded
+    /// `session/cancel`, "You stopped this turn", open approvals answered
+    /// `cancelled`), and a Live Voice session on it ends. Otherwise the
+    /// budget only releases idle chats, never a shown one. A
+    /// re-attach in progress is abandoned and the chat is released again.
+    ///
+    /// Returns the teardown task (cancel, then client stop).
+    @discardableResult
+    func releaseProcess(stoppingTurn: Bool = false) -> Task<Void, Never>? {
+        guard holdsProcess || isReattaching else { return nil }
+        // Nothing to come back to — a new chat stopped before its session
+        // existed: a released chat could never re-attach (a dead row that
+        // swallows sends). Supersede it like any start left with nothing,
+        // and let the window's leave rule drop it.
+        guard richChatViewModel.sessionId != nil || targetSessionId != nil else {
+            let teardown = supersede()
+            host?.chatSettledWithoutConnection(self)
+            return teardown
+        }
+        // A start in flight (a re-attach) abandons at its next check.
+        beginStartIntent()
+        if stoppingTurn {
+            // The user stopped this chat's work: a Live Voice session on
+            // it (only possible when it is shown) has nothing to talk to.
+            host?.chatWillTearDown(self)
+        }
+        if stoppingTurn && hasTurnInFlight {
+            richChatViewModel.noteTurnStopRequestedByUser()
+        } else {
+            richChatViewModel.clearPendingPermissions()
+        }
+        // Nothing held can go out now; say so where it was typed.
+        let held = heldSends.count
+        heldSends = []
+        heldSendsClient = nil
+        holdingForPendingClient = false
+        if held > 0 {
+            richChatViewModel.transientHint = String(
+                localized: "^[\(held) message](inflect: true) couldn't be sent — the connection didn't come up."
+            )
+            scheduleHintClear()
+        }
+        let teardown = tearDownConnection(cancelledHint: nil)
+        isReleased = true
+        acpStatus = ""
+        logger.info("released this chat's hermes acp process to the live-chat budget")
+        host?.chatDidReleaseProcess(self)
+        return teardown
+    }
+
+    /// Bring a released chat back on its own session through the full start
+    /// path (`startACPSession`: model preset, project chip, environment
+    /// hint), not autostart. The transcript stays and the load's replay is
+    /// kept out of it; `thenSend` (typed into the released chat) and every
+    /// send typed until the session is ready are held, then sent once. The
+    /// budget applies — a re-attach takes a slot like any open.
+    ///
+    /// A chat released while its resume was still loading has no transcript
+    /// session yet: it re-attaches the session the resume was for
+    /// (`targetSessionId`), in the project that resume resolved.
+    func reattach(thenSend send: (text: String, images: [ChatImageAttachment])? = nil) {
+        guard isReleased else { return }
+        guard let sessionId = richChatViewModel.sessionId ?? targetSessionId else {
+            // Unreachable by construction (`releaseProcess` drops such a
+            // chat), but a send must never vanish without a word.
+            isReleased = false
+            if send != nil {
+                showHint(String(localized: "Not sent — this chat has no session to reconnect to. Start a new chat and send it there."))
+            }
+            host?.chatSettledWithoutConnection(self)
+            return
+        }
+        startACPSession(
+            resume: sessionId, projectPath: currentProjectPath ?? lastStartProjectPath,
+            reattaching: true, heldSend: send)
+    }
+
+    /// A send the budget dialog's Wait dropped: it was never echoed, so say
+    /// it wasn't sent.
+    private func noteSendNotRun() {
+        showHint(String(localized: "Not sent — every live chat on \(context.displayName) is in use. Stop one, or send again later."))
     }
 
     /// Best-effort `session/cancel`, then wait for the cancelled turn to
@@ -2663,6 +3055,8 @@ final class ChatSession {
         richChatViewModel.reset()
         targetSessionId = nil
         hasSentPrompt = false
+        userPickedApprovalMode = nil
+        isReleased = false
         setInspectorFocus(.none)
         // Full teardown: bounded best-effort `session/cancel` if a turn
         // is in flight (lets Hermes finalize the orphaned turn before
