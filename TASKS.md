@@ -109,9 +109,14 @@
 - [ ] De-flake Kanban chip count Live UI test (id: t-ccd07453) (added: 2026-10-26)
 - [ ] Upload ScarfGo 3.7.0 (Mac 3.7.0 shipped) (id: t-126e3304) (added: 2026-10-05) (priority: high)
 - [ ] Investigate slow chat resume (gh#150) (id: t-9eed811c) (added: 2026-10-27)
+- [ ] Parallel chats P2: handoffs, voice, close confirm, banners, analytics (id: t-9aec8776) (added: 2026-10-29)
+- [ ] Parallel chats P3: live UI tests in the scarf-ui VM (v0.22.5 + v0.21.5) (id: t-c254a28b) (added: 2026-10-29)
+- [ ] Fix 3 failing iOS ChatControllerP7bTests (reconnect / scene-phase) (id: t-89569440) (added: 2026-10-29)
 
 ## Doing
 
+- [ ] Parallel chats P1: live registry, background chats, budget, approvals and notifications (id: t-f759fabb) (added: 2026-10-29)
+- [ ] Run several chats at once (switching chats cancels the running reply) (id: t-0583409d) (added: 2026-10-29) (priority: high)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
@@ -120,6 +125,11 @@
 
 ## Done
 
+- [x] P1 step 3: row state, per-chat drafts, background approvals, notifications (id: t-f874d2cc) (added: 2026-10-29)
+- [x] P1 step 2: live-chat budget, re-attach, approval mode, SSH single-flight recovery (id: t-8d3fafa5) (added: 2026-10-29)
+- [x] P1 step 1: chat registry and focus core (id: t-67400d44) (added: 2026-10-29)
+- [x] iOS: confirm before switching away from a chat that is still replying (id: t-fa06460f) (added: 2026-10-29)
+- [x] Parallel chats P0: extract ChatSession from ChatViewModel (no behaviour change) (id: t-2e32c82a) (added: 2026-10-29)
 - [x] Post gh#147 retest note when the next release ships (id: t-9f3fefc6) (added: 2026-10-26)
 - [x] Pass /retry and /undo through on gateway-backed ACP (id: t-b2ba0fa8) (added: 2026-10-26) (priority: high)
 - [x] Pin SwiftTerm so fresh clones build (id: t-c6412713) (added: 2026-10-26) (priority: high)
