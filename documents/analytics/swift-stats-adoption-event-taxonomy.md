@@ -112,6 +112,7 @@ There is **no per-event consent routing** in the package — the groups gate lay
 - chat_session_started {mode: new|resume|continue_last, origin: chat|error_retry|project|bots}
   - `origin: bots` — a bot's canonical Bot Chat opened from the Bots section; this is the bot chat-engagement signal (see "Bots" below).
   - `origin: error_retry` — the chat error banner's Reconnect button (`ChatView.swift`), which mechanically runs the same resume as the session list. Split out so failure recovery doesn't inflate ordinary resume counts.
+- parallel_chats_used {trigger: concurrent|budget_blocked, live_chats_bucket: 2|3|4_plus, transport: local|ssh, budget_choice: none|stopped|waited} — once per presence epoch, trigger and bucket (`ChatViewModel.recordParallelChatsUsed`). `concurrent`: a window's count of chats holding a process first reaches the bucket; `budget_choice` is always `none`. `budget_blocked`: the live-chat budget dialog resolved, Esc counting as `waited`; the budget is per host, so a window holding fewer than two chats reports bucket `2`.
 - session_resume_fallback {kind: new_session_fallback|non_acp_source|history_fallback|sparse_transcript|slash_command_fallback} — ScarfCore string seam only (no `UsageEvent` case)
 - message_sent {has_attachment, input_mode: typed|voice|quick_command} — never content/length
 - agent_turn_completed {duration_bucket, tool_call_count_bucket}
