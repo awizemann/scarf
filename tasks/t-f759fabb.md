@@ -15,5 +15,5 @@ Parent t-0583409d; design §4, §6, §7. Ships as one unit: focus path, keep wor
 
 ## Artifacts
 
-
+["commit 34d572ef (step 1)", "commit 52a3552e (step 2)", "commit 47efbd13 (step 3)", "commit 01db68bc (prompt-order race fix)", "VM UI gate PASS: v0.22.5 Full+Live, v2026.9.24 Full+Live", "Pending: host Mac full unit suite x2 + mutation check of heldSendsReachHermesInSendOrder (screen was locked)"]
 
