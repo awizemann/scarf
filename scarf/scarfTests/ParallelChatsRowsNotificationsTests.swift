@@ -41,6 +41,7 @@ import UserNotifications
         private var heldPrompts: [Int] = []
         private(set) var closed = false
         private(set) var sentMethods: [String] = []
+        private(set) var promptTexts: [String] = []
         var diagnosticID: String? { "controlled-channel" }
 
         init(sessionId: String) {
@@ -62,6 +63,10 @@ import UserNotifications
                   let method = obj["method"] as? String
             else { return }
             sentMethods.append(method)
+            if method == "session/prompt",
+               let prompt = (obj["params"] as? [String: Any])?["prompt"] as? [[String: Any]] {
+                promptTexts.append(prompt.compactMap { $0["text"] as? String }.joined())
+            }
             guard let id = obj["id"] as? Int else { return }
             switch method {
             case "session/new", "session/load":
@@ -85,6 +90,17 @@ import UserNotifications
             for id in heldPrompts {
                 reply(["jsonrpc": "2.0", "id": id,
                        "error": ["code": -32603, "message": "scripted prompt failure"]])
+            }
+            heldPrompts = []
+        }
+
+        /// Fail held prompts as gateway-backed ACP does: `-32603` with the
+        /// real text in `error.data.details`.
+        func failPrompts(details: String) {
+            for id in heldPrompts {
+                reply(["jsonrpc": "2.0", "id": id,
+                       "error": ["code": -32603, "message": "Internal error",
+                                 "data": ["details": details]] as [String: Any]])
             }
             heldPrompts = []
         }

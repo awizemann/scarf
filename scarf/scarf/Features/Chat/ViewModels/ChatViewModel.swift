@@ -244,6 +244,19 @@ final class ChatViewModel {
     /// Kept apart from the chats' ACP state: a terminal is not a chat.
     private(set) var terminalProcessRunning = false
 
+    /// The chat this window's Live Voice session runs on, bound when it
+    /// starts and cleared on any chat change. Every `VoiceTurnHost` member
+    /// goes to it, so nothing spoken can land in a chat focused later.
+    @ObservationIgnored
+    weak var voiceChat: ChatSession?
+
+    /// The owner's own work, for a `.single` window whose running turn isn't
+    /// an ACP prompt: Bot Chat creating its conversation with the first
+    /// message, or a turn over the CLI transport. Counts as the focused
+    /// chat working for the close and quit confirms.
+    @ObservationIgnored
+    var ownerIsWorking: (() -> Bool)?
+
     /// This window's Live Voice session (GPT-Live). This VM is its
     /// `VoiceTurnHost`: spoken requests become ordinary ACP turns in the
     /// attached chat. Ended on every session change and ACP teardown.
@@ -787,23 +800,27 @@ final class ChatViewModel {
         // method — Kanban opens the chat window, which lands here as
         // `project` or `chat`, and cron sessions are created by Hermes
         // itself, never by this app.
-        Analytics.record(.chatSessionStarted(
-            mode: .new,
-            origin: projectPath == nil ? .chat : .project
-        ))
+        // Recorded once the open is admitted: one the budget blocks hasn't
+        // started anything.
         beginRoute()
-        openNewSession(projectPath: projectPath, initialPrompt: initialPrompt)
+        openNewSession(
+            projectPath: projectPath,
+            initialPrompt: initialPrompt,
+            startEvent: .chatSessionStarted(mode: .new, origin: projectPath == nil ? .chat : .project)
+        )
     }
 
     /// The routing half of `startNewSession`, without its analytics event
     /// (continue-last records its own).
-    private func openNewSession(projectPath: String?, initialPrompt: String?) {
+    private func openNewSession(projectPath: String?, initialPrompt: String?, startEvent: UsageEvent? = nil) {
         guard admitOpen(inPlace: false, replay: { [weak self] in
-            self?.openNewSession(projectPath: projectPath, initialPrompt: initialPrompt)
-        }) else { return }
+            self?.openNewSession(projectPath: projectPath, initialPrompt: initialPrompt, startEvent: startEvent)
+        }, onWait: kickoffParker(projectPath: projectPath, initialPrompt: initialPrompt)) else { return }
+        if let startEvent { Analytics.record(startEvent) }
         // Rich chat: the focused chat when it is blank (or only starting),
-        // else a new one — a working or live chat keeps running.
-        let chat = displayMode == .richChat ? chatForNewWork() : focusedChat
+        // else a new one — a working or live chat keeps running. Terminal:
+        // the focused chat, unless it is working.
+        let chat = displayMode == .richChat ? chatForNewWork() : chatForTerminal()
         chat.beginSessionSwitch()
         // A voice session belongs to the chat it was started in.
         endVoiceForChatChange()
@@ -857,24 +874,45 @@ final class ChatViewModel {
             focus(live)
             return
         }
-        Analytics.record(.chatSessionStarted(mode: .resume, origin: origin))
         // Explicit user action: clear any open SSH circuit breaker for
         // this host (gh#138) so the resume gets a real attempt instead of
         // an instant fail-fast from background-poller history.
         if case .ssh(let cfg) = context.kind {
             SSHConnectionGate.shared.reset(SSHConnectionGate.key(host: cfg.host, port: cfg.port))
         }
-        openResume(sessionId, inPlace: isRetry)
+        openResume(
+            sessionId,
+            inPlace: isRetry,
+            startEvent: .chatSessionStarted(mode: .resume, origin: origin)
+        )
     }
 
     /// The opening half of `resumeSession`: no lookup, no analytics, no
     /// gate reset (continue-last never reset the gate). `inPlace` restarts
     /// the focused chat whatever its state (Reconnect).
-    private func openResume(_ sessionId: String, inPlace: Bool = false) {
+    private func openResume(_ sessionId: String, inPlace: Bool = false, startEvent: UsageEvent? = nil) {
+        // Terminal mode on a conversation a chat is still working in: a
+        // second agent on it would be wrong and stopping that chat is not
+        // this click's to do, so show the chat instead.
+        if !inPlace, displayMode == .terminal, let working = workingChat(covering: sessionId) {
+            displayMode = .richChat
+            focus(working)
+            working.richChatViewModel.transientHint = String(
+                localized: "This chat is still working, so it stayed here instead of opening in the terminal. Stop it first to open it there."
+            )
+            working.scheduleHintClear()
+            return
+        }
         guard admitOpen(inPlace: inPlace, replay: { [weak self] in
-            self?.openResume(sessionId, inPlace: inPlace)
+            self?.openResume(sessionId, inPlace: inPlace, startEvent: startEvent)
         }) else { return }
-        let chat = displayMode == .richChat && !inPlace ? chatForNewWork() : focusedChat
+        if let startEvent { Analytics.record(startEvent) }
+        let chat: ChatSession
+        if inPlace {
+            chat = focusedChat
+        } else {
+            chat = displayMode == .richChat ? chatForNewWork() : chatForTerminal()
+        }
         chat.beginSessionSwitch()
         // A voice session belongs to the chat it was started in.
         endVoiceForChatChange()
@@ -898,8 +936,9 @@ final class ChatViewModel {
         // Terminal mode with no background chat that could be on the
         // latest session, and Bot Chat's single chat: the pre-P1 path.
         // (A released one counts: refocused later, it would re-attach.)
+        // A working focused chat too: `--continue` could land on its session.
         let hasBackgroundLiveChat = chats.contains { $0 !== focusedChat && ($0.isLive || $0.isReleased) }
-        guard mode == .window, !terminal || hasBackgroundLiveChat else {
+        guard mode == .window, !terminal || hasBackgroundLiveChat || focusedChat.isWorking else {
             continueLastInFocusedChat()
             return
         }
@@ -960,12 +999,13 @@ final class ChatViewModel {
     /// The pre-P1 continue-last: terminal mode's `hermes chat --continue`,
     /// or (Bot Chat's single chat) the lookup inside the reset chat.
     private func continueLastInFocusedChat() {
-        let intent = focusedChat.beginSessionSwitch()
+        let chat = displayMode == .richChat ? focusedChat : chatForTerminal()
+        let intent = chat.beginSessionSwitch()
         // A voice session belongs to the chat it was started in.
         endVoiceForChatChange()
-        focusedChat.resetForSessionSwitch()
+        chat.resetForSessionSwitch()
         if displayMode == .richChat {
-            focusedChat.continueLastACPSession(intent: intent)
+            chat.continueLastACPSession(intent: intent)
         } else {
             launchTerminal(arguments: ["chat", "--continue"])
         }
@@ -1012,11 +1052,32 @@ final class ChatViewModel {
         return { chat in chat.covers(sessionId) || lineage.contains(where: chat.covers) }
     }
 
+    /// A chat in this window working in `sessionId`'s conversation, the
+    /// focused one first. Never for Bot Chat's single chat.
+    private func workingChat(covering sessionId: String) -> ChatSession? {
+        guard mode == .window else { return nil }
+        let isOn = conversationMatcher(for: sessionId)
+        if focusedChat.isWorking, isOn(focusedChat) { return focusedChat }
+        return chats.first { $0.isWorking && isOn($0) }
+    }
+
+    /// The chat a terminal launch runs beside. `launchTerminal` stops the
+    /// focused chat, and the open resets it first, so a working one is moved
+    /// to the background (a blank chat takes its place) and keeps running.
+    /// Nothing working: the focused chat, stopped as it always was.
+    private func chatForTerminal() -> ChatSession {
+        guard mode == .window, focusedChat.isWorking else { return focusedChat }
+        let chat = makeChat()
+        focus(chat)
+        return chat
+    }
+
     /// Terminal mode is about to run `hermes chat` on `sessionId`: a
     /// background chat with that session live would be a second agent
     /// writing the same conversation. Stop it (the bounded `session/cancel`
     /// of a turn in flight included) and drop it. Other background chats
-    /// are left alone; the focused chat is `launchTerminal`'s to stop.
+    /// are left alone; the focused chat is `launchTerminal`'s to stop. A
+    /// working chat never gets here: `openResume` shows it instead.
     private func stopBackgroundChats(covering sessionId: String) {
         let isOn = conversationMatcher(for: sessionId)
         // A released chat too: focusing it later would re-attach a second
@@ -1039,6 +1100,7 @@ final class ChatViewModel {
             focusedChat.isShownInWindow = false
             focusedChat = chat
             chat.isShownInWindow = true
+            chat.startDeferredHintClear()
             chat.lastFocusedAt = Date()
             chat.lastUsedAt = Date()
             reapBackgroundChats()
@@ -1184,7 +1246,7 @@ final class ChatViewModel {
     /// the user where they were. `inPlace`: the focused chat is restarted
     /// (its own slot is reused) — as `chatForNewWork` decides it; otherwise
     /// the focused chat is about to be left and, idle, may be released.
-    private func admitOpen(inPlace: Bool, replay: @escaping () -> Void) -> Bool {
+    private func admitOpen(inPlace: Bool, replay: @escaping () -> Void, onWait: (() -> Void)? = nil) -> Bool {
         guard mode == .window, displayMode == .richChat else { return true }
         let reusing = inPlace || !focusedChat.keepsRunningWhenLeft ? focusedChat : nil
         let route = routeGeneration
@@ -1198,9 +1260,12 @@ final class ChatViewModel {
         case .full(let working):
             presentBudgetBlock(working: working, replay: { [weak self] in
                 // The user has moved on since: not what they want now.
-                guard let self, self.routeGeneration == route else { return }
+                guard let self, self.routeGeneration == route else {
+                    onWait?()
+                    return
+                }
                 replay()
-            }, onWait: nil)
+            }, onWait: onWait)
             return false
         }
     }
@@ -1222,6 +1287,60 @@ final class ChatViewModel {
     /// The pending open the budget dialog asks about, or nil.
     private(set) var budgetBlocked: BudgetBlock?
 
+    /// A kickoff prompt whose open the budget dialog's Wait turned away (the
+    /// New Project wizard's, Upgrade Project's). `ChatView` has already
+    /// cleared its handoff and nobody retypes these, so it stays here, with
+    /// its project, until the user opens or discards it from the banner. A
+    /// start that fails carrying one parks it too. It lives with the window:
+    /// closing, quitting or switching profile discards it, after a confirm
+    /// that names it (`ChatClosePolicy`).
+    struct ParkedKickoff: Identifiable, Equatable {
+        let id = UUID()
+        let projectPath: String?
+        let prompt: String
+    }
+
+    /// Kickoffs waiting for a free chat, oldest first.
+    private(set) var parkedKickoffs: [ParkedKickoff] = []
+
+    /// What Wait does to an open carrying `initialPrompt`; nil when it
+    /// carries none, and is simply not opened.
+    private func kickoffParker(projectPath: String?, initialPrompt: String?) -> (() -> Void)? {
+        guard let initialPrompt,
+              !initialPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return { [weak self] in self?.parkKickoff(projectPath: projectPath, initialPrompt: initialPrompt) }
+    }
+
+    func parkKickoff(projectPath: String?, initialPrompt: String) {
+        parkedKickoffs.append(ParkedKickoff(projectPath: projectPath, prompt: initialPrompt))
+    }
+
+    /// The banner's Open Now. Blocked again, the dialog asks again, and a
+    /// Wait parks it again.
+    func openParkedKickoff(_ kickoff: ParkedKickoff) {
+        parkedKickoffs.removeAll { $0.id == kickoff.id }
+        displayMode = .richChat
+        startNewSession(projectPath: kickoff.projectPath, initialPrompt: kickoff.prompt)
+    }
+
+    func discardParkedKickoff(_ kickoff: ParkedKickoff) {
+        parkedKickoffs.removeAll { $0.id == kickoff.id }
+    }
+
+    /// What the close, quit and profile-switch confirms call the kickoffs
+    /// they would discard.
+    var parkedKickoffNames: [String] {
+        parkedKickoffs.map { projectName(forKickoff: $0) ?? String(localized: "New chat") }
+    }
+
+    /// The name of the project a parked kickoff belongs to, when known.
+    func projectName(forKickoff kickoff: ParkedKickoff) -> String? {
+        guard let path = kickoff.projectPath else { return nil }
+        return allProjects.first { $0.path == path }?.name
+            ?? URL(fileURLWithPath: path).lastPathComponent
+    }
+
     /// Stop on the budget dialog: end that chat's work and give its process
     /// back (`ChatSession.releaseProcess(stoppingTurn:)` — bounded
     /// `session/cancel`, then the client stops), then run the open that
@@ -1235,6 +1354,7 @@ final class ChatViewModel {
     /// alternative is counting dying processes.
     func stopChatForBudget(_ block: BudgetBlock, chatID: UUID) {
         if budgetBlocked?.id == block.id { budgetBlocked = nil }
+        recordParallelChatsUsed(.budgetBlocked, choice: .stopped)
         guard let chat = block.working.first(where: { $0.id == chatID })?.chat else {
             // Gone meanwhile (its window closed): its slot is free, or not —
             // the replayed open asks the budget again.
@@ -1263,10 +1383,13 @@ final class ChatViewModel {
         }
     }
 
-    /// Wait on the budget dialog: the open is dropped.
+    /// Wait on the budget dialog: nothing opens. A kickoff prompt is parked
+    /// (`parkedKickoffs`), a typed send goes back to the composer; a plain
+    /// open is dropped, and clicking the row again is all it takes.
     func waitForBudget() {
         guard let block = budgetBlocked else { return }
         budgetBlocked = nil
+        recordParallelChatsUsed(.budgetBlocked, choice: .waited)
         block.onWait?()
     }
 
@@ -1310,6 +1433,58 @@ final class ChatViewModel {
         ttsEnabled = false
         isRecording = false
         voiceLive.endImmediately()
+        voiceChat = nil
+    }
+
+    // MARK: - Analytics (parallel chats)
+
+    /// `parallel_chats_used`, once per presence epoch, trigger and bucket.
+    /// The budget's slots are per host and can be full with few of them in
+    /// this window, so `budget_blocked` reports at least the lowest bucket.
+    private func recordParallelChatsUsed(_ trigger: UsageEvent.ParallelChatsTrigger, choice: UsageEvent.ParallelChatsBudgetChoice) {
+        let holding = chats.filter(\.holdsProcess).count
+        let bucket = UsageEvent.LiveChatsBucket(count: holding)
+        Analytics.recordOnce(
+            .parallelChatsUsed(
+                trigger: trigger,
+                liveChatsBucket: bucket,
+                transport: context.isRemote ? .ssh : .local,
+                budgetChoice: choice
+            ),
+            key: "parallel_chats_used:\(Analytics.presenceEpoch):\(trigger.rawValue):\(bucket.token)"
+        )
+    }
+
+    // MARK: - Handoffs
+
+    /// Take what another surface asked Chat to open (`AppCoordinator`): a
+    /// new project chat (with a kickoff prompt from the wizard or Upgrade
+    /// Project), a session to resume, or a plain new chat. Each only opens
+    /// or focuses a chat, so a working one keeps running. Exactly one opens
+    /// per call: project chat outranks resume outranks new when several are
+    /// somehow set, and the others are dropped with it, so none fires on a
+    /// later visit.
+    func consumePendingOpen(from coordinator: AppCoordinator) {
+        let projectPath = coordinator.pendingProjectChat
+        let prompt = coordinator.pendingInitialPrompt
+        let sessionId = coordinator.selectedSessionId
+        let newChat = coordinator.pendingNewChat
+        coordinator.pendingNewChat = false
+        if let projectPath {
+            coordinator.pendingProjectChat = nil
+            coordinator.pendingInitialPrompt = nil
+            coordinator.selectedSessionId = nil
+            if let prompt {
+                startNewSessionAndSend(projectPath: projectPath, text: prompt)
+            } else {
+                startNewSession(projectPath: projectPath)
+            }
+        } else if let sessionId {
+            coordinator.selectedSessionId = nil
+            resumeSession(sessionId)
+        } else if newChat {
+            startNewSession()
+        }
     }
 
     // MARK: - Send Message
@@ -2188,6 +2363,8 @@ final class ChatViewModel {
     var terminalLaunchOverride: (([String]) -> Void)?
 
     private func launchTerminal(arguments: [String]) {
+        // Never a working chat in a window: every open moved it off first
+        // (`chatForTerminal`).
         stopACP()
         if let terminalLaunchOverride {
             terminalLaunchOverride(arguments)
@@ -2299,6 +2476,14 @@ extension ChatViewModel {
     var hasActiveProcess: Bool {
         displayMode == .terminal ? terminalProcessRunning : focusedChat.hasActiveProcess
     }
+    /// A `hermes` process is attached to anything in this window, or is
+    /// coming: what it shows (`hasActiveProcess`) or any chat that is live,
+    /// starting or in the reconnect ladder (`ChatSession.isLive`). The config
+    /// banners wait for this, so they don't flash up while a chat reconnects.
+    /// With one chat too: they stay hidden during its start and ladder.
+    var hasActiveProcessInWindow: Bool {
+        hasActiveProcess || chats.contains(where: \.isLive)
+    }
     var isACPConnected: Bool { focusedChat.isACPConnected }
     var acpStatus: String {
         get { focusedChat.acpStatus }
@@ -2365,26 +2550,36 @@ extension ChatViewModel {
         focusedChat.respondToPermission(requestId: requestId, optionId: optionId)
     }
     func noteLoadedHead(_ head: String?) { focusedChat.noteLoadedHead(head) }
+    /// The banner's offer on a lost gateway turn (`ChatSession.discardLostTurn`).
+    func discardLostTurn() { focusedChat.discardLostTurn() }
 
     /// Tear down the focused chat's ACP connection (`ChatSession.stop`):
     /// the bounded `session/cancel` of a turn in flight, `client.stop()`,
     /// and the "Turn cancelled." hint. Background chats are untouched
     /// (terminal mode, Bot Chat's teardown).
-    func stopACP() {
+    @discardableResult
+    func stopACP() -> Task<Void, Never>? {
         focusedChat.stop()
     }
 
     /// Tear down every chat this window holds (window close, server
     /// switch): the focused one as `stopACP` does, the background ones
     /// superseded and dropped — nothing can reach them afterwards.
-    func stopAllChats() {
+    ///
+    /// Returns each chat's teardown (the bounded `session/cancel` of a turn
+    /// in flight, then `client.stop()`), for a caller that must let them
+    /// finish — quitting Scarf.
+    @discardableResult
+    func stopAllChats() -> [Task<Void, Never>] {
+        var teardowns: [Task<Void, Never>] = []
         for chat in chats where chat !== focusedChat {
-            chat.supersede()
+            if let task = chat.supersede() { teardowns.append(task) }
             chat.wasDropped = true
         }
-        focusedChat.stop()
+        if let task = focusedChat.stop() { teardowns.append(task) }
         chats = [focusedChat]
         if preflightChat !== focusedChat { preflightChat = nil }
+        return teardowns
     }
 }
 
@@ -2450,9 +2645,33 @@ extension ChatViewModel: ChatSessionHost {
     /// connection for good has nothing left to run and no row it could be
     /// reopened from that isn't a fresh resume: the leave rules drop it
     /// (its process is already stopped). The focused chat keeps its error.
+    /// One with a session stays, showing its error, and reconnects when
+    /// focused (`ChatSession.keepAfterFailedConnection`); a blank one has no
+    /// row to come back to and is dropped.
+    ///
+    /// What the start carried isn't lost with it. A kickoff prompt is parked,
+    /// from the focused chat too: it has no echo, and nothing else offers it
+    /// again. A typed message stays as an echo with a hint in a chat that is
+    /// kept, or goes to the composer of the chat the user is in.
     func chatSettledWithoutConnection(_ chat: ChatSession) {
+        let unsent = chat.takeUnsentStartInput()
+        if case let .kickoff(projectPath, prompt) = unsent {
+            parkKickoff(projectPath: projectPath, initialPrompt: prompt)
+        }
         guard chat !== focusedChat else { return }
+        var typed: (text: String, images: [ChatImageAttachment])?
+        if case let .typed(text, images) = unsent { typed = (text, images) }
+        if chat.keepAfterFailedConnection(lostTypedMessage: typed != nil) {
+            notifyConnectionFailed(chat)
+        } else if let typed {
+            focusedChat.takeUnsentFromFailedChat(text: typed.text, images: typed.images)
+        }
         reapBackgroundChats()
+    }
+
+    func chatDidTakeProcess(_ chat: ChatSession) {
+        guard mode == .window, chats.filter(\.holdsProcess).count >= 2 else { return }
+        recordParallelChatsUsed(.concurrent, choice: .none)
     }
 
     func admitSpawn(for chat: ChatSession, replay: @escaping () -> Void, onWait: (() -> Void)?) -> Bool {
@@ -2576,6 +2795,24 @@ extension ChatViewModel {
             chat.postedFinishedNotificationId = nil
             notifier.remove(identifiers: [posted])
         }
+        if let posted = chat.postedFailureNotificationId {
+            chat.postedFailureNotificationId = nil
+            notifier.remove(identifiers: [posted])
+        }
+    }
+
+    /// A background chat lost its connection for good. Goes under the same
+    /// toggle as the other chat notifications; focusing it withdraws this.
+    private func notifyConnectionFailed(_ chat: ChatSession) {
+        let identifier = notificationIdentifier(for: chat, suffix: "failed")
+        chat.postedFailureNotificationId = identifier
+        notifier.post(ChatNotification(
+            kind: .connectionFailed,
+            identifier: identifier,
+            title: ChatNotificationPolicy.connectionFailedTitle(chatName: chat.displayTitle),
+            body: ChatNotificationPolicy.connectionFailedBody,
+            route: notificationRoute(for: chat)
+        ))
     }
 
     /// `chat` is gone: its approvals can't be answered here any more.
@@ -2591,6 +2828,8 @@ extension ChatViewModel {
         chat.postedPermissionNotificationIds = [:]
         if let posted = chat.postedFinishedNotificationId { identifiers.append(posted) }
         chat.postedFinishedNotificationId = nil
+        if let posted = chat.postedFailureNotificationId { identifiers.append(posted) }
+        chat.postedFailureNotificationId = nil
         if !identifiers.isEmpty { notifier.remove(identifiers: identifiers) }
     }
 
@@ -2638,12 +2877,20 @@ extension ChatViewModel: VoiceTurnHost {
         case noSession
     }
 
-    /// Whether this chat can take voice turns right now: rich chat, a live
-    /// ACP client, an attached session, and no alternate send route.
-    var canHostVoiceTurns: Bool {
+    /// Whether a Live Voice session can start on the focused chat: rich
+    /// chat, a live ACP client, an attached session, and no alternate send
+    /// route.
+    var canStartVoiceTurns: Bool {
         displayMode == .richChat
             && sendRouter == nil
             && focusedChat.hasLiveACPSession
+    }
+
+    /// Whether the Live Voice session can hand this window a turn right now:
+    /// it must still be on the chat it started in (`voiceChat`), the one
+    /// shown.
+    var canHostVoiceTurns: Bool {
+        voiceChat === focusedChat && canStartVoiceTurns
     }
 
     /// The voice gate for this chat (P7b): Hermes ≥ 0.21.3 AND
@@ -2658,14 +2905,18 @@ extension ChatViewModel: VoiceTurnHost {
     /// readiness verdict names. No-op unless the chat can host voice turns,
     /// the host passes the gate, and no session is running.
     func startVoiceLive(capabilities: HermesCapabilities) {
-        guard canHostVoiceTurns else { return }
+        guard canStartVoiceTurns else { return }
         guard let engineKind = voiceLiveAvailability(capabilities: capabilities).engineKind else { return }
+        // Before the start: the engine reads the seed turns and chat id from
+        // this host as it comes up.
+        voiceChat = focusedChat
         voiceLive.start(context: context, host: self, engineKind: engineKind)
         // A start refused because another window holds the app's one
         // session has no panel to say so on (none was built): the
         // composer's transient hint carries the same sentence the button's
         // tooltip does.
         if voiceLive.consumeStartRefusal() == .blockedByAnotherWindow {
+            voiceChat = nil
             richChatViewModel.transientHint = String(
                 localized: "Live Voice is running in another Scarf window. End it there first."
             )
@@ -2682,6 +2933,7 @@ extension ChatViewModel: VoiceTurnHost {
     /// the outcome.
     func leaveChatVoiceLive() {
         voiceLive.dismiss()
+        voiceChat = nil
     }
 
     /// The chat's root went away: the window closed, or a server/profile
@@ -2697,12 +2949,16 @@ extension ChatViewModel: VoiceTurnHost {
     /// engine and its web view, which `endImmediately` alone leaves
     /// attached. Idempotent: a second call finds no ACP client and does
     /// nothing.
-    func leaveChat() {
+    ///
+    /// Returns the chats' teardowns (`stopAllChats`).
+    @discardableResult
+    func leaveChat() -> [Task<Void, Never>] {
         // The window (or, on a profile switch, its root) is going: nothing
         // it posted can be acted on in it, the shown chat's included.
         for chat in chats { withdrawNotifications(for: chat) }
-        stopAllChats()
+        let teardowns = stopAllChats()
         leaveChatVoiceLive()
+        return teardowns
     }
 
     /// Continue on the Live Voice consent sheet: remember the consent, then
@@ -2715,11 +2971,11 @@ extension ChatViewModel: VoiceTurnHost {
 
     /// A voice turn Scarf started is still running and nothing typed is
     /// mixed into its run (`ChatSession.isVoiceTurnBusy`).
-    var isVoiceTurnBusy: Bool { focusedChat.isVoiceTurnBusy }
+    var isVoiceTurnBusy: Bool { voiceChat?.isVoiceTurnBusy ?? false }
 
     /// Hermes is busy with something that isn't a voice turn
     /// (`ChatSession.isBusyWithNonVoiceTurn`).
-    var isBusyWithNonVoiceTurn: Bool { focusedChat.isBusyWithNonVoiceTurn }
+    var isBusyWithNonVoiceTurn: Bool { voiceChat?.isBusyWithNonVoiceTurn ?? false }
 
     /// What the voice says when a spoken request arrives while Hermes works
     /// on a typed one. Model input, not UI copy (the voice speaks it in the
@@ -2727,28 +2983,28 @@ extension ChatViewModel: VoiceTurnHost {
     static let voiceBusyReply = "Hermes is busy with another request in this chat, so I didn't send that. Ask me again when it's finished."
 
     var activeVoiceToolName: String? {
-        if case .runningTool(let name) = richChatViewModel.liveActivityStatus { return name }
+        if case .runningTool(let name) = voiceChat?.richChatViewModel.liveActivityStatus { return name }
         return nil
     }
 
     /// The ACP session: Hermes keeps a cancelled turn's text per session,
     /// so the engine's "next voice turn goes text-only" debt is keyed by it
     /// and survives into the next voice session (`VoiceTextOnlyTurnLedger`).
-    var voiceChatID: String? { richChatViewModel.sessionId }
+    var voiceChatID: String? { voiceChat?.richChatViewModel.sessionId }
 
     /// Hand a spoken request to the chat as an ordinary ACP turn
     /// (`ChatSession.submitVoiceTurn`), when it can host voice turns.
     func submitVoiceTurn(_ request: VoiceTurnRequest) async throws {
-        guard canHostVoiceTurns else {
+        guard canHostVoiceTurns, let voiceChat else {
             throw VoiceTurnSubmitError.noSession
         }
-        try focusedChat.submitVoiceTurn(request)
+        try voiceChat.submitVoiceTurn(request)
     }
 
     /// Cancel the running voice turn and wait (bounded) for it to return
     /// (`ChatSession.cancelActiveVoiceTurn`).
     func cancelActiveVoiceTurn() async {
-        await focusedChat.cancelActiveVoiceTurn()
+        await voiceChat?.cancelActiveVoiceTurn()
     }
 
     // MARK: - Stop
@@ -2773,13 +3029,13 @@ extension ChatViewModel: VoiceTurnHost {
     }
 
     func voiceTurnReply(for requestID: String) -> VoiceTurnReply? {
-        focusedChat.voiceTurnReply(for: requestID)
+        voiceChat?.voiceTurnReply(for: requestID)
     }
 
     /// The chat's user and assistant text turns, oldest first; tool rows,
     /// system notices and empty tool-call carriers are left out.
     func voiceSeedTurns() -> [VoiceLiveText.SeedTurn] {
-        richChatViewModel.messages.compactMap { message in
+        (voiceChat?.richChatViewModel.messages ?? []).compactMap { message in
             let text = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !text.isEmpty else { return nil }
             if message.isUser { return VoiceLiveText.SeedTurn(role: .user, text: text) }

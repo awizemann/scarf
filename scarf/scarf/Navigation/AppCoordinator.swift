@@ -230,6 +230,11 @@ final class AppCoordinator {
     /// yet have an id for.
     var pendingProjectChat: String?
 
+    /// Set by the Dashboard's New Session: start a new chat
+    /// (`ChatViewModel.consumePendingOpen`). A chat already working keeps
+    /// running.
+    var pendingNewChat = false
+
     /// Optional first message to send automatically once a
     /// `pendingProjectChat` session has connected. Set alongside
     /// `pendingProjectChat` by the "New Project from Scratch" wizard
@@ -372,6 +377,14 @@ final class AppCoordinator {
         let created = make()
         featureViewModels[section] = created
         return created
+    }
+
+    /// The Bots section's view model, if this window has built one. Its open
+    /// conversation's chat belongs to the window as much as the Chat
+    /// section's do, and goes with it. Looks in the cache, so a window that
+    /// never opened Bots builds nothing.
+    var botsViewModelIfBuilt: BotsViewModel? {
+        featureViewModels[.bots] as? BotsViewModel
     }
 }
 

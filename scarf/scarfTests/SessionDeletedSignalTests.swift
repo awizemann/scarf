@@ -151,7 +151,12 @@ import ScarfCore
         let vm = await Self.attachedMidTurnChat(home: home, channel: chA, sessionId: "sess-A")
         let chatA = vm.focusedChat
         let chB = ScriptedACPChannel(behavior: .happy(sessionId: "sess-B"))
-        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in chB } }
+        let calls = Lifecycle.CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            // Past the first, a fresh channel: two clients on one would trap.
+            let channel = calls.next() == 1 ? chB : ScriptedACPChannel(behavior: .happy(sessionId: "sess-extra"))
+            return ACPClient(context: ctx) { _ in channel }
+        }
 
         vm.startNewSession() // A keeps working in the background
         let bReady = await Lifecycle.waitUntil {

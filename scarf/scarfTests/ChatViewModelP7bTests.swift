@@ -205,6 +205,7 @@ import ScarfCore
         vm.startNewSession()
         let ready = await Lifecycle.waitUntil { vm.acpStatus == ChatViewModel.ACPPhase.ready }
         #expect(ready)
+        vm.voiceChat = vm.focusedChat
 
         try await vm.submitVoiceTurn(VoiceTurnRequest(id: "v1", prompt: "book the dentist", context: ""))
         let inFlight = await Lifecycle.waitUntil { await channel.sentMethods.contains("session/prompt") }

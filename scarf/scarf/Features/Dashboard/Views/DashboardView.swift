@@ -73,6 +73,7 @@ struct DashboardView: View {
                 .buttonStyle(ScarfSecondaryButton())
 
                 Button {
+                    coordinator.pendingNewChat = true
                     coordinator.selectedSection = .chat
                 } label: {
                     Label("New Session", systemImage: "plus")

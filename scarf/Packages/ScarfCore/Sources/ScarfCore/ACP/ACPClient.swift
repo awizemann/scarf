@@ -1200,6 +1200,38 @@ public enum ACPClientError: Error, LocalizedError {
         return details?.trimmingCharacters(in: .whitespacesAndNewlines) == reason
     }
 
+    /// Whether `error` carries Hermes's own explanation (`error.data.details`).
+    public static func carriesServerText(_ error: Error) -> Bool {
+        guard case let ACPClientError.rpcError(_, _, details?) = error else { return false }
+        return !details.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// A gateway's refusal of a prompt while a turn lost in a restart blocks
+    /// the session: what to tell the user, and the admission ids it names.
+    public struct LostTurnRefusal: Equatable, Sendable {
+        public let discardIDs: [String]
+        public let hint: String
+    }
+
+    /// `error` as a lost-turn refusal, or nil. Keyed off the server's own
+    /// text, so a host that never sends it takes no new path: details start
+    /// `unknown_execution:` and name each id as `` `/discard <id>` ``
+    /// (`_unknown_recovery`, acp_adapter/gateway_server.py:847-850 @ v0.22.5).
+    /// A refused prompt says "nothing was submitted" (:633): it is gone.
+    public static func lostTurnRefusal(_ error: Error) -> LostTurnRefusal? {
+        guard case let ACPClientError.rpcError(code, _, details?) = error, code == -32603 else { return nil }
+        let text = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.hasPrefix("unknown_execution:") else { return nil }
+        let ids = text.matches(of: #/`\/discard ([^`\s]+)`/#).map { String($0.output.1) }
+        guard !ids.isEmpty else { return nil }
+        let commands = ids.map { "/discard \($0)" }.joined(separator: " and ")
+        var hint = "A turn in this chat was lost when the Hermes gateway restarted, and its outcome is unknown. Hermes won't take messages here until you send \(commands)."
+        if text.contains("nothing was submitted") {
+            hint += " Your last message wasn't sent."
+        }
+        return LostTurnRefusal(discardIDs: ids, hint: hint)
+    }
+
     /// Pick the most signal-rich line from a stderr tail for the
     /// user-facing error summary.
     ///
@@ -1315,6 +1347,13 @@ public enum ACPErrorHint {
         // acp_adapter/gateway_server.py:269-274 @ v0.22.5) and
         // `profile_mismatch` a gateway that answers for another profile
         // (`_client`, :164-166). No in-process adapter tag raises either.
+        // The gateway went away during a turn (`GatewayClientError`,
+        // hermes_cli/gateway_client.py:197-198 @ v0.22.5). Hermes's own text
+        // says not to resend, and Scarf never does; it talks about a printed
+        // session id, which only the CLI shows.
+        if errorMessage.contains("turn outcome is unknown") {
+            return Classification(hint: "The Hermes gateway went away during this turn, so it may or may not have finished. Scarf didn't resend it. Check the conversation before you send it again.")
+        }
         if errorMessage.contains("acp_policy_unavailable") {
             return Classification(hint: "The Hermes gateway that is running is older than this Hermes and can't serve chats. Restart it (`hermes gateway restart`), then try again.")
         }

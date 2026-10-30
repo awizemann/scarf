@@ -122,6 +122,7 @@ import ScarfCore
         vm.sendText("first")
         #expect(await Lifecycle.waitUntil { await ch.hasPendingLoad })
         // The client is installed and live, its replay not handled.
+        vm.voiceChat = vm.focusedChat
         #expect(vm.canHostVoiceTurns)
 
         try await vm.submitVoiceTurn(VoiceTurnRequest(id: "v1", prompt: "spoken", context: ""))

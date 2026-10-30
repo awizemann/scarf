@@ -163,6 +163,10 @@ final class ProfilesViewModel {
                 try await AppRelauncher.relaunch()
                 await MainActor.run {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                        // Confirmed by the Switch & Relaunch dialog; the new
+                        // instance is already starting, so it's too late for
+                        // the quit confirm's Cancel.
+                        AppQuitGuard.shared.skipConfirmOnNextQuit()
                         NSApp.terminate(nil)
                     }
                 }

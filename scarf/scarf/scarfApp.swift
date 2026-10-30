@@ -4,6 +4,8 @@ import os
 
 @main
 struct ScarfApp: App {
+    /// Asks before quitting with chats working (`AppQuitGuard`).
+    @NSApplicationDelegateAdaptor(ScarfAppDelegate.self) private var appDelegate
     /// User-editable list of remote servers. Loaded from
     /// `~/Library/Application Support/scarf/servers.json` at launch.
     @State private var registry = ServerRegistry()
@@ -519,6 +521,18 @@ private struct ContextBoundRoot: View {
             // geometry; new servers fall back to WindowGroup's `.defaultSize`
             // until first resize.
             .windowFrameAutosave("Scarf.Window.\(context.id)")
+            // Closing the window stops its chats (`onDisappear` below): ask
+            // first when any of them is working or a first message is waiting.
+            .confirmsWindowClose { [weak chatViewModel, weak coordinator] in
+                guard let chatViewModel else { return nil }
+                return ChatClosePolicy.prompt(
+                    .closeWindow,
+                    workingChatNames: ChatWindowDirectory
+                        .workingChats(chat: chatViewModel, coordinator: coordinator)
+                        .map(\.displayTitle),
+                    parkedKickoffs: chatViewModel.parkedKickoffNames
+                )
+            }
             .onAppear {
                 fileWatcher.startWatching()
                 // A chat notification click can land in this window (and a
@@ -546,8 +560,10 @@ private struct ContextBoundRoot: View {
                 // nothing can reach it afterwards, so it is stopped here —
                 // and a Live Voice session bills until it is closed, with
                 // its engine and web view going with it. `leaveChat` does
-                // both, in that order.
+                // both, in that order. The bot conversation goes the same
+                // way (`BotsView` closes it too; this is a no-op after that).
                 chatViewModel.leaveChat()
+                coordinator.botsViewModelIfBuilt?.closeConversation()
             }
             // App quit: best effort — the vendor close is sent, teardown
             // may not finish before the process exits (the peer connection

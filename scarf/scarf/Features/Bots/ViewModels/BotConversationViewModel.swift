@@ -180,6 +180,8 @@ final class BotConversationViewModel {
         // every resolve, so `verifyCanonicalBinding` always polls the chat
         // the resume landed in.
         let vm = chat ?? ChatViewModel(context: pinned, mode: .single)
+        // Named in the close confirm before its conversation has a title.
+        vm.focusedChat.untitledName = profileName
         // Pin the ACP subprocess to the bot's profile. Without this the
         // context alone would point reads at the bot while the AGENT ran as
         // the user's active profile — the transcript and the entity writing
@@ -212,6 +214,12 @@ final class BotConversationViewModel {
             self.cliDeliverer = { ctx, profile, text, dir in
                 await Self.createCanonicalBotChat(context: ctx, profile: profile, text: text, stagingDirectory: dir)
             }
+        }
+        // The first message creating the conversation and a turn over the
+        // CLI transport aren't ACP prompts, and closing would lose them.
+        vm.ownerIsWorking = { [weak self] in
+            guard let self else { return false }
+            return self.phase == .creating || !self.cliTurnDirectories.subtracting(self.stoppedCLITurns).isEmpty
         }
     }
 
@@ -600,11 +608,14 @@ final class BotConversationViewModel {
     /// leaves the Bots section, or closes the window — nothing else will do
     /// it, because `AppCoordinator` caches feature view models for the life
     /// of the window and never calls a teardown hook.
-    func close() {
+    ///
+    /// Returns the chat's teardown (`ChatSession.stop`).
+    @discardableResult
+    func close() -> Task<Void, Never>? {
         generation += 1
         work?.cancel()
         work = nil
-        chat.stopACP()
+        let teardown = chat.stopACP()
         // CLI-transport leftovers: the DB poll timer `markAgentWorking`
         // started (stopACP knows nothing about it) and the send router —
         // a `ChatViewModel` outliving this conversation must go back to
@@ -617,6 +628,7 @@ final class BotConversationViewModel {
         _ = acpHandle.take()
         canonical = nil
         phase = .idle
+        return teardown
     }
 
     /// Last-resort reaper. `close()` is the intended teardown and does this

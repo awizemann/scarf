@@ -860,21 +860,23 @@ import ScarfCore
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
         let vm = ChatViewModel(context: home.context)
-        let chA = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        let chA = ScriptedACPChannel(behavior: .answeringPrompts(sessionId: "sess-A"))
         let chC = ScriptedACPChannel(behavior: .happy(sessionId: "sess-C"))
         let chB = ScriptedACPChannel(behavior: .happy(sessionId: "sess-B"))
         _ = Self.install([chA, chC, chB], on: vm)
         var launched: [[String]] = []
         vm.terminalLaunchOverride = { launched.append($0) }
 
-        // A and C each working in the background, B focused.
+        // A idle and C working in the background, B focused. (A working chat
+        // on the session is never stopped:
+        // `aTerminalResumeOfAWorkingConversationShowsTheChatInstead`.)
+        #expect(await Self.startWithATurn(vm, chA, "sess-A"))
         let chatA = vm.focusedChat
-        for (channel, id) in [(chA, "sess-A"), (chC, "sess-C")] {
-            vm.startNewSession()
-            #expect(await Self.readyOn(vm, id))
-            vm.sendText("long job")
-            #expect(await Lifecycle.waitUntil { await channel.sentMethods.contains("session/prompt") })
-        }
+        #expect(await Lifecycle.waitUntil { !chatA.hasTurnInFlight })
+        vm.startNewSession()
+        #expect(await Self.readyOn(vm, "sess-C"))
+        vm.sendText("long job")
+        #expect(await Lifecycle.waitUntil { await chC.sentMethods.contains("session/prompt") })
         let chatC = vm.focusedChat
         vm.startNewSession()
         #expect(await Self.readyOn(vm, "sess-B"))
@@ -883,9 +885,7 @@ import ScarfCore
         vm.displayMode = .terminal
         vm.resumeSession("sess-A")
         #expect(launched == [["chat", "--resume", "sess-A"]])
-        #expect(await Lifecycle.waitUntil { await chA.sentMethods.contains("session/cancel") },
-                "the background chat on the resumed session kept its turn")
-        #expect(await Lifecycle.waitUntil { await chA.closed })
+        #expect(await Lifecycle.waitUntil { await chA.closed }, "the background chat on the resumed session kept running")
         #expect(!vm.chats.contains { $0 === chatA }, "the stopped chat stayed in the window")
         #expect(vm.chats.contains { $0 === chatC })
         #expect(await chC.closed == false, "an unrelated background chat was stopped")
@@ -905,17 +905,15 @@ import ScarfCore
         INSERT INTO messages (id, session_id, role, content, timestamp) VALUES (3, 'sess-A', 'user', 'latest', 9.0);
         """, dbAt: home.url)
         let vm = ChatViewModel(context: home.context)
-        let chA = ScriptedACPChannel(behavior: .happy(sessionId: "sess-A"))
+        let chA = ScriptedACPChannel(behavior: .answeringPrompts(sessionId: "sess-A"))
         let chB = ScriptedACPChannel(behavior: .answeringPrompts(sessionId: "sess-B"))
         _ = Self.install([chA, chB], on: vm)
         var launched: [[String]] = []
         vm.terminalLaunchOverride = { launched.append($0) }
 
-        vm.startNewSession()
-        #expect(await Self.readyOn(vm, "sess-A"))
+        #expect(await Self.startWithATurn(vm, chA, "sess-A")) // A idle in the background
         let chatA = vm.focusedChat
-        vm.sendText("long job") // A works on in the background
-        #expect(await Lifecycle.waitUntil { await chA.sentMethods.contains("session/prompt") })
+        #expect(await Lifecycle.waitUntil { !chatA.hasTurnInFlight })
         #expect(await Self.startWithATurn(vm, chB, "sess-B"))
 
         vm.displayMode = .terminal

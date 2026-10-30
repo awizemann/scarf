@@ -35,6 +35,7 @@ struct ChatView: View {
         VStack(spacing: 0) {
             toolbar
             Divider()
+            parkedKickoffBanner
             errorBanner
             chatArea
         }
@@ -72,33 +73,11 @@ struct ChatView: View {
             // loading" complaint. Same loader fires again at session
             // start so any version bump applied this launch lands.
             viewModel.richChatViewModel.loadGlobalScopedCommands()
-            // Cold-launch handoff: if the user clicked "New Chat" on
-            // a project before ChatView had a chance to render, the
-            // coordinator was already populated. Consume the request
-            // here. The onChange below handles the live case.
-            if let pending = coordinator.pendingProjectChat {
-                let prompt = coordinator.pendingInitialPrompt
-                coordinator.pendingProjectChat = nil
-                coordinator.pendingInitialPrompt = nil
-                if let prompt {
-                    viewModel.startNewSessionAndSend(projectPath: pending, text: prompt)
-                } else {
-                    viewModel.startNewSession(projectPath: pending)
-                }
-            }
-            // Same story for resume-session handoff: the user clicked
-            // a session in the Projects Sessions tab (routes to `.chat`
-            // rather than `.sessions` so the chat actually reopens).
-            // SessionsView consumes `selectedSessionId` for its own
-            // routing; Chat now consumes it too. Mutually exclusive at
-            // any given render because only one section is active per
-            // `coordinator.selectedSection`. `else if` makes precedence
-            // explicit — pendingProjectChat (new) outranks
-            // selectedSessionId (resume) when both are somehow set.
-            else if let pendingId = coordinator.selectedSessionId {
-                coordinator.selectedSessionId = nil
-                viewModel.resumeSession(pendingId)
-            }
+            // Cold-launch handoff: a project's "New Chat", a session row
+            // or the Dashboard's New Session asked for this before ChatView
+            // had a chance to render. The onChanges below handle the live
+            // case.
+            viewModel.consumePendingOpen(from: coordinator)
         }
         .onChange(of: fileWatcher.lastChangeDate) {
             // Debounced rather than immediate. During an active ACP
@@ -118,41 +97,63 @@ struct ChatView: View {
             // gh#102 typing-lag.
             viewModel.scheduleCredentialPreflightRefresh()
         }
-        // Live handoff from the per-project Sessions tab: the tab
-        // sets `pendingProjectChat` + flips `selectedSection` to
-        // `.chat`; this view consumes the path and starts a fresh
-        // session with cwd=projectPath. Attribution happens inside
-        // ChatViewModel on successful session creation.
-        //
-        // The "New Project from Scratch" wizard (v2.8) sets the
-        // sister slot `pendingInitialPrompt` alongside the project
-        // path so the agent receives a kickoff prompt without the
-        // user having to type one. We drain both atomically and
-        // route to `startNewSessionAndSend` when present.
-        .onChange(of: coord.pendingProjectChat) { _, new in
-            if let projectPath = new {
-                let prompt = coordinator.pendingInitialPrompt
-                coordinator.pendingProjectChat = nil
-                coordinator.pendingInitialPrompt = nil
-                if let prompt {
-                    viewModel.startNewSessionAndSend(projectPath: projectPath, text: prompt)
-                } else {
-                    viewModel.startNewSession(projectPath: projectPath)
-                }
-            }
+        // Live handoffs, drained in one place. A project's "New Chat" sets
+        // `pendingProjectChat` (the wizard and Upgrade Project add
+        // `pendingInitialPrompt`, the kickoff the agent gets without the
+        // user typing one); the Projects Sessions tab sets
+        // `selectedSessionId`; the Dashboard sets `pendingNewChat`.
+        // ChatViewModel.resumeSession recovers a session's project from the
+        // attribution sidecar and threads it through startACPSession, so the
+        // respawned `hermes acp` gets the project cwd (AGENTS.md + tool dirs)
+        // and the header chip — not just the chip. t-24594c4a.
+        .onChange(of: coord.pendingProjectChat) { _, _ in
+            viewModel.consumePendingOpen(from: coordinator)
         }
-        // Live handoff for resume: user clicked an existing session in
-        // the Projects Sessions tab while already in the Chat section
-        // (or switched back to Chat after). ChatViewModel.resumeSession
-        // recovers the session's project from the attribution sidecar and
-        // threads it through startACPSession, so the respawned `hermes acp`
-        // gets the project cwd (AGENTS.md + tool dirs) and the header chip
-        // — not just the chip. t-24594c4a.
-        .onChange(of: coord.selectedSessionId) { _, new in
-            if let sessionId = new {
-                coordinator.selectedSessionId = nil
-                viewModel.resumeSession(sessionId)
+        .onChange(of: coord.selectedSessionId) { _, _ in
+            viewModel.consumePendingOpen(from: coordinator)
+        }
+        .onChange(of: coord.pendingNewChat) { _, _ in
+            viewModel.consumePendingOpen(from: coordinator)
+        }
+    }
+
+    /// A kickoff prompt the budget dialog's Wait kept: it stays offered until
+    /// the user opens it (the dialog asks again if every chat is still in
+    /// use) or discards it.
+    @ViewBuilder
+    private var parkedKickoffBanner: some View {
+        if let kickoff = viewModel.parkedKickoffs.first {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "clock")
+                    .foregroundStyle(ScarfColor.warning)
+                VStack(alignment: .leading, spacing: 2) {
+                    if let project = viewModel.projectName(forKickoff: kickoff) {
+                        Text("The first message for \(project) hasn't been sent")
+                            .font(.callout)
+                    } else {
+                        Text("A first message hasn't been sent")
+                            .font(.callout)
+                    }
+                    Text("It's waiting for a free chat on \(viewModel.context.displayName). Open it when a chat has finished.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Open Now") { viewModel.openParkedKickoff(kickoff) }
+                    .buttonStyle(ScarfPrimaryButton())
+                    .controlSize(.small)
+                Button("Discard") { viewModel.discardParkedKickoff(kickoff) }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
             }
+            .padding(10)
+            .background(ScarfColor.warningTint.opacity(0.44))
+            .overlay(
+                Rectangle()
+                    .fill(ScarfColor.warningHue.opacity(0.25))
+                    .frame(height: 1),
+                alignment: .bottom
+            )
         }
     }
 
@@ -210,6 +211,14 @@ struct ChatView: View {
                         .controlSize(.small)
                         .help("Open Credential Pools and re-authenticate \(provider).")
                     }
+                    if !viewModel.richChatViewModel.acpErrorDiscardIDs.isEmpty, viewModel.isACPConnected {
+                        Button("Discard Lost Turn") {
+                            viewModel.discardLostTurn()
+                        }
+                        .buttonStyle(ScarfPrimaryButton())
+                        .controlSize(.small)
+                        .help("Send \(viewModel.richChatViewModel.acpErrorDiscardIDs.map { "/discard \($0)" }.joined(separator: " and ")) so Hermes takes messages in this chat again.")
+                    }
                     if viewModel.acpErrorDetails != nil {
                         Button(showErrorDetails ? "Hide details" : "Show details") {
                             showErrorDetails.toggle()
@@ -251,7 +260,7 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
-        } else if viewModel.missingCredentials && !viewModel.hasActiveProcess {
+        } else if viewModel.missingCredentials && !viewModel.hasActiveProcessInWindow {
             HStack(spacing: 8) {
                 Image(systemName: "key.fill")
                     .foregroundStyle(ScarfColor.warning)
@@ -272,7 +281,7 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
-        } else if viewModel.llamaCppBaseURLIgnored && !viewModel.hasActiveProcess {
+        } else if viewModel.llamaCppBaseURLIgnored && !viewModel.hasActiveProcessInWindow {
             // S06-F2: on Hermes v0.21.1+ provider `llamacpp` ignores
             // model.base_url and only reaches its own managed server (or
             // 127.0.0.1:8080). Offer the switch; never migrate silently.
@@ -304,7 +313,7 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
-        } else if let provider = viewModel.unroutableProvider, !viewModel.hasActiveProcess {
+        } else if let provider = viewModel.unroutableProvider, !viewModel.hasActiveProcessInWindow {
             // S06-F1: config.yaml names a provider this Hermes can't route
             // (older Scarf pickers offered every models.dev provider).
             // Warn and offer the picker; never rewrite config silently.
@@ -336,7 +345,7 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
-        } else if let mismatch = viewModel.modelProviderMismatch, !viewModel.hasActiveProcess {
+        } else if let mismatch = viewModel.modelProviderMismatch, !viewModel.hasActiveProcessInWindow {
             // Provider/model mismatch — `model.default` carries one
             // provider prefix while `model.provider` names another.
             // Hermes can't reconcile and the chat dies with -32603 at

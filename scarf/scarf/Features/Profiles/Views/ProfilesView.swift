@@ -23,6 +23,12 @@ struct ProfilesView: View {
     /// `active_profile`. Optional so previews/tests without the environment
     /// don't trap.
     @Environment(WindowProfileScope.self) private var profileScope: WindowProfileScope?
+    /// Viewing another profile rebuilds this window and stops its chats, so
+    /// the switch asks first when any of them is working.
+    @Environment(ChatViewModel.self) private var chatViewModel: ChatViewModel?
+    @Environment(AppCoordinator.self) private var coordinator: AppCoordinator?
+    /// The switch waiting on that confirm, and what it says.
+    @State private var pendingView: (name: String, prompt: ChatClosePolicy.Prompt)?
 
     init(context: ServerContext) {
         _viewModel = State(initialValue: ProfilesViewModel(context: context))
@@ -110,7 +116,26 @@ struct ProfilesView: View {
             }
             Button("Cancel", role: .cancel) { pendingSwitch = nil }
         } message: {
-            Text("All Scarf windows will close and reopen. Unsaved chat input may be lost.")
+            if let working = ChatClosePolicy.quitPrompt(
+                workingChatNames: ChatWindowDirectory.shared.workingChatNamesByWindow(),
+                parkedKickoffs: ChatWindowDirectory.shared.parkedKickoffNames()
+            ) {
+                Text("All Scarf windows will close and reopen. \(working.title). \(working.message)")
+            } else {
+                Text("All Scarf windows will close and reopen. Unsaved chat input may be lost.")
+            }
+        }
+        .confirmationDialog(
+            pendingView?.prompt.title ?? "",
+            isPresented: Binding(get: { pendingView != nil }, set: { if !$0 { pendingView = nil } })
+        ) {
+            Button("Switch Anyway", role: .destructive) {
+                if let name = pendingView?.name { profileScope?.select(name) }
+                pendingView = nil
+            }
+            Button("Cancel", role: .cancel) { pendingView = nil }
+        } message: {
+            Text(pendingView?.prompt.message ?? "")
         }
         .sheet(isPresented: $showRemoteImportSheet) {
             RemoteProfilePathSheet(
@@ -215,7 +240,7 @@ struct ProfilesView: View {
                     .accessibilityElement(children: .combine)
                     .contextMenu {
                         if viewModel.context.isRemote {
-                            Button("View this profile") { profileScope?.select(profile.name) }
+                            Button("View this profile") { requestView(profile) }
                                 .disabled(viewing)
                             Button("Set as server's active profile") { viewModel.switchTo(profile) }
                                 .disabled(profile.isActive)
@@ -319,6 +344,22 @@ struct ProfilesView: View {
         }
     }
 
+    /// View `profile` in this window, asking first if that would stop
+    /// working chats.
+    private func requestView(_ profile: HermesProfile) {
+        let names = chatViewModel.map {
+            ChatWindowDirectory.workingChats(chat: $0, coordinator: coordinator).map(\.displayTitle)
+        } ?? []
+        if let prompt = ChatClosePolicy.prompt(
+            .switchProfile, workingChatNames: names,
+            parkedKickoffs: chatViewModel?.parkedKickoffNames ?? []
+        ) {
+            pendingView = (profile.name, prompt)
+        } else {
+            profileScope?.select(profile.name)
+        }
+    }
+
     @ViewBuilder
     private func detailSubtitle(_ profile: HermesProfile) -> some View {
         if viewModel.context.isRemote {
@@ -343,7 +384,7 @@ struct ProfilesView: View {
                     .foregroundStyle(Color.accentColor)
             } else {
                 Button {
-                    profileScope?.select(profile.name)
+                    requestView(profile)
                 } label: {
                     Label("View this profile", systemImage: "eye")
                 }

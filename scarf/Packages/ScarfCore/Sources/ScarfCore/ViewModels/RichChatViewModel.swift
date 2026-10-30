@@ -692,7 +692,20 @@ public final class RichChatViewModel {
     /// response's `stopReason` is `"error"` (non-retryable provider
     /// failures like Nous Portal HTTP 404 for an unknown model —
     /// pass-1 M7 #2).
-    public var acpError: String?
+    public var acpError: String? {
+        // Belongs to the failure that set it.
+        didSet { acpErrorDiscardIDs = [] }
+    }
+
+    /// The lost turns a gateway's `unknown_execution:` refusal named, for the
+    /// banner's offer to send `/discard <id>`. Empty for any other failure.
+    public private(set) var acpErrorDiscardIDs: [String] = []
+
+    /// The failure just recorded carries no text from the server (a `-32603`
+    /// with no details, a request timeout): a prompt's banner gets the
+    /// fallback hint for it (`handlePromptComplete`).
+    @ObservationIgnored
+    private var acpFailureHasNoServerText = false
 
     /// Short hint derived from the error + stderr tail (e.g.
     /// "set ANTHROPIC_API_KEY" or "pick a different model — this
@@ -752,6 +765,11 @@ public final class RichChatViewModel {
         acpErrorHint = cls?.hint
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
         acpErrorOAuthProvider = cls?.oauthProvider
+        acpFailureHasNoServerText = !ACPClientError.carriesServerText(error)
+        if let lost = ACPClientError.lostTurnRefusal(error) {
+            acpErrorHint = lost.hint
+            acpErrorDiscardIDs = lost.discardIDs
+        }
     }
 
     /// Populate the error triplet when `handlePromptComplete` sees a
@@ -3450,7 +3468,14 @@ public final class RichChatViewModel {
             // nothing happened. The controller registers
             // `acpStderrProvider`; if absent, the banner still shows
             // with the hint fallback.
-            if !isCancelled {
+            // A failed `session/prompt` RPC already recorded Hermes's own
+            // text (`recordACPFailure`) before its host synthesized this
+            // `error` stop: the generic line must not replace it.
+            let alreadyExplained = response.stopReason == "error" && acpError != nil
+            if alreadyExplained, acpFailureHasNoServerText, acpErrorHint == nil {
+                acpErrorHint = Self.fallbackHint(for: response.stopReason)
+            }
+            if !isCancelled && !alreadyExplained {
                 Task { await self.recordPromptStopFailureUsingProvider(stopReason: response.stopReason) }
             }
         }

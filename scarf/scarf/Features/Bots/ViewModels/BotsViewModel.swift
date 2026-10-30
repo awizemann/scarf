@@ -648,10 +648,13 @@ final class BotsViewModel: OutcomeMessageHosting {
     }
 
     /// Stop and drop the live conversation. Call on bot switch, on leaving
-    /// the section, and on window teardown.
-    func closeConversation() {
-        conversation?.close()
+    /// the section, and on window teardown. Returns the chat's teardown, for
+    /// a caller that must let it finish (quitting Scarf).
+    @discardableResult
+    func closeConversation() -> Task<Void, Never>? {
+        let teardown = conversation?.close()
         conversation = nil
+        return teardown
     }
 
     // MARK: - Presence (Phase B P2)

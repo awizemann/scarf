@@ -71,6 +71,14 @@ nonisolated enum UsageEvent {
     // MARK: - Chat
 
     case chatSessionStarted(mode: ChatSessionMode, origin: ChatSessionOrigin)
+    /// A window ran chats side by side, or the live-chat budget stopped one
+    /// opening. Once per presence epoch, trigger and bucket.
+    case parallelChatsUsed(
+        trigger: ParallelChatsTrigger,
+        liveChatsBucket: LiveChatsBucket,
+        transport: Transport,
+        budgetChoice: ParallelChatsBudgetChoice
+    )
     case messageSent(hasAttachment: Bool, inputMode: ChatViewModel.ChatInputMode)
     case modelPreflightResult(outcome: ModelPreflightOutcome)
     case permissionPromptResponded(decision: PermissionDecision)
@@ -139,6 +147,7 @@ nonisolated enum UsageEvent {
         case .notificationToggled:      return "notification_toggled"
         case .sectionViewed:            return "section_viewed"
         case .chatSessionStarted:       return "chat_session_started"
+        case .parallelChatsUsed:        return "parallel_chats_used"
         case .messageSent:              return "message_sent"
         case .modelPreflightResult:     return "model_preflight_result"
         case .permissionPromptResponded: return "permission_prompt_responded"
@@ -218,6 +227,13 @@ nonisolated enum UsageEvent {
             return ["enabled": .bool(enabled)]
         case .sectionViewed(let section):
             return ["section": .string(section.analyticsToken)]
+        case .parallelChatsUsed(let trigger, let bucket, let transport, let choice):
+            return [
+                "trigger": .string(trigger.rawValue),
+                "live_chats_bucket": .string(bucket.token),
+                "transport": .string(transport.rawValue),
+                "budget_choice": .string(choice.rawValue),
+            ]
         case .chatSessionStarted(let mode, let origin):
             return [
                 "mode": .string(mode.rawValue),
@@ -341,7 +357,11 @@ nonisolated enum UsageEvent {
         case .settingChanged:           return .notificationToggled(enabled: true)
         case .notificationToggled:      return .sectionViewed(section: .dashboard)
         case .sectionViewed:            return .chatSessionStarted(mode: .new, origin: .chat)
-        case .chatSessionStarted:       return .messageSent(hasAttachment: false, inputMode: .typed)
+        case .chatSessionStarted:       return .parallelChatsUsed(trigger: .concurrent,
+                                                                  liveChatsBucket: .init(count: 2),
+                                                                  transport: .local,
+                                                                  budgetChoice: .none)
+        case .parallelChatsUsed:        return .messageSent(hasAttachment: false, inputMode: .typed)
         case .messageSent:              return .modelPreflightResult(outcome: .passed)
         case .modelPreflightResult:     return .permissionPromptResponded(decision: .approve)
         case .permissionPromptResponded: return .voiceUsed(kind: .tts)
@@ -509,6 +529,15 @@ nonisolated extension UsageEvent {
         case failed
     }
 
+    enum ParallelChatsTrigger: String, CaseIterable, Sendable {
+        case concurrent
+        case budgetBlocked = "budget_blocked"
+    }
+
+    enum ParallelChatsBudgetChoice: String, CaseIterable, Sendable {
+        case none, stopped, waited
+    }
+
     enum ChatSessionMode: String, CaseIterable, Sendable {
         case new
         case resume
@@ -643,6 +672,19 @@ nonisolated extension UsageEvent {
         let token: String
         init(seconds: TimeInterval) { token = ScarfAnalytics.durationBucket(seconds) }
         init(since start: Date) { self.init(seconds: Date().timeIntervalSince(start)) }
+    }
+
+    /// How many chats hold a process, for `parallel_chats_used`: 2, 3 or
+    /// 4_plus. A count below 2 reads as the lowest bucket.
+    struct LiveChatsBucket: Equatable, Sendable {
+        let token: String
+        init(count: Int) {
+            switch count {
+            case ...2: token = "2"
+            case 3: token = "3"
+            default: token = "4_plus"
+            }
+        }
     }
 
     /// Coarse server-count bucket for `launch_completed`.

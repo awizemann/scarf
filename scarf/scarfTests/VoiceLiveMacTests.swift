@@ -222,6 +222,8 @@ import ScarfCore
         vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in channel } }
         vm.startNewSession()
         _ = await waitUntil { vm.acpStatus == ChatViewModel.ACPPhase.ready }
+        // The host side of a running voice session (`startVoiceLive` binds it).
+        vm.voiceChat = vm.focusedChat
         return vm
     }
 
@@ -355,6 +357,7 @@ import ScarfCore
 
     @Test @MainActor func toolNameAndSeedTurnsComeFromTheTranscript() async {
         let vm = Self.chat(context: .local)
+        vm.voiceChat = vm.focusedChat
         let rich = vm.richChatViewModel
         rich.setSessionId("s")
         rich.addUserMessage(text: "  check thursday  ")

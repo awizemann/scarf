@@ -97,6 +97,40 @@ final class ChatWindowDirectory {
         windows.removeAll { $0.chat == nil || $0.chat === chat }
     }
 
+    /// The chats working in one window: its Chat section's and the bot
+    /// conversation open in it. The window's own close and profile-switch
+    /// confirms ask about exactly these.
+    static func workingChats(chat: ChatViewModel, coordinator: AppCoordinator?) -> [ChatSession] {
+        chat.workingChats + (coordinator?.botsViewModelIfBuilt?.conversation?.chat.workingChats ?? [])
+    }
+
+    /// The names of the chats working in each open window, for the quit
+    /// confirm. A window with none is an empty list.
+    func workingChatNamesByWindow() -> [[String]] {
+        prune()
+        return windows.compactMap { window in
+            guard let chat = window.chat else { return nil }
+            return Self.workingChats(chat: chat, coordinator: window.coordinator).map(\.displayTitle)
+        }
+    }
+
+    /// What every open window would discard with its parked kickoffs.
+    func parkedKickoffNames() -> [String] {
+        prune()
+        return windows.flatMap { $0.chat?.parkedKickoffNames ?? [] }
+    }
+
+    /// Stop every chat in every open window (Quit Anyway), returning their
+    /// teardowns.
+    func stopAllWindows() -> [Task<Void, Never>] {
+        prune()
+        return windows.flatMap { window -> [Task<Void, Never>] in
+            var teardowns = window.chat?.leaveChat() ?? []
+            if let task = window.coordinator?.botsViewModelIfBuilt?.closeConversation() { teardowns.append(task) }
+            return teardowns
+        }
+    }
+
     enum Outcome: Equatable {
         /// A window had a live chat on the session: focused there.
         case focusedLiveChat

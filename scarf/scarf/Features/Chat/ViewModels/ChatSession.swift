@@ -60,6 +60,11 @@ protocol ChatSessionHost: AnyObject {
     /// the window marks it unread when it isn't the chat shown and decides
     /// whether to notify. `preview` is the reply's text.
     func chatDidFinishTurn(_ chat: ChatSession, preview: String)
+    /// `chat` now holds a process slot: the window's concurrency analytics.
+    func chatDidTakeProcess(_ chat: ChatSession)
+    /// A blocked start carrying a kickoff prompt was told to wait: the
+    /// window keeps the prompt (`ChatViewModel.parkedKickoffs`).
+    func parkKickoff(projectPath: String?, initialPrompt: String)
     /// `chat`'s approval/question queue changed: `added` arrived, `removed`
     /// (request ids) were answered, settled by Hermes or dropped. The
     /// window posts and withdraws the "needs your answer" notifications.
@@ -124,6 +129,16 @@ final class ChatSession {
     @ObservationIgnored
     var postedFinishedNotificationId: String?
 
+    /// The "couldn't reconnect" notification posted for this chat, withdrawn
+    /// when the user focuses it. Kept by the window.
+    @ObservationIgnored
+    var postedFailureNotificationId: String?
+
+    /// What to call this chat before it has a title or a first message (Bot
+    /// Chat creating its conversation names the bot). Nil: "New chat".
+    @ObservationIgnored
+    var untitledName: String?
+
     /// The request ids last seen in the permission queue, to tell the
     /// window what arrived and what went (`permissionQueueChanged`).
     @ObservationIgnored
@@ -180,7 +195,49 @@ final class ChatSession {
     @ObservationIgnored
     private var startCarriesUserInput = false {
         // Handed over or abandoned: nothing left to put back.
-        didSet { if !startCarriesUserInput { autostartInput = nil } }
+        didSet {
+            if !startCarriesUserInput {
+                autostartInput = nil
+                startKickoff = nil
+            }
+        }
+    }
+
+    /// The kickoff prompt a start is carrying, with its project, until it is
+    /// handed to `sendViaACP`.
+    @ObservationIgnored
+    private var startKickoff: (projectPath: String?, prompt: String)?
+
+    /// What a start was carrying when the watchdog tore it down: `stop()`
+    /// clears the live state before the window hears of the failure.
+    @ObservationIgnored
+    private var unsentAtTeardown: UnsentStartInput?
+
+    /// Something the user asked to send that a failed start never handed over.
+    enum UnsentStartInput {
+        case kickoff(projectPath: String?, prompt: String)
+        case typed(text: String, images: [ChatImageAttachment])
+    }
+
+    private var currentUnsentStartInput: UnsentStartInput? {
+        guard startCarriesUserInput else { return nil }
+        if let startKickoff {
+            return .kickoff(projectPath: startKickoff.projectPath, prompt: startKickoff.prompt)
+        }
+        if let autostartInput {
+            return .typed(text: autostartInput.text, images: autostartInput.images)
+        }
+        return nil
+    }
+
+    /// For the window, when this chat's start has failed: what it was still
+    /// carrying. The chat no longer carries it after this.
+    func takeUnsentStartInput() -> UnsentStartInput? {
+        defer {
+            unsentAtTeardown = nil
+            startCarriesUserInput = false
+        }
+        return unsentAtTeardown ?? currentUnsentStartInput
     }
 
     /// A prompt went to Hermes on the attached session. Hermes stores an
@@ -583,7 +640,9 @@ final class ChatSession {
     var autoAcceptEditsStore = ProjectAutoAcceptEditsStore()
 
     private static let maxReconnectAttempts = 5
-    private static let reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
+    /// A `var` so tests can run the ladder out without waiting for it.
+    @ObservationIgnored
+    var reconnectBaseDelay: UInt64 = 1_000_000_000 // 1 second
     private static let maxReconnectDelay: UInt64 = 16_000_000_000 // 16 seconds
 
     /// Forwarders to the ScarfCore implementation so the error-banner
@@ -596,15 +655,39 @@ final class ChatSession {
     /// Auto-clear the chat composer's transient hint after 4 s. Shared
     /// helper for `/steer`, `/goal`, and `/queue` so the toast lifetime
     /// stays consistent across non-interruptive commands.
+    ///
+    /// In a chat no window shows, the clock waits until one does: the hint
+    /// is there to be read (`startDeferredHintClear`).
     @MainActor
     func scheduleHintClear() {
+        guard isShownInWindow else {
+            hintClearWaitsForFocus = true
+            return
+        }
         let snapshot = richChatViewModel.transientHint
+        let lifetime = hintLifetimeNanos
         Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            try? await Task.sleep(nanoseconds: lifetime)
             if self?.richChatViewModel.transientHint == snapshot {
                 self?.richChatViewModel.transientHint = nil
             }
         }
+    }
+
+    @ObservationIgnored
+    private var hintClearWaitsForFocus = false
+
+    /// How long a hint stays once it can be seen (a `var` for tests).
+    @ObservationIgnored
+    var hintLifetimeNanos: UInt64 = 4_000_000_000
+
+    /// The window now shows this chat: a hint set while it was in the
+    /// background starts its clock.
+    @MainActor
+    func startDeferredHintClear() {
+        guard hintClearWaitsForFocus else { return }
+        hintClearWaitsForFocus = false
+        scheduleHintClear()
     }
 
     @MainActor
@@ -676,6 +759,7 @@ final class ChatSession {
             let seconds = Int(budget / 1_000_000_000)
             self.logger.error("session-start watchdog fired after \(seconds)s — tearing down the wedged start")
             let wasReattaching = self.isReattaching
+            let unsent = self.currentUnsentStartInput
             // Counted before `stop()`, which drops sends held for a client
             // not spawned yet (a re-attach's) without a word.
             let dropped = self.heldSends.count
@@ -684,6 +768,7 @@ final class ChatSession {
             // stomping the error state painted below.
             self.beginStartIntent()
             self.stop()
+            self.unsentAtTeardown = unsent
             // A released chat that failed to come back is still the chat
             // it was: kept, transcript and all, to retry later.
             if wasReattaching { self.isReleased = true }
@@ -810,7 +895,7 @@ final class ChatSession {
             let line = first.split(separator: "\n", maxSplits: 1).first.map(String.init) ?? first
             return line.count > 40 ? String(line.prefix(40)) + "…" : line
         }
-        return String(localized: "New chat")
+        return untitledName ?? String(localized: "New chat")
     }
 
     /// A prompt Scarf started on this chat hasn't returned.
@@ -888,11 +973,41 @@ final class ChatSession {
         // Ready but the typed message or kickoff prompt not sent yet: the
         // start still awaits the sidebar reload / replay drain (autostart)
         // or the project setup (`initialPrompt`) before it sends.
-        if startCarriesUserInput && (isStartingSession || acpClient != nil) { return true }
+        if startHoldsUserInput { return true }
         if isStartingSession { return false }
         if holdingForPendingClient { return true }
         guard acpClient != nil, richChatViewModel.sessionId != nil else { return false }
         return hasSentPrompt || targetSessionId != nil || richChatViewModel.currentSession != nil
+    }
+
+    /// A start under way carries something the user typed or a kickoff
+    /// prompt, not yet handed to `sendViaACP`.
+    var startHoldsUserInput: Bool {
+        startCarriesUserInput && (isStartingSession || acpClient != nil)
+    }
+
+    /// The window isn't showing this chat and its connection is gone for
+    /// good (a start failed or timed out, the reconnect ladder gave up).
+    /// With a session to come back to it stays as a released chat: no process
+    /// and no budget slot, its error on its row (`rowState`), and focusing it
+    /// or typing into it re-attaches through the full start path. Returns
+    /// whether it was kept; a blank chat has no row, and the window drops it.
+    /// `lostTypedMessage`: a failed autostart never handed over what was
+    /// typed. Its echo stays and the reconnect doesn't send it, so say so.
+    func keepAfterFailedConnection(lostTypedMessage: Bool) -> Bool {
+        guard richChatViewModel.sessionId != nil || targetSessionId != nil else { return false }
+        if lostTypedMessage {
+            let unsent = 1
+            richChatViewModel.transientHint = String(
+                localized: "^[\(unsent) message](inflect: true) couldn't be sent — the connection didn't come up."
+            )
+            scheduleHintClear()
+        }
+        // The echo raised it, and nothing else will lower it.
+        if !hasTurnInFlight { richChatViewModel.cancelPendingSend() }
+        isReattaching = false
+        isReleased = true
+        return true
     }
 
     /// Drop this chat: supersede any start in progress (its pipeline
@@ -1060,6 +1175,9 @@ final class ChatSession {
     private var heldSends: [(text: String, images: [ChatImageAttachment])] = []
     @ObservationIgnored
     private weak var heldSendsClient: ACPClient?
+    /// Something the user typed is held for a client and hasn't gone out
+    /// yet (`heldSends`).
+    var hasHeldSends: Bool { !heldSends.isEmpty }
     /// True while a path that will install a client for THIS session has
     /// none yet — the reconnect ladder, or the re-attach of a released chat
     /// (`reattach`) before its spawn: sends typed then are held for the
@@ -1167,6 +1285,7 @@ final class ChatSession {
         isStartingSession = true
         isReleased = false
         startCarriesUserInput = true
+        host?.chatDidTakeProcess(self)
         let intent = beginStartIntent()
         // Bound the whole auto-start pipeline (pre-spawn attribution
         // read included) — S3, t-5451bd1b.
@@ -1320,6 +1439,14 @@ final class ChatSession {
                 if sessionToResume != nil, acpClient === client,
                    startStillCurrent(intent, client: nil),
                    handOffDeadStartToReconnect(after: error) {
+                    return
+                }
+                // The event loop's EOF got there first: the ladder owns this
+                // session now, and its state isn't this failure's to touch.
+                if sessionToResume != nil, acpClient !== client,
+                   startStillCurrent(intent, client: nil) {
+                    isStartingSession = false
+                    disarmStartWatchdog()
                     return
                 }
                 // Superseded start (a newer click, or the watchdog):
@@ -2052,6 +2179,9 @@ final class ChatSession {
             },
             onWait: heldSend.map { send in
                 { [weak self] in self?.noteSendNotRun(text: send.text, images: send.images) }
+            } ?? initialPrompt.flatMap { prompt -> (() -> Void)? in
+                guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                return { [weak self] in self?.host?.parkKickoff(projectPath: projectPath, initialPrompt: prompt) }
             }
         ) ?? true
         guard admitted else {
@@ -2067,9 +2197,11 @@ final class ChatSession {
         // session-list overlay stays up through the entire boot.
         isStartingSession = true
         startCarriesUserInput = !(initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+        startKickoff = startCarriesUserInput ? initialPrompt.map { (projectPath, $0) } : nil
         isReleased = false
         isReattaching = reattaching
         lastStartProjectPath = projectPath
+        host?.chatDidTakeProcess(self)
         if reattaching {
             // The transcript is kept, so the gate an earlier turn opened
             // must be shut again: `session/load` streams the whole history
@@ -2660,6 +2792,14 @@ final class ChatSession {
             host?.chatSettledWithoutConnection(self)
             return
         }
+        // An autostart that died mid-start: the ladder reloads the same
+        // session and sends what is held, so the message it was carrying goes
+        // first (its echo is there). Whichever saw the death first, the
+        // event loop's EOF or the start's own catch, comes through here.
+        if startCarriesUserInput, let autostartInput {
+            heldSends.insert((autostartInput.text, autostartInput.images), at: 0)
+            startCarriesUserInput = false
+        }
         attemptReconnect(sessionId: savedSessionId)
     }
 
@@ -2726,7 +2866,7 @@ final class ChatSession {
                 // Backoff delay (skip on first attempt for fast recovery)
                 if attempt > 1 {
                     let delay = min(
-                        Self.reconnectBaseDelay * UInt64(1 << (attempt - 1)),
+                        reconnectBaseDelay * UInt64(1 << (attempt - 1)),
                         Self.maxReconnectDelay
                     )
                     try? await Task.sleep(nanoseconds: delay)
@@ -3104,6 +3244,20 @@ final class ChatSession {
         }
     }
 
+    /// A message typed into ANOTHER chat with no session, whose start failed
+    /// in the background: that chat is dropped, so the text lands here, as
+    /// `takeUnsentFromStoppedChat` does for a Stop.
+    func takeUnsentFromFailedChat(text: String, images: [ChatImageAttachment]) {
+        if !composer.hasContent {
+            composer.restoreUnsent(text: text, images: images)
+            showHint(String(localized: "Not sent — that chat couldn't start. Your message is back in the composer."))
+        } else {
+            let line = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let quoted = line.count > 40 ? String(line.prefix(40)) + "…" : line
+            showHint(String(localized: "Not sent — that chat couldn't start: “\(quoted)”"))
+        }
+    }
+
     /// A send the budget dialog's Wait dropped: it was never echoed, so put
     /// it back in the composer and say it wasn't sent.
     private func noteSendNotRun(text: String, images: [ChatImageAttachment]) {
@@ -3144,6 +3298,33 @@ final class ChatSession {
             Task {
                 try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
                 resumeOnce()
+            }
+        }
+    }
+
+    /// The error banner's offer after a gateway refused a prompt with
+    /// `unknown_execution:`: send `/discard <id>` for each lost turn the
+    /// refusal named. Hermes acknowledges the turn without replaying it, and
+    /// the session takes prompts again (`_discard_unknown`,
+    /// acp_adapter/gateway_commands.py:72-87 @ v0.22.5).
+    ///
+    /// One at a time, each after the last has returned: every `/discard`
+    /// refreshes and replaces the same cached pending snapshot and shares the
+    /// session's `_submitting` flag (gateway_server.py:856-890), nothing in
+    /// Hermes makes overlapping ones safe, and one that fails must not be
+    /// followed by the next.
+    func discardLostTurn() {
+        let ids = richChatViewModel.acpErrorDiscardIDs
+        guard let client = acpClient, !ids.isEmpty else { return }
+        clearACPErrorState()
+        Task { @MainActor [weak self] in
+            for id in ids {
+                guard let self, self.acpClient === client, self.acpError == nil else { return }
+                let before = self.promptTurnCounter
+                self.sendRichText("/discard \(id)", images: [], autoStartInterceptor: nil)
+                if self.promptTurnCounter != before {
+                    await self.promptTurns[self.promptTurnCounter]?.task?.value
+                }
             }
         }
     }

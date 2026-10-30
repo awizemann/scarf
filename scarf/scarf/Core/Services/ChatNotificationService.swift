@@ -52,6 +52,8 @@ struct ChatNotification: Equatable {
         case turnFinished
         /// An approval or question waits in a chat (parallel chats P1).
         case needsAnswer
+        /// A background chat's connection is gone and it couldn't reconnect.
+        case connectionFailed
     }
 
     let kind: Kind
@@ -104,6 +106,14 @@ enum ChatNotificationPolicy {
 
     nonisolated static func finishedTitle(chatName: String) -> String {
         String(localized: "Hermes finished — \(chatName)")
+    }
+
+    nonisolated static func connectionFailedTitle(chatName: String) -> String {
+        String(localized: "Connection lost — \(chatName)")
+    }
+
+    nonisolated static var connectionFailedBody: String {
+        String(localized: "Hermes couldn't reconnect this chat. Open it to try again.")
     }
 
     nonisolated static func needsAnswerTitle(chatName: String) -> String {
@@ -195,7 +205,7 @@ final class ChatNotificationService: NSObject, ChatNotificationPosting, UNUserNo
     func post(_ notification: ChatNotification) {
         // A unit-test or preview host never posts to the real center.
         guard !isSyntheticHost else { return }
-        if notification.kind == .turnFinished || ChatNotificationPolicy.needsAnswerFollowsToggle {
+        if notification.kind != .needsAnswer || ChatNotificationPolicy.needsAnswerFollowsToggle {
             let enabled = defaults.object(forKey: Self.toggleKey) as? Bool ?? true
             guard enabled else { return }
         }

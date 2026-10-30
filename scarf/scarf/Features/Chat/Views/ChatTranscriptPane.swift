@@ -39,7 +39,7 @@ struct ChatTranscriptPane: View {
         return VoiceLiveComposerEntry(
             engineKind: engineKind,
             isActive: isActive,
-            canStart: chatViewModel.canHostVoiceTurns,
+            canStart: chatViewModel.canStartVoiceTurns,
             blockedByAnotherWindow: chatViewModel.voiceLive.isBlockedByAnotherWindow,
             onToggle: {
                 if isActive {
@@ -119,7 +119,7 @@ struct ChatTranscriptPane: View {
                 controller: chatViewModel.voiceLive,
                 onRestart: { chatViewModel.startVoiceLive(capabilities: voiceCapabilities) },
                 ttsProvider: chatViewModel.voiceTTSProviderRaw,
-                canRestart: chatViewModel.canHostVoiceTurns
+                canRestart: chatViewModel.canStartVoiceTurns
                     && !chatViewModel.voiceLive.isBlockedByAnotherWindow
             )
             // The draft belongs to the chat (`ChatSession.composer`), so
