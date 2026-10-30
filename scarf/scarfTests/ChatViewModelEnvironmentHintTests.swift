@@ -67,7 +67,7 @@ import ScarfCore
         defer { home.cleanup() }
         let suite = "com.scarf.tests.envhint.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        let store = await AAE.capabilities("0.16.0", context: home.context, suite: suite)
+        let store = try await AAE.capabilities("0.16.0", context: home.context, suite: suite)
 
         let (_, spawns, agentsPath, projectPath) = try await Self.boot(home: home, store: store)
 
@@ -90,7 +90,7 @@ import ScarfCore
         defer { home.cleanup() }
         let suite = "com.scarf.tests.envhint.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        let store = await AAE.capabilities("0.15.2", context: home.context, suite: suite)
+        let store = try await AAE.capabilities("0.15.2", context: home.context, suite: suite)
 
         let (_, spawns, agentsPath, _) = try await Self.boot(home: home, store: store)
 
@@ -158,7 +158,7 @@ import ScarfCore
         defer { home.cleanup() }
         let suite = "com.scarf.tests.envhint.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        let store = await AAE.capabilities("0.16.0", context: home.context, suite: suite)
+        let store = try await AAE.capabilities("0.16.0", context: home.context, suite: suite)
 
         let vm = ChatViewModel(context: home.context)
         vm.capabilitiesStore = store
@@ -196,7 +196,7 @@ import ScarfCore
         defer { home.cleanup() }
         let suite = "com.scarf.tests.envhint.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
-        let store = await AAE.capabilities("0.16.0", context: home.context, suite: suite)
+        let store = try await AAE.capabilities("0.16.0", context: home.context, suite: suite)
         let projectPath = home.path + "/projects/demo"
         try FileManager.default.createDirectory(atPath: projectPath, withIntermediateDirectories: true)
         try ProjectDashboardService(context: home.context)

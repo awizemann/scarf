@@ -93,10 +93,10 @@ import ScarfCore
     }
 
     @MainActor
-    static func vm(_ home: TempHermesHome, version: String, suite: String) async -> ChatViewModel {
+    static func vm(_ home: TempHermesHome, version: String, suite: String) async throws -> ChatViewModel {
         let vm = ChatViewModel(context: home.context)
         vm.knownProviderIDs = ["anthropic", "custom"]
-        vm.capabilitiesStore = await ChatViewModelAutoAcceptEditsTests.capabilities(
+        vm.capabilitiesStore = try await ChatViewModelAutoAcceptEditsTests.capabilities(
             version, context: home.context, suite: suite)
         return vm
     }
@@ -104,7 +104,7 @@ import ScarfCore
     @Test @MainActor func bannerAppearsAndTheFixWritesCustomKeepingTheURL() async throws {
         let home = try Self.home()
         defer { home.cleanup() }
-        let vm = await Self.vm(home, version: "0.21.5 (2026.9.24)", suite: "r03-llama-\(UUID().uuidString)")
+        let vm = try await Self.vm(home, version: "0.21.5 (2026.9.24)", suite: "r03-llama-\(UUID().uuidString)")
         vm.refreshConfigDiagnostics()
         let shown = await ChatViewModelStartLifecycleTests.waitUntil { vm.llamaCppBaseURLIgnored }
         #expect(shown, "banner never raised for llamacpp + :8081 on v0.21.5")
@@ -135,7 +135,7 @@ import ScarfCore
     @Test @MainActor func olderHostGetsNoBanner() async throws {
         let home = try Self.home()
         defer { home.cleanup() }
-        let vm = await Self.vm(home, version: "0.21.0 (2026.8.31)", suite: "r03-llama-old-\(UUID().uuidString)")
+        let vm = try await Self.vm(home, version: "0.21.0 (2026.8.31)", suite: "r03-llama-old-\(UUID().uuidString)")
         vm.refreshConfigDiagnostics()
         // Give the detached refresh time to land, then confirm nothing fired.
         _ = await ChatViewModelStartLifecycleTests.waitUntil(timeoutSeconds: 1) { vm.llamaCppBaseURLIgnored }

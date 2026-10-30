@@ -602,11 +602,18 @@ public actor ACPClient {
     /// interrupt: <text>". A prompt carrying a note leaves it behind for the
     /// chat's next typed prompt. Live Voice does this via
     /// `VoiceTurnRequest.supersedesCancelledTurn`.
+    ///
+    /// `onIssued` runs once, on this actor, as soon as the request has its
+    /// JSON-RPC id and its write is queued (or the send failed before
+    /// that) — long before the turn ends. A caller with several prompts
+    /// for one chat waits for it before issuing the next, so they reach
+    /// Hermes in the order they were sent (`ChatSession.launchPromptTask`).
     public func sendPrompt(
         sessionId: String,
         text: String,
         images: [ChatImageAttachment],
-        contextNotes: [ACPContextNote]
+        contextNotes: [ACPContextNote],
+        onIssued: (@Sendable () -> Void)? = nil
     ) async throws -> ACPPromptResult {
         statusMessage = "Sending prompt..."
         let messageId = UUID().uuidString
@@ -618,7 +625,7 @@ public actor ACPClient {
             "messageId": AnyCodable(messageId),
             "prompt": AnyCodable(promptBlocks as [Any]),
         ]
-        let result = try await sendRequest(method: "session/prompt", params: params)
+        let result = try await sendRequest(method: "session/prompt", params: params, onIssued: onIssued)
         let dict = result?.dictValue ?? [:]
         let usage = dict["usage"] as? [String: Any] ?? [:]
         // Hermes does NOT send a compression count in the ACP usage payload
@@ -836,7 +843,15 @@ public actor ACPClient {
 
     // MARK: - JSON-RPC Transport
 
-    private func sendRequest(method: String, params: [String: AnyCodable]) async throws -> AnyCodable? {
+    /// `onIssued` (see `sendPrompt`) runs exactly once: right after the
+    /// write is queued, or as this throws before getting that far.
+    private func sendRequest(
+        method: String,
+        params: [String: AnyCodable],
+        onIssued: (@Sendable () -> Void)? = nil
+    ) async throws -> AnyCodable? {
+        var issued = false
+        defer { if !issued { onIssued?() } }
         let requestId = nextRequestId
         nextRequestId += 1
 
@@ -891,6 +906,8 @@ public actor ACPClient {
             // (`enqueueWrite`). The continuation is already stored; the
             // response arrives via the read loop.
             let write = enqueueWrite(line, on: ch)
+            issued = true
+            onIssued?()
             Task.detached { [weak self] in
                 if await write.value != nil {
                     await self?.handleWriteFailedForRequest(id: requestId)

@@ -55,8 +55,11 @@ final class ChatViewModel {
     ) {
         self.context = context
         self.mode = mode
-        // Nil = the app-wide ones; tests inject their own.
-        self.liveChatBudget = liveChatBudget ?? .shared
+        // Nil = the app-wide ones; tests inject their own. In a test host a
+        // nil budget is a fresh one: the suite builds many windows that never
+        // leave, and in a shared budget their shown chats could fill the 8
+        // local slots and block an unrelated test's spawn.
+        self.liveChatBudget = liveChatBudget ?? (Analytics.isSyntheticHost ? LiveChatBudget() : .shared)
         self.masterRecovery = masterRecovery ?? .shared
         self.notifier = notifier ?? ChatNotificationService.shared
         self.voiceLive = voiceLive ?? VoiceLiveController()

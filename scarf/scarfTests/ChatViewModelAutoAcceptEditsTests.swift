@@ -111,14 +111,17 @@ import ScarfCore
     @MainActor
     static func capabilities(
         _ version: String, context: ServerContext, suite: String
-    ) async -> HermesCapabilitiesStore {
+    ) async throws -> HermesCapabilitiesStore {
         let caps = HermesCapabilities.parseLine("Hermes Agent v\(version)")
         let cache = HermesVersionCache(
             defaults: UserDefaults(suiteName: suite)!,
             probe: { _ in caps }
         )
         let store = HermesCapabilitiesStore(context: context, cache: cache)
-        _ = await waitUntil { store.capabilities.semver != nil }
+        // A store still on its unknown default gates every v0.15+ path off,
+        // and the test using it fails somewhere unrelated: fail here.
+        try #require(await waitUntil(timeoutSeconds: 15) { store.capabilities.semver != nil },
+                     "the capabilities store never resolved v\(version)")
         return store
     }
 
@@ -130,9 +133,9 @@ import ScarfCore
         version: String,
         optIn: Bool,
         defaultsSuite: String
-    ) async -> (vm: ChatViewModel, channel: ModeRecordingChannel) {
+    ) async throws -> (vm: ChatViewModel, channel: ModeRecordingChannel) {
         let vm = ChatViewModel(context: home.context)
-        vm.capabilitiesStore = await capabilities(
+        vm.capabilitiesStore = try await capabilities(
             version, context: home.context, suite: defaultsSuite
         )
         let store = ProjectAutoAcceptEditsStore(
@@ -160,7 +163,7 @@ import ScarfCore
         let suite = "com.scarf.tests.autoaccept.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
-        let (vm, channel) = await Self.bootProjectSession(
+        let (vm, channel) = try await Self.bootProjectSession(
             home: home, projectPath: "/p/opted-in", version: "0.15.0",
             optIn: true, defaultsSuite: suite
         )
@@ -181,7 +184,7 @@ import ScarfCore
         let suite = "com.scarf.tests.autoaccept.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
-        let (vm, channel) = await Self.bootProjectSession(
+        let (vm, channel) = try await Self.bootProjectSession(
             home: home, projectPath: "/p/plain", version: "0.15.0",
             optIn: false, defaultsSuite: suite
         )
@@ -202,7 +205,7 @@ import ScarfCore
         let suite = "com.scarf.tests.autoaccept.\(UUID().uuidString)"
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
-        let (vm, channel) = await Self.bootProjectSession(
+        let (vm, channel) = try await Self.bootProjectSession(
             home: home, projectPath: "/p/opted-in", version: "0.14.9",
             optIn: true, defaultsSuite: suite
         )
@@ -226,7 +229,7 @@ import ScarfCore
         // What an agent with a terminal can do: `defaults write`.
         defaults.set("on", forKey: "com.scarf.project.autoAcceptEdits./p/forged")
 
-        let (vm, channel) = await Self.bootProjectSession(
+        let (vm, channel) = try await Self.bootProjectSession(
             home: home, projectPath: "/p/forged", version: "0.15.0",
             optIn: false, defaultsSuite: suite
         )
@@ -245,7 +248,7 @@ import ScarfCore
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
 
         let vm = ChatViewModel(context: home.context)
-        vm.capabilitiesStore = await Self.capabilities(
+        vm.capabilitiesStore = try await Self.capabilities(
             "0.15.0", context: home.context, suite: suite
         )
         let channel = ModeRecordingChannel(sessionId: "sess-NP")

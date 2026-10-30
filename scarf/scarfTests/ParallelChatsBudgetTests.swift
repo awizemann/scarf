@@ -520,9 +520,9 @@ import ScarfCore
     // MARK: - Remembered approval mode
 
     @MainActor
-    static func modeVM(_ home: TempHermesHome, suite: String) async -> ChatViewModel {
+    static func modeVM(_ home: TempHermesHome, suite: String) async throws -> ChatViewModel {
         let vm = ChatViewModel(context: home.context, liveChatBudget: LiveChatBudget())
-        vm.capabilitiesStore = await ChatViewModelAutoAcceptEditsTests.capabilities(
+        vm.capabilitiesStore = try await ChatViewModelAutoAcceptEditsTests.capabilities(
             "0.15.0", context: home.context, suite: suite)
         return vm
     }
@@ -543,7 +543,8 @@ import ScarfCore
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
         let suite = "p1-mode-\(UUID().uuidString)"
-        let vm = await Self.modeVM(home, suite: suite)
+        let vm = try await Self.modeVM(home, suite: suite)
+        defer { vm.leaveChat() }
         let first = ModeChannel(sessionId: "sess-A")
         let second = ModeChannel(sessionId: "sess-A", loadMode: "default")
         let calls = Lifecycle.CallCounter()
@@ -556,19 +557,22 @@ import ScarfCore
         #expect(await Self.pickAcceptEdits(vm, on: first))
         let chat = vm.focusedChat
 
-        chat.releaseProcess()
+        // Let the release finish (cancel, client stop) before re-attaching.
+        await chat.releaseProcess()?.value
         vm.focus(chat) // shown and released: re-attaches
-        #expect(await Lifecycle.waitUntil { await second.modeIds == ["accept_edits"] },
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 15) { await second.modeIds == ["accept_edits"] },
                 "the picked mode was not re-sent after the re-attach")
         #expect(await second.sentMethods.contains("session/load"))
-        #expect(await Lifecycle.waitUntil { vm.richChatViewModel.activeApprovalMode == .acceptEdits })
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 15) {
+            vm.richChatViewModel.activeApprovalMode == .acceptEdits
+        })
     }
 
     /// The session came back in the picked mode already: nothing to send.
     @Test @MainActor func aPickedModeIsNotResentWhenTheSessionKeptIt() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
-        let vm = await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
+        let vm = try await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
         let first = ModeChannel(sessionId: "sess-A")
         let second = ModeChannel(sessionId: "sess-A", loadMode: "accept_edits")
         let calls = Lifecycle.CallCounter()
@@ -597,7 +601,7 @@ import ScarfCore
     @Test @MainActor func aPickedModeIsResentAfterAReconnect() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
-        let vm = await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
+        let vm = try await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
         let first = ModeChannel(sessionId: "sess-A")
         let second = ModeChannel(sessionId: "sess-A", loadMode: "default")
         let calls = Lifecycle.CallCounter()
@@ -622,7 +626,7 @@ import ScarfCore
     @Test @MainActor func aPickedModeSurvivesTheReconnectButton() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
-        let vm = await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
+        let vm = try await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
         let first = ModeChannel(sessionId: "sess-A")
         let second = ModeChannel(sessionId: "sess-A", loadMode: "default")
         let calls = Lifecycle.CallCounter()
@@ -648,7 +652,7 @@ import ScarfCore
     @Test @MainActor func aPickedModeIsResentWhenTheLoadReportsNoMode() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
-        let vm = await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
+        let vm = try await Self.modeVM(home, suite: "p1-mode-\(UUID().uuidString)")
         let first = ModeChannel(sessionId: "sess-A")
         let second = ModeChannel(sessionId: "sess-A", loadMode: nil)
         let calls = Lifecycle.CallCounter()

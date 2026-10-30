@@ -512,6 +512,23 @@ final class ChatSession {
     @ObservationIgnored
     private var promptTurnCounter = 0
 
+    /// Finishes once the most recently launched prompt's `session/prompt`
+    /// has been issued (`ACPClient.sendPrompt`'s `onIssued`: id assigned,
+    /// write queued) or failed before that. The next prompt waits on it,
+    /// so prompts reach Hermes in the order they were sent — not the order
+    /// their tasks happened to reach the client actor (held sends released
+    /// in one main-actor turn used to race). It waits for the ISSUE only,
+    /// never the previous turn: Hermes's own queueing (`/queue`, `/steer`,
+    /// a prompt sent mid-turn) is unchanged.
+    @ObservationIgnored
+    private var lastPromptIssued: AsyncStream<Never>?
+
+    /// Test seam: awaited (with the prompt's wire text) by each prompt task
+    /// before it waits its turn to issue — stands in for a slow executor
+    /// hop on the way to the client. Nil in the app.
+    @ObservationIgnored
+    var beforePromptIssueForTesting: (@MainActor (String) async -> Void)?
+
     /// Origins of the interruptive turns started since the chat was last
     /// idle. Kept until EVERY interruptive turn has returned, because a
     /// typed prompt Hermes queued behind a voice turn returns at once but
@@ -1588,8 +1605,15 @@ final class ChatSession {
         )
         hasSentPrompt = true
         if !isNonInterruptive { busyTurnOrigins.insert(origin) }
+        // Chain this prompt's issue behind the previous one's.
+        let previousIssued = lastPromptIssued
+        let issueHook = beforePromptIssueForTesting
+        let (issued, issuedContinuation) = AsyncStream<Never>.makeStream()
+        lastPromptIssued = issued
         let task = Task { @MainActor in
             defer { settlePromptTurn(token) }
+            // Whatever happens below, the next prompt must not wait forever.
+            defer { issuedContinuation.finish() }
             // Whether another interruptive turn is still in flight — then
             // this return doesn't end the chat's busy period.
             @MainActor func othersStillRunning() -> Bool {
@@ -1597,7 +1621,14 @@ final class ChatSession {
             }
             do {
                 let result = try await ScarfMon.measureAsync(.chatStream, "mac.sendPrompt") {
-                    try await client.sendPrompt(sessionId: sessionId, text: wireText, images: images, contextNotes: contextNotes)
+                    // Ends when the previous prompt was issued (immediately
+                    // if it already was, or if this task is cancelled).
+                    if let issueHook { await issueHook(wireText) }
+                    if let previousIssued { for await _ in previousIssued {} }
+                    return try await client.sendPrompt(
+                        sessionId: sessionId, text: wireText, images: images, contextNotes: contextNotes,
+                        onIssued: { issuedContinuation.finish() }
+                    )
                 }
                 // A turn resuming after its client was superseded
                 // (session switch / watchdog teardown mid-turn) must

@@ -44,10 +44,18 @@ public enum ScarfMon {
     /// Async variant. Same shape — the `defer` block fires after the body
     /// returns whether or not it threw, so cancelled / failed work still
     /// records its duration.
+    ///
+    /// Runs on the CALLER's isolation (`isolation`, defaulted to
+    /// `#isolation`), so wrapping a call in it never adds an executor hop.
+    /// As a plain nonisolated async func (Swift 5 mode) every call from the
+    /// main actor hopped to the global executor first; two prompts sent
+    /// back to back each took that hop, and the hops raced to `ACPClient`
+    /// — the second prompt could get the lower JSON-RPC id.
     @inline(__always)
     public static func measureAsync<T>(
         _ category: Category,
         _ name: StaticString,
+        isolation: isolated (any Actor)? = #isolation,
         _ body: () async throws -> T
     ) async rethrows -> T {
         guard isActive else { return try await body() }

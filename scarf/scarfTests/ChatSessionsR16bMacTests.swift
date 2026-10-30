@@ -233,7 +233,8 @@ import ScarfCore
     @Test @MainActor func secondSendDuringAutostartWaitsForTheReplayToDrain() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
-        let vm = ChatViewModel(context: home.context)
+        let vm = ChatViewModel(context: home.context, liveChatBudget: LiveChatBudget())
+        defer { vm.leaveChat() }
         let ch = GatedReplayChannel()
         vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in ch } }
         // After an exhausted reconnect: a session id, no client.
@@ -261,6 +262,40 @@ import ScarfCore
         }
         #expect(leaked.isEmpty, "load replay painted as new content: \(leaked.map(\.content))")
         #expect(rich.messages.filter(\.isUser).map(\.content) == ["first", "second"])
+    }
+
+    /// Prompts reach Hermes in the order they were sent, whatever order
+    /// their tasks reach the client in. The autostart's prompt and the held
+    /// sends are released in one main-actor turn, each in its own task;
+    /// each used to take its own executor hop to `ACPClient`, and the hops
+    /// raced for the JSON-RPC id and the write queue — "second" could reach
+    /// Hermes first. The seam slows "first" and "third" on that path; each
+    /// prompt now waits until the one before it is issued.
+    @Test @MainActor func heldSendsReachHermesInSendOrderWhenTheirTasksArriveOutOfOrder() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context, liveChatBudget: LiveChatBudget())
+        defer { vm.leaveChat() }
+        let ch = GatedReplayChannel()
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in ch } }
+        vm.richChatViewModel.setSessionId("sess-old")
+        vm.focusedChat.beforePromptIssueForTesting = { text in
+            if text == "first" || text == "third" {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+        }
+
+        vm.sendText("first")
+        #expect(await Lifecycle.waitUntil { await ch.hasPendingLoad })
+        for text in ["second", "third", "fourth"] { vm.sendText(text) }
+        #expect(await ch.sentMethods.contains("session/prompt") == false)
+
+        await ch.releaseLoad()
+        let allSent = await Lifecycle.waitUntil(timeoutSeconds: 15) {
+            await ch.sentMethods.filter { $0 == "session/prompt" }.count == 4
+        }
+        #expect(allSent)
+        #expect(await ch.promptTexts == ["first", "second", "third", "fourth"])
     }
 
     // MARK: - Bot Chat: no blind autostart

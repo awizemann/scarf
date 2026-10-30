@@ -106,6 +106,42 @@ import Foundation
         _ = await second.value
     }
 
+    final class Flag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func fire() { lock.withLock { count += 1 } }
+        var fired: Int { lock.withLock { count } }
+    }
+
+    /// `onIssued` fires once the prompt is issued — id assigned, write
+    /// queued — not when the turn ends: this channel never answers it.
+    /// A caller chains its next prompt on it (`ChatSession.launchPromptTask`).
+    @Test func onIssuedFiresWhenThePromptIsIssuedNotWhenItReturns() async throws {
+        let ch = SlowFirstPromptChannel()
+        let client = ACPClient(context: .local) { _ in ch }
+        try await client.start()
+        let flag = Flag()
+        let turn = Task { try? await client.sendPrompt(
+            sessionId: "s", text: "first", images: [], contextNotes: [], onIssued: { flag.fire() }) }
+        #expect(await waitFor { flag.fired == 1 })
+        await client.stop()
+        _ = await turn.value
+        #expect(flag.fired == 1, "onIssued must fire exactly once")
+    }
+
+    /// A prompt that fails before it is issued still fires `onIssued`, so a
+    /// prompt chained behind it is not stranded.
+    @Test func onIssuedFiresWhenTheSendFailsBeforeIssuing() async throws {
+        let client = ACPClient(context: .local) { _ in SlowFirstPromptChannel() }
+        let flag = Flag()
+        // Never started: no channel.
+        await #expect(throws: (any Error).self) {
+            _ = try await client.sendPrompt(
+                sessionId: "s", text: "x", images: [], contextNotes: [], onIssued: { flag.fire() })
+        }
+        #expect(flag.fired == 1)
+    }
+
     /// A write the channel refuses still fails its own request promptly —
     /// the queued write reports its error back to the request that issued it.
     @Test func aRefusedWriteFailsItsRequest() async throws {
