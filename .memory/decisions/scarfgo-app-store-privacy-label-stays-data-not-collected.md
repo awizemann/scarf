@@ -19,3 +19,9 @@ Decided by Alan on 2026-10-05 during 3.6.0 release prep, after the privacy polic
 - [constraint] Keep this true: any new ScarfGo feature that sends data to the developer or a third party by default would invalidate the label, so it must be opt-in and consent-gated or the label changes with it #privacy
 - [convention] App Review notes for each ScarfGo release explain the Live Voice path (audio, replies and status lines from the device; recent messages from the host) and why the label stays Data Not Collected; the text lives in releases/v<ver>/APP_STORE_METADATA.md #appstore
 - [fact] The iOS manifest declares UserDefaults CA92.1 and File Timestamp C617.1 (MetricKit reports and the TTS cache in the app container) as of 3.6.0 #appstore
+
+## Relations
+- implements [[ScarfGo App Store review: submission requirements and access model]]
+- relates_to [[ScarfGo Live Voice (P5b): gate, mic exclusivity, teardown and the shared prompt path]]
+- relates_to [[Push-to-talk dictation (ScarfIOS): on-device-only privacy contract + lifecycle teardown pattern]]
+- builds_on [[Live Voice core (ScarfCore/VoiceLive): the engine-agnostic surface both apps bind to]]

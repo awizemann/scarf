@@ -2,12 +2,12 @@
 title: Config reads must survive an invisible config.yaml — HermesConfigReader fallback chain (gh#112)
 type: note
 permalink: scarf/architecture/config-reads-must-survive-an-invisible-config-yaml
-source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/GuardedTextFile.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesConfigReader.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
 created: 2026-07-12
 updated: 2026-07-12
-reviewed: 2026-09-26
+reviewed: 2026-10-29
 reviewed_by: audit:claude-code (background)
 ---
 

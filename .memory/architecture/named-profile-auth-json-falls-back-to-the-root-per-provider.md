@@ -20,3 +20,7 @@ Under a named profile (`<root>/profiles/<name>`) Hermes does not read only the p
 - [constraint] `active_provider` is NOT merged — Hermes reads it from the profile's own file (`get_active_provider`, `auth.py:1070-1072`), (Scarf no longer uses `active_provider` for Nous at all: since R18c/T3-F2 'subscribed' = signed in, because Hermes gates the Tool Gateway on sign-in + entitlement, never the provider — `tools/tool_backend_helpers.py:18-28` @ v2026.9.24) #auth
 - [convention] Root path = `HermesProfileScope.rootHome(forHome:)` + `/auth.json`, only when `isProfileHome`; default-profile and undetected hosts read only their own file (C1). Inherited pools/providers render an 'inherited from default profile' badge and their Remove / OAuth-remove buttons are DISABLED: run in the profile, `hermes auth remove` never touches the root file (it copies the remaining root entries into the profile, or writes an empty list Hermes ignores) and logout clears only profile state — verified at v0.21.5. The chat 'No AI provider credentials' check (`HermesFileService.hasAnyAICredential`) uses the same fallback #ui
 - [gotcha] `HermesAuthFallback.load` calls `HermesVersionCache.capabilitiesSync` via callers — only ever from detached/OffPool work, never the main actor (C10) #concurrency
+
+## Relations
+- relates_to [[Whole-server operations must cover every profile home, not just the root]]
+- relates_to [[Hermes gateway multiplex-by-default and parked profiles (v0.21.4 / v0.21.5)]]

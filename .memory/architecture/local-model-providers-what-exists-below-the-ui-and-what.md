@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/local-model-providers-what-exists-below-the-ui-and-what
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LocalModelProviders.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesRoutableProviders.swift]
 source_paths_inferred: false
-source_sha: 3b042718fac93b0021f7dccf7f75ed4530b394ef
+source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
 created: 2026-07-13
 updated: 2026-09-27
-reviewed: 2026-10-06
+reviewed: 2026-10-29
 reviewed_by: audit:claude-code (background)
 ---
 

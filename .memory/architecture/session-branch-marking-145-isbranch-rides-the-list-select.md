@@ -20,3 +20,8 @@ GitHub #145: Scarf marks sessions created by Hermes /branch in the Mac Sessions 
 - [fact] Lineage signals: parent end_reason='branched' since v2026.4.8, stable model_config._branched_from marker since v2026.6.5; both gated behind hasListableChildSupport (v0.20.4 columns + JSON1), and without it the SELECT is byte-identical and nothing is marked (C1) #gating
 - [convention] The branch badge is a text 'Branch' capsule, never arrow.triangle.branch — that glyph means Subagent in SessionDetailView; compression/reset children are never marked #ui
 - [gotcha] Compression-tip projection keeps the ROOT row's isBranch/branchParentTitle (projectedOntoCompressionTip / addingUsage), since the root is the listed branch #sessions
+
+## Relations
+- relates_to [[scarf/architecture/scarf-session-lists-mirror-hermes-list-sessions-rich]]
+- implements [[scarf/architecture/hermes-capability-gating-pattern]]
+- relates_to [[scarf/decisions/hermes-v0-20-4-compatibility-decisions]]

@@ -5,10 +5,10 @@ permalink: scarf/architecture/which-scarf-surface-writes-which-config-file-skill
 tags: [settings, models, skills, config, testing]
 source_paths: [scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SkillsScanner.swift]
 source_paths_inferred: false
-source_sha: 617115a44db1d20a6f87b2db698c6f6c549e612f
+source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
 created: 2026-09-08
 updated: 2026-09-27
-reviewed: 2026-09-28
+reviewed: 2026-10-30
 reviewed_by: audit:claude-code (background)
 ---
 

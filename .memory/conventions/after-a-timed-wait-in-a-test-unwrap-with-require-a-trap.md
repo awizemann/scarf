@@ -4,9 +4,11 @@ type: note
 permalink: scarf/conventions/after-a-timed-wait-in-a-test-unwrap-with-require-a-trap
 source_paths: [scarf/scarfTests/ChatViewModelEnvironmentHintTests.swift, scarf/scarfTests/BotsViewModelTests.swift, scarf/scarfTests/HermesP7fCronPeersTests.swift]
 source_paths_inferred: false
-source_sha: 6cd59436d8fbf968f77b919a6eda5177810f7039
+source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
 created: 2026-10-05
 updated: 2026-10-05
+reviewed: 2026-10-30
+reviewed_by: audit:claude-code (background)
 ---
 
 - [convention] In scarfTests, any value read after a timed poll (`waitUntil`, `settle`, `waitForLoad`, a `for _ in 0..<200` sleep loop) must be unwrapped with `try #require(...)`, never `!`, `.first!`, or `array[n]`. Under heavy machine load (load average 160–450 seen 2026-10-05) the wait times out, the force-unwrap or out-of-range subscript traps, and the trap takes down the whole scarfTests host — hundreds of unrelated in-flight tests then report "Crash: scarf". #testing

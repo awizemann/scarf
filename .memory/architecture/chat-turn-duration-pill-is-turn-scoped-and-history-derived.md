@@ -5,10 +5,10 @@ permalink: scarf/architecture/chat-turn-duration-pill-is-turn-scoped-and-history
 tags: [chat, turn-duration]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift]
 source_paths_inferred: false
-source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
+source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-10-27
+reviewed: 2026-10-29
 reviewed_by: audit:claude-code (background)
 ---
 

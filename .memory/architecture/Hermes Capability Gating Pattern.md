@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-capability-gating-pattern
 tags: [architecture, capabilities, versioning]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/scarf/scarfApp.swift, scarf/Scarf iOS/App/ScarfGoTabRoot.swift]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
 created: 2026-05-29
 updated: 2026-09-27
-reviewed: 2026-10-28
+reviewed: 2026-10-30
 reviewed_by: audit:claude-code (background)
 ---
 

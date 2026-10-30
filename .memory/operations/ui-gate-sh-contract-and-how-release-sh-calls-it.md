@@ -4,10 +4,10 @@ type: note
 permalink: scarf/operations/ui-gate-sh-contract-and-how-release-sh-calls-it
 source_paths: [scripts/release.sh]
 source_paths_inferred: false
-source_sha: 7c0b8a6367b4a0c476e0b1a38c63e597abac5af6
+source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
 created: 2026-09-08
 updated: 2026-09-21
-reviewed: 2026-09-08
+reviewed: 2026-10-29
 reviewed_by: audit:claude-code (background)
 ---
 

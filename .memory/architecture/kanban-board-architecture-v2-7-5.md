@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/kanban-board-architecture-v2-7-5
 tags: [kanban, drag-drop, tenants]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/KanbanError.swift, scarf/scarf/Core/Services/KanbanTenantResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanTenantReader.swift, scarf/scarf/Features/Kanban/ViewModels/KanbanBoardViewModel.swift, scarf/scarf/Features/Kanban/Views/KanbanBoardView.swift]
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
 created: 2026-05-29
 updated: 2026-09-28
-reviewed: 2026-09-29
+reviewed: 2026-10-29
 reviewed_by: audit:claude-code (background)
 ---
 

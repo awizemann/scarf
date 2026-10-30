@@ -3,18 +3,21 @@ title: Template Catalog Pipeline
 type: note
 permalink: scarf/ops/template-catalog-pipeline
 tags: [templates, catalog, gh-pages]
-source_paths: [tools/build-catalog.py, tools/test_build_catalog.py, scripts/catalog.sh, site/index.html.tmpl, site/template.html.tmpl, site/widgets.js, .github/workflows/validate-template-pr.yml]
-source_sha: 8d2293330e574b9e3b4ff42f6fcd155af248ab59
+source_paths: [tools/build-catalog.py, tools/test_build_catalog.py, tools/check-design-tokens.py, scripts/catalog.sh, site/index.html.tmpl, site/template.html.tmpl, site/widgets.js, .github/workflows/validate-template-pr.yml]
+source_paths_inferred: false
+source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
 created: 2026-05-29
 updated: 2026-05-29
+reviewed: 2026-10-30
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations
 - [location] Shipped community templates live at templates/<author>/<name>/. templates/CONTRIBUTING.md explains author submission flow. Catalog site served at awizemann.github.io/scarf/templates/ alongside the Sparkle appcast on gh-pages — disjoint paths #paths
-- [validator] tools/build-catalog.py is stdlib-only Python 3.9+. Walks templates/*/*/, validates every .scarftemplate against its manifest claim (mirrors Swift ProjectTemplateService.verifyClaims), enforces 5 MB bundle-size cap, scans for high-confidence secret patterns, checks staging/ matches built bundle byte-for-byte, emits templates/catalog.json. Tested by tools/test_build_catalog.py (16 tests) #validator
+- [validator] tools/build-catalog.py is stdlib-only Python 3.9+. Walks templates/*/*/, validates every .scarftemplate against its manifest claim (mirrors Swift ProjectTemplateService.verifyClaims), enforces 5 MB bundle-size cap, scans for high-confidence secret patterns, checks staging/ matches built bundle byte-for-byte, emits templates/catalog.json. Tested by tools/test_build_catalog.py (34 tests across 6 test classes) #validator
 - [design-tokens] tools/check-design-tokens.py validates site/styles.css mirrors ScarfDesign's accent/on-accent/background colorsets against ScarfBrand.xcassets and checks for contrast regressions. Called as a gate in cmd_check, cmd_build, cmd_preview, cmd_publish before build/preview — dies on drift #design-tokens
 - [wrapper] scripts/catalog.sh mirrors scripts/wiki.sh shape: check / build / preview / serve / publish subcommands. All build commands (check, build, preview, publish) run design-tokens validation first. `publish` adds a SECOND-PASS secret-scan against rendered site before committing + pushing gh-pages #wrapper
-- [site] site/index.html.tmpl + site/template.html.tmpl are {{TOKEN}}-substitution templates. site/widgets.js (~300 lines vanilla JS) renders a ProjectDashboard JSON into HTML using the same widget vocabulary the Swift app uses — each template's detail page shows a live preview of its post-install dashboard #site
+- [site] site/index.html.tmpl + site/template.html.tmpl are {{TOKEN}}-substitution templates. site/widgets.js (744 lines vanilla JS) renders a ProjectDashboard JSON into HTML using the same widget vocabulary the Swift app uses — each template's detail page shows a live preview of its post-install dashboard #site
 - [install-url] Install URLs raw-served from main: https://raw.githubusercontent.com/awizemann/scarf/main/templates/<author>/<name>/<name>.scarftemplate. No per-template Releases ceremony #distribution
 - [ci] .github/workflows/validate-template-pr.yml runs Python validator + its tests on every PR that touches templates/, the validator, or its tests. Failures post a comment with last 3 KB of validator log #ci
 - [maintainer-workflow] On merge to main: `./scripts/catalog.sh build` (design-tokens gate + regenerate templates/catalog.json + .gh-pages-worktree/templates/) → `./scripts/catalog.sh publish` (design-tokens + secret-scan + commit + push gh-pages). Manual cadence, no auto-deploy — same as scripts/release.sh #workflow

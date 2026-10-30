@@ -3,12 +3,12 @@ title: Chat /title is client-side rename; /retry and /undo are intercepted, neve
 type: note
 permalink: scarf/decisions/chat-title-is-client-side-rename-retry-and-undo-are
 tags: [slash-commands, chat, gh147]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Features/Chat/Views/ChatInspectorPane.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/scarf/Features/Chat/ViewModels/ChatSession.swift, scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Features/Chat/Views/ChatInspectorPane.swift]
 source_paths_inferred: false
-source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
+source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-10-27
+reviewed: 2026-10-30
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,9 +5,11 @@ permalink: scarf/architecture/hermes-env-values-python-dotenv-parse-then-expansi
 tags: [hermes-env, dotenv, secrets, templates]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SecretsEnvBlock.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/SecretsEnvBlockTests.swift]
 source_paths_inferred: false
-source_sha: d6533b8fc52976a84b6ca58711e874e03fce50fc
+source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
 created: 2026-09-26
 updated: 2026-09-26
+reviewed: 2026-10-29
+reviewed_by: audit:claude-code (background)
 ---
 
 Found in R12 (S12-F5) while fixing the template-secrets block Scarf mirrors into `~/.hermes/.env`. Verified by loading a scratch file with the reference worktree's own loader (`hermes_cli.env_loader._load_dotenv_with_fallback`, v2026.9.24 `.venv`, python-dotenv 1.2.2) under an empty environment; the golden pairs live in `SecretsEnvBlockTests.escapedValuesRoundTripThroughHermesDotenvLoader`.

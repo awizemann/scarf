@@ -3,16 +3,14 @@ title: UI release gate: XCUITest is the gate, Harness is exploratory, fixture ho
 type: note
 permalink: scarf/decisions/ui-release-gate-xcuitest-is-the-gate-harness-is-exploratory
 tags: [testing, release, harness, xcuitest]
-source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarfUITests/TemplateInstallUITests.swift, scarf/scarf/Navigation/AppCoordinator.swift, scripts/release.sh]
+source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarf/ContentView.swift, scripts/release.sh, scripts/ui-gate.sh, scripts/ui-fixture/make-ui-fixture.sh]
 source_paths_inferred: false
-source_sha: 3b042718fac93b0021f7dccf7f75ed4530b394ef
+source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
 created: 2026-09-08
 updated: 2026-09-21
-reviewed: 2026-10-06
+reviewed: 2026-10-30
 reviewed_by: audit:claude-code (background)
 ---
-
-Decided 2026-09-08 with Alan. Full plan: documents/testing/ui-release-gate-plan-2026-09-08.md. Harness "replay" is a viewer of a finished run's events.jsonl, not a re-executor, and its autonomous runs are LLM-driven and non-deterministic, so it cannot be a pass/fail gate.
 
 ## Observations
 - [decision] The pre-release UI gate is XCUITest (scarfUITests on ScarfUITestCase isolation): a per-section sweep plus journeys, three test plans Smoke / Full / Live, run from release.sh with multiple modes and a --skip-ui-tests escape hatch; default is unit tests locally + Full/Live in Tart VM, --host-ui-gate runs all on this Mac (~25 min) #testing #release
