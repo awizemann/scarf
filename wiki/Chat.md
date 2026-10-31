@@ -2,7 +2,7 @@
 title: Chat
 type: note
 permalink: scarf-wiki/chat
-updated: 2026-07-14
+updated: 2026-10-31
 created: 2026-05-29
 ---
 
@@ -132,6 +132,24 @@ Nothing to set up. Your voice never leaves the device: Scarf forces on-device re
 - **Chained: "On-device speech recognition isn't available for this language."** Download the language's on-device model (macOS: System Settings → Keyboard → Dictation; iOS: Settings → General → Keyboard → Dictation languages) or pick a supported language.
 - **Button's there, but starting a session fails right away.** The host doesn't have an OpenAI key configured yet (see step 3 above) — nothing is billed when this happens.
 - **Session ended on its own.** Either it sat silent for a few minutes, or something closed the window / switched servers / quit the app — all of those end a session on purpose so it never keeps billing unattended.
+
+## Parallel chats _(v3.8+, Mac)_
+
+A window keeps several chats live at once, each with its own `hermes acp` process, transcript and draft. Clicking into another chat doesn't stop the one you left.
+
+**Rows.** Each row shows the chat's state, most urgent first: needs an answer, error, replying, finished and unread.
+
+**Approvals.** A background chat's approval shows in its row and doesn't cover the chat you're in. With Notify on, it also sends a notification; clicking it opens that chat.
+
+**The limit.** Each server keeps up to 4 live chats over SSH, or 8 on your Mac. Opening one more releases the oldest idle chat, which reconnects with its transcript when you return. If every chat is working, Scarf asks which to stop; Wait opens nothing, and you can try again when one finishes.
+
+**Closing.** Closing a window, quitting or switching profile asks first when a chat is working or a wizard prompt is waiting to start.
+
+**Lost turns.** If a gateway dies mid-turn, Hermes can't tell whether the turn finished, so Scarf shows Hermes's message and never resends. If the lost turn then blocks the session, use **Discard Lost Turn**.
+
+ScarfGo stays one chat at a time for now, and asks before you switch away from a chat that's still replying.
+
+
 
 ## Background completion notifications _(v2.6+, Mac)_
 
