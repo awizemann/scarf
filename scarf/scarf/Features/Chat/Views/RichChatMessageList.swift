@@ -142,12 +142,16 @@ struct RichChatMessageList: View {
                         ResumeContinuityNoticeRow(text: resumeNotice.text)
                     }
 
+                    // Read once per list, not once per row: each read goes to
+                    // UserDefaults, and this closure reruns on streaming updates.
+                    let toolStyle = listToolCardStyle
+                    let reasoningStyle = listReasoningStyle
                     ForEach(groups) { group in
                         // A group whose every message is density-hidden must
                         // not render at all: a zero-height row still collects
                         // the VStack's 16pt spacing, and a tool-heavy turn
                         // hides a dozen in a row — read as one big blank gap.
-                        if !group.isHiddenByDensity(toolStyle: listToolCardStyle, reasoningStyle: listReasoningStyle) {
+                        if !group.isHiddenByDensity(toolStyle: toolStyle, reasoningStyle: reasoningStyle) {
                             MessageGroupView(
                                 group: group,
                                 turnDurations: turnDurations,
