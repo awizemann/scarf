@@ -103,3 +103,31 @@ files and would carry a prior session's changes forward). Find one staged in you
 **Memophant (the app)** is the management surface — browse, search, and edit every tier,
 run the kanban, migrate docs, and commit/publish through the secret scan.
 <!-- memophant:end -->
+
+## Scarf project enrichment (added by template-author, 2026-10-31)
+
+This directory is the Scarf app repo itself AND a registered Scarf project (tenant `scarf:scarf`, id `CDD496D4-EF55-404F-82F8-88883E85402E`).
+
+### Dashboard — `.scarf/dashboard.json`
+Sections: **Project Status** (Version 3.7.1, 32 feature areas, Swift file count, Parallel Chats P1 progress), **Active Work** (current branch checklist + latest release notes), **Architecture** (feature pie, commits bar, key modules table), **Board & Build** (Kanban summary, weekly-digest job status, `This Week` report, build steps, dependencies).
+- `cron_status` (jobId `7307d377be1f`) + `markdown_file` (`.scarf/reports/weekly-digest.md`) are fed by the paused **Weekly Digest** cron job. They refresh automatically when the cron writes under `.scarf/`.
+- Keep widgets live by keeping `.scarf/` the write target for any report the agent generates.
+
+### Mini-apps — `.scarf/miniapps/`
+- `task-board` — reads the project's Kanban via `query:kanban.tasks` (non-sensitive); filter buttons by status. Runs immediately.
+- `release-notes` — reads `releases/v<X>/RELEASE_NOTES.md` via `file:read` (non-sensitive); pick a version to render. Runs immediately.
+- Both are `generated: true` with only non-sensitive permissions — no approval needed on first open.
+
+### Slash commands — `.scarf/slash-commands/`
+- `/latest-release` — latest version, highlights, unreleased commits.
+- `/branch-status` — current branch (parallel-chats) state from `git log` + `TASKS.md`.
+- `/architecture <topic>` — explain feature modules / packages / transport with `path:line` refs.
+- `/build-guide` — build from source, no-Apple-ID debug build, release pipeline.
+
+### Cron
+- `[proj:CDD496D4-EF55-404F-82F8-88883E85402E] Scarf weekly release digest` (id `7307d377be1f`) — weekly Mon 9am, **paused**. When enabled it writes `.scarf/reports/weekly-digest.md` and touches `dashboard.json`. Enable via the Cron tab.
+
+### What NOT to do
+- Do not edit inside the `<!-- memophant:begin/end -->` block above.
+- Do not hand-write `.scarf/project.json` identity fields; Scarf owns it.
+- Never put secrets in `.scarf/dashboard.json` or `.scarf/manifest.json`.
