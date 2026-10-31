@@ -706,7 +706,7 @@ import ScarfCore
         let deletes = DeleteRecorder()
         vm.sessionDeleteRunner = { _, sid in
             deletes.record(sid)
-            return 0
+            return (0, "")
         }
 
         vm.startNewSession()
@@ -763,7 +763,7 @@ import ScarfCore
         let deletes = DeleteRecorder()
         vm.sessionDeleteRunner = { _, sid in
             deletes.record(sid)
-            return 0
+            return (0, "")
         }
 
         vm.startNewSession()
@@ -803,7 +803,7 @@ import ScarfCore
         let deletes = DeleteRecorder()
         vm.sessionDeleteRunner = { _, sid in
             deletes.record(sid)
-            return 0
+            return (0, "")
         }
 
         vm.startNewSession()

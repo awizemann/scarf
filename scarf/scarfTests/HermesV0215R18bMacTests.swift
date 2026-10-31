@@ -159,7 +159,7 @@ struct HermesV0215R18bMacTests {
         let home = try TempHermesHome()
         defer { home.cleanup() }
         let vm = ChatViewModel(context: home.context)
-        vm.sessionDeleteRunner = { _, _ in 1 }
+        vm.sessionDeleteRunner = { _, _ in (1, "") }
         await vm.deleteSession("gone")
         let hint = try #require(vm.richChatViewModel.transientHint)
         #expect(hint.contains("Couldn't delete that session"))

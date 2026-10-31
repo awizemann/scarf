@@ -740,20 +740,16 @@ struct ChatView: View {
         // Live-chat budget: every chat holding a process on this host is
         // working or shown in a window. Stop one (its turn is cancelled, its transcript kept) and
         // the chat the user asked for opens; or wait, and nothing opens.
-        .confirmationDialog(
-            "Every live chat on \(viewModel.budgetBlocked?.hostName ?? viewModel.context.displayName) is in use",
-            isPresented: budgetBlockedBinding,
-            titleVisibility: .visible,
-            presenting: viewModel.budgetBlocked
-        ) { block in
-            ForEach(block.working) { chat in
-                Button("Stop “\(chat.title)”", role: .destructive) {
-                    viewModel.stopChatForBudget(block, chatID: chat.id)
-                }
-            }
-            Button("Wait", role: .cancel) { viewModel.waitForBudget() }
-        } message: { block in
-            Text("Scarf keeps up to \(block.limit) chats connected to \(block.hostName) at once. Stop one to open this chat, or wait until one finishes.")
+        //
+        // A sheet, not a `confirmationDialog`: macOS shows such a dialog's
+        // first three buttons and an OK, which hid the fourth chat and Wait
+        // on a remote host at its budget of 4.
+        .sheet(item: budgetBlockBinding) { block in
+            LiveChatBudgetSheet(
+                block: block,
+                onStop: { chatID in viewModel.stopChatForBudget(block, chatID: chatID) },
+                onWait: { viewModel.waitForBudget() }
+            )
         }
         // Kanban toolset onboarding — fires on the user's first `/goal`
         // when Scarf's chats lack kanban tools. On 0.21.5+ it offers to add
@@ -812,13 +808,13 @@ struct ChatView: View {
     /// can write this before running the button pressed, so the VM settles
     /// it a turn later (`budgetDialogDismissed`): a Stop is never also a
     /// Wait.
-    private var budgetBlockedBinding: Binding<Bool> {
+    private var budgetBlockBinding: Binding<ChatViewModel.BudgetBlock?> {
         // The block on screen when this binding was made (the body re-runs
         // whenever it changes): a later write dismisses that one only.
         let presented = viewModel.budgetBlocked?.id
         return Binding(
-            get: { viewModel.budgetBlocked != nil },
-            set: { if !$0 { viewModel.budgetDialogDismissed(blockID: presented) } }
+            get: { viewModel.budgetBlocked },
+            set: { if $0 == nil { viewModel.budgetDialogDismissed(blockID: presented) } }
         )
     }
 
@@ -829,6 +825,53 @@ struct ChatView: View {
                 if !newValue { viewModel.cancelModelPreflight() }
             }
         )
+    }
+}
+
+// MARK: - Live-chat budget
+
+/// Every live chat on a host is working: stop one, or wait. One button per
+/// chat, however many the host's budget allows.
+private struct LiveChatBudgetSheet: View {
+    let block: ChatViewModel.BudgetBlock
+    let onStop: (UUID) -> Void
+    let onWait: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: ScarfSpace.s3) {
+            Text("Every live chat on \(block.hostName) is in use")
+                .scarfStyle(.headline)
+                .foregroundStyle(ScarfColor.foregroundPrimary)
+            Text("Scarf keeps up to \(block.limit) chats connected to \(block.hostName) at once. Stop one to open this chat now, or choose Wait: nothing opens, and you can try again when one finishes.")
+                .scarfStyle(.footnote)
+                .foregroundStyle(ScarfColor.foregroundMuted)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: ScarfSpace.s2) {
+                ForEach(block.working) { chat in
+                    Button("Stop “\(chat.title)”", role: .destructive) {
+                        onStop(chat.id)
+                        dismiss()
+                    }
+                    .buttonStyle(ScarfDestructiveButton())
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Wait") {
+                    onWait()
+                    dismiss()
+                }
+                .buttonStyle(ScarfGhostButton())
+                .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(ScarfSpace.s5)
+        .frame(width: 420)
     }
 }
 

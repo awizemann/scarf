@@ -83,6 +83,12 @@
 # used: ScarfRack's clones (ui-dev, …) are not supported. Only this run's own
 # guest folders are removed.
 #
+# The Live plan also gets a "remote" Hermes over real SSH: the guest's own sshd
+# on 127.0.0.1, a throwaway key in the run dir, a copy of the fixture home and
+# one servers.json entry (ParallelChatsLiveUITests' budget journeys, ⌘2), plus a
+# once-a-second list of `hermes acp` processes for the sandboxed runner, which
+# can't run ps. All of it is removed with the run.
+#
 # Results: build/ui-gate-vm/results/<stamp>/ — summary.md, one .xcresult and
 # one .log per plan, plus the setup and fixture logs. Exits non-zero when any
 # plan is not PASS. Verdicts are scripts/ui-gate.sh's (--classify): PASS, FAIL,
@@ -145,7 +151,7 @@ while [[ $# -gt 0 ]]; do
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,92p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,98p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -285,7 +291,7 @@ gbash() { gssh_in "bash -s" <<<"$1"; }
 # runner's temp dirs, and a ~/.hermes a run created (marked inside, see step 3).
 # guest.sh's cleanup runs the same lines.
 HERMES_MARK=".scarf-ui-gate-vm-created"
-SWEEP='for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do [ -d "$d" ] && find "$d" -maxdepth 1 -name "scarf-uitest-home-*" -exec rm -rf {} + 2>/dev/null; done; [ -f "$HOME/.hermes/'"$HERMES_MARK"'" ] && rm -rf "$HOME/.hermes"; true'
+SWEEP='for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do [ -d "$d" ] && find "$d" -maxdepth 1 -name "scarf-uitest-home-*" -exec rm -rf {} + 2>/dev/null; done; [ -f "$HOME/.hermes/'"$HERMES_MARK"'" ] && rm -rf "$HOME/.hermes"; [ -f "$HOME/.ssh/authorized_keys" ] && sed -i "" /scarf-ui-gate-vm-loopback/d "$HOME/.ssh/authorized_keys"; [ -f "$HOME/.ssh/known_hosts" ] && ssh-keygen -q -R 127.0.0.1 >/dev/null 2>&1; rm -f "$HOME/.ssh/known_hosts.old"; f="$HOME/Library/Application Support/scarf/servers.json"; grep -q 5CA2F00D-0000-4000-9000-000000000C01 "$f" 2>/dev/null && rm -f "$f"; pkill -f scarf-ssh- ; true'
 cleanup() {
   local status=$?
   trap '' INT TERM
@@ -316,7 +322,7 @@ cleanup() {
 # only matching FILE NAMES come back).
 verify_guest_clean() {
   local left mins found
-  left="$(gbash "ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
+  left="$(gbash "ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l scarf-ui-gate-vm-loopback ~/.ssh/authorized_keys 2>/dev/null; grep -l 5CA2F00D-0000-4000-9000-000000000C01 \"\$HOME/Library/Application Support/scarf/servers.json\" 2>/dev/null; ssh-keygen -F 127.0.0.1 >/dev/null 2>&1 && echo known_hosts:127.0.0.1; pgrep -fl scarf-ssh- 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
   mins=$(( ( $(date +%s) - STARTED_AT ) / 60 + 5 ))
   found=""; local searched="searched for"
   if [[ ! -s "$SCRATCH/secret-values" ]]; then
@@ -566,6 +572,52 @@ export UV_CACHE_DIR="$W/uv/cache" UV_PYTHON_INSTALL_DIR="$W/uv/python" UV_PYTHON
 mkdir -p "$TMPDIR"
 UV="$W/bin/uv"; HB="$W/venv/bin/hermes"; FIXTURE="$W/fixture/fixture-home"
 SHIM="$HOME/.local/bin/hermes"; SHIM_MARK="scarf-ui-gate-vm $STAMP"
+# A "remote" Hermes the Live plan's budget journey reaches over real SSH: this
+# guest's own sshd, on 127.0.0.1, with a throwaway key, a copy of the fixture
+# home, and one servers.json entry with a fixed id. All of it goes with the run.
+LOOPBACK_ID="5CA2F00D-0000-4000-9000-000000000C01"; LOOPBACK_MARK="scarf-ui-gate-vm-loopback"
+SERVERS="$HOME/Library/Application Support/scarf/servers.json"
+loopback_sweep() {
+  [ -f "$HOME/.ssh/authorized_keys" ] && sed -i '' "/$LOOPBACK_MARK/d" "$HOME/.ssh/authorized_keys" || true
+  [ -f "$HOME/.ssh/known_hosts" ] && ssh-keygen -q -R 127.0.0.1 >/dev/null 2>&1 || true
+  rm -f "$HOME/.ssh/known_hosts.old"
+  if grep -q "$LOOPBACK_ID" "$SERVERS" 2>/dev/null; then rm -f "$SERVERS"; fi
+  # The ssh ControlMaster Scarf left behind (ControlPersist).
+  pkill -f "scarf-ssh-" 2>/dev/null || true
+}
+loopback_up() {
+  # Someone else's server list stays, and the journey skips itself.
+  if [ -e "$SERVERS" ] && ! grep -q "$LOOPBACK_ID" "$SERVERS"; then return 0; fi
+  mkdir -p "$W/loopback" "$HOME/.ssh" "$(dirname "$SERVERS")"
+  chmod 700 "$W/loopback" "$HOME/.ssh"
+  [ -f "$W/loopback/id" ] || ssh-keygen -q -t ed25519 -N '' -C "$LOOPBACK_MARK" -f "$W/loopback/id"
+  grep -q "$LOOPBACK_MARK" "$HOME/.ssh/authorized_keys" 2>/dev/null || cat "$W/loopback/id.pub" >>"$HOME/.ssh/authorized_keys"
+  chmod 600 "$HOME/.ssh/authorized_keys"
+  if [ ! -d "$W/remote-home" ]; then
+    cp -R "$FIXTURE" "$W/remote-home"
+    # A person answers approvals here (the journey that raises one can't write
+    # this home from the sandboxed runner).
+    printf '\napprovals:\n  mode: manual\n' >>"$W/remote-home/config.yaml"
+  fi
+  cat >"$SERVERS" <<EOF
+{"schemaVersion":1,"entries":[{"id":"$LOOPBACK_ID","displayName":"Loopback","openOnLaunch":false,"kind":{"ssh":{"_0":{"host":"127.0.0.1","user":"$(id -un)","identityFile":"$W/loopback/id","remoteHome":"$W/remote-home","hermesBinaryHint":"$HOME/.local/bin/hermes","hermesBinaryHintIsPath":true}}}}]}
+EOF
+  export TEST_RUNNER_SCARF_UITEST_LOOPBACK_ID="$LOOPBACK_ID"
+  export TEST_RUNNER_SCARF_UITEST_LOOPBACK_HOME="$W/remote-home"
+}
+# The UI-test runner is sandboxed and can't list processes (ps and pgrep both
+# refuse), so this writes what the Live journeys need to count: every process
+# with `hermes … acp` in its command line, once a second.
+acp_watch() {
+  export TEST_RUNNER_SCARF_UITEST_ACP_PROCS="$W/acp-procs.txt"
+  ( while [ -d "$W" ]; do
+      ps -axwwo command= | grep ' acp' | grep hermes >"$W/acp-procs.tmp" || true
+      mv "$W/acp-procs.tmp" "$W/acp-procs.txt"
+      sleep 1
+    done ) >/dev/null 2>&1 &
+  ACP_WATCH=$!
+  trap 'kill "$ACP_WATCH" 2>/dev/null || true' EXIT
+}
 case "$CMD" in
 setup)
   py="$1"; expect="$2"
@@ -604,6 +656,7 @@ fixture)
 plan)
   plan="$1"; xctestrun="$2"; bundle="$3"; per_test="$4"; per_test_max="$5"; shift 5
   cd "$W"
+  if [ "$plan" = Live ]; then loopback_up; acp_watch; fi
   TEST_RUNNER_SCARF_UITEST_FIXTURE="$FIXTURE" \
   xcodebuild test-without-building \
     -xctestrun "$W/Products/$xctestrun" \
@@ -629,9 +682,11 @@ cleanup)
     for d in "$W" "$RW"; do
       pkill -"$sig" -f "$d/venv/" 2>/dev/null || true
       pkill -"$sig" -f "$d/Products/" 2>/dev/null || true
+      pkill -"$sig" -f "$d plan " 2>/dev/null || true
     done
     [ "$sig" = KILL ] || sleep 2
   done
+  loopback_sweep
   if [ -f "$SHIM" ] && grep -q "$SHIM_MARK" "$SHIM"; then rm -f "$SHIM"; fi
   rmdir "$HOME/.local/bin" "$HOME/.local" 2>/dev/null || true
   # The tests' throwaway homes (copies of the fixture, credentials included).

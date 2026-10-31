@@ -145,7 +145,7 @@ import ScarfCore
         let probe = RunnerProbe()
         vm.sessionDeleteRunner = { _, id in
             probe.record(id, nil)
-            return 0
+            return (0, "")
         }
         await vm.deleteSession("sess-9")
         #expect(probe.all.map(\.id) == ["sess-9"])

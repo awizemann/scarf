@@ -247,6 +247,30 @@ final class ChatSession {
     @ObservationIgnored
     private var hasSentPrompt = false
 
+    /// What the chat list calls this chat until Hermes has stored it, and
+    /// when its first prompt went out (`ChatViewModel.sessionsForList`). Kept
+    /// apart from the transcript so a row doesn't re-render on streamed text.
+    private(set) var unstoredRow: (title: String, since: Date)?
+    /// This chat began with `session/new`, not a resume: only such a chat can
+    /// be one Hermes hasn't stored. A resumed session is merely older than
+    /// the list's newest 50.
+    @ObservationIgnored
+    private var startedFresh = false
+    /// A delete stopped this chat's turn and hasn't been answered yet.
+    @ObservationIgnored
+    private var stoppedForDelete = false
+
+    /// Hermes lists this session now: no temporary row, ever again.
+    func noteStoredByHermes() { unstoredRow = nil }
+
+    /// Stop for a delete Hermes hasn't answered yet: the transcript stays, and
+    /// nothing claims the session is gone (`tearDownDeletedActiveSession` does
+    /// once it is).
+    func stopForDeletion() -> Task<Void, Never>? {
+        stoppedForDelete = true
+        return stop(reason: "Turn cancelled.")
+    }
+
     /// Same category the code logged under before the extraction, so log
     /// filters keep matching.
     private let logger = Logger(subsystem: "com.scarf", category: "ChatViewModel")
@@ -826,6 +850,9 @@ final class ChatSession {
         richChatViewModel.reset()
         targetSessionId = nil
         hasSentPrompt = false
+        unstoredRow = nil
+        startedFresh = false
+        stoppedForDelete = false
         // A new session boundary: the badge must not carry the last
         // chat's model (S03-F2). The start sets it from the session.
         currentModelPreset = nil
@@ -1365,6 +1392,7 @@ final class ChatSession {
                 } else {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
+                    startedFresh = true
                 }
                 guard startStillCurrent(intent, client: client) else { return }
 
@@ -1731,6 +1759,12 @@ final class ChatSession {
             sessionId: sessionId, origin: origin, isNonInterruptive: isNonInterruptive, task: nil
         )
         hasSentPrompt = true
+        // A slash command Hermes answers itself saves no session on v0.21.5
+        // (acp_adapter/server.py:827-837 @ v2026.9.24), so it earns no row.
+        if startedFresh, unstoredRow == nil,
+           !wireText.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("/") {
+            unstoredRow = (displayTitle, Date())
+        }
         if !isNonInterruptive { busyTurnOrigins.insert(origin) }
         // Chain this prompt's issue behind the previous one's.
         let previousIssued = lastPromptIssued
@@ -1762,15 +1796,16 @@ final class ChatSession {
                 // not touch shared state: the newer session owns
                 // `acpStatus`, the transcript, and notifications.
                 guard acpClient === client, !othersStillRunning() else { return }
-                // gh#147: a served `/undo` / `/retry` reply's last chunk can
-                // still be in the event loop; drain it so it lands before
-                // the turn closes and the transcript is rebuilt.
+                // The reply's last chunks can still be in the event loop: the
+                // answer to `session/prompt` overtakes them here. Drain them
+                // so they land before the turn closes, or the bubble keeps
+                // the reply without its end ("IDLE393" for "IDLE39367", seen
+                // live on both tags). gh#147's rewound transcript needs the
+                // same before it is rebuilt.
+                await awaitEventLoopDrain(client: client)
+                guard acpClient === client, !othersStillRunning() else { return }
                 let isRewind = RichChatViewModel.isGatewayRewindSlash(
                     wireText, capabilities: richChatViewModel.capabilitiesGate)
-                if isRewind {
-                    await awaitEventLoopDrain(client: client)
-                    guard acpClient === client, !othersStillRunning() else { return }
-                }
                 acpStatus = ACPPhase.ready
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
@@ -2455,6 +2490,7 @@ final class ChatSession {
                 } else {
                     acpStatus = ACPPhase.creatingSession
                     resolvedSessionId = try await client.newSession(cwd: cwd)
+                    startedFresh = true
                     guard startStillCurrent(intent, client: client) else { return }
                 }
 
@@ -3428,7 +3464,8 @@ final class ChatSession {
     /// `handleSessionDeletedElsewhere` (the Sessions tab's independent
     /// delete surface, t-5f1d9008). Callers must have verified the
     /// deleted id is the attached one.
-    func tearDownDeletedActiveSession() {
+    @discardableResult
+    func tearDownDeletedActiveSession() -> Task<Void, Never>? {
         // Supersede any in-flight start pipeline: a stale await
         // resuming later must abandon at its `startStillCurrent` check
         // instead of re-attaching plumbing for the deleted session.
@@ -3439,6 +3476,10 @@ final class ChatSession {
         richChatViewModel.reset()
         targetSessionId = nil
         hasSentPrompt = false
+        unstoredRow = nil
+        startedFresh = false
+        let announceDeleted = stoppedForDelete
+        stoppedForDelete = false
         userPickedApprovalMode = nil
         isReleased = false
         hasUnreadCompletion = false
@@ -3448,11 +3489,16 @@ final class ChatSession {
         // the kill), then `client.stop()`. Also disarms the start
         // watchdog, cancels reconnects, and clears `isStartingSession`.
         // A cancelled turn's hint names the delete.
-        stop(reason: "Turn cancelled — session deleted.")
+        let teardown = stop(reason: "Turn cancelled — session deleted.")
         // stop() leaves `acpStatus` at its last painted phase; the
         // pane is now an idle blank chat, so park the pill at idle the
         // same way the preflight bail does.
         acpStatus = ""
+        if announceDeleted {
+            richChatViewModel.transientHint = String(localized: "Turn cancelled — session deleted.")
+            scheduleHintClear()
+        }
+        return teardown
     }
 
     /// A `session/load` answered with an internal head this transcript does

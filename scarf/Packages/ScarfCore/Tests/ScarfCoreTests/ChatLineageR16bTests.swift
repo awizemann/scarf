@@ -140,6 +140,53 @@ import SQLite3
 
     // MARK: - R14-3: chain delete
 
+    /// Only the refusals time cures are retried, and only after stopping a turn.
+    @Test func deleteRetriesOnlyTheRefusalsOfAnUnwindingTurn() {
+        func attempts(stopped: Bool, _ output: String, succeedsOn: Int? = nil) -> (calls: Int, code: Int32) {
+            var calls = 0
+            let result = SessionChainDelete.retrying(afterStoppingTurns: stopped, delay: 0) { () -> (exitCode: Int32, output: String) in
+                calls += 1
+                return calls == succeedsOn ? (0, "") : (1, output)
+            }
+            return (calls, result.exitCode)
+        }
+        let active = "Cannot delete active session: session 'x' has an active turn lease"
+        let busy = "Cannot delete session 'x': it has a queued or running turn. Wait for it to finish (or stop it), then retry."
+        let lost = "Cannot delete session 'x': a turn was lost across a gateway restart. Acknowledge it first with: hermes sessions discard x"
+        let missing = "No session 'x'. Run: hermes sessions list to find the id."
+        #expect(attempts(stopped: true, active, succeedsOn: 3).calls == 3)
+        #expect(attempts(stopped: true, active, succeedsOn: 3).code == 0)
+        #expect(attempts(stopped: true, busy, succeedsOn: 2).calls == 2)
+        #expect(attempts(stopped: true, active).calls == 8, "the retry must give up")
+        #expect(attempts(stopped: true, active).code == 1)
+        #expect(attempts(stopped: false, active).calls == 1)
+        #expect(attempts(stopped: true, missing).calls == 1)
+        #expect(attempts(stopped: true, lost).calls == 1)
+    }
+
+    /// A segment already gone with the one before it counts as deleted; alone,
+    /// or for any other refusal, it stays a failure with Hermes's reason.
+    @Test func aSegmentAlreadyGoneCountsAsDeleted() {
+        let missing = "No session 'x'. Run: hermes sessions list to find the id."
+        let chain = SessionChainDelete.run(["tip", "mid", "root"], deleteReporting: { id in
+            id == "tip" ? (0, "") : (1, missing)
+        })
+        #expect(chain.deleted == ["tip", "mid", "root"])
+        #expect(chain.failed == nil)
+
+        let alone = SessionChainDelete.run(["tip"], deleteReporting: { _ in (1, missing) })
+        #expect(alone.deleted.isEmpty)
+        #expect(alone.failedBecauseNoSession)
+
+        let busy = SessionChainDelete.run(["tip", "mid"], deleteReporting: { id in
+            id == "tip" ? (0, "") : (1, "Cannot delete session 'mid': it has a queued or running turn.")
+        })
+        #expect(busy.deleted == ["tip"])
+        #expect(!busy.failedBecauseNoSession)
+        #expect(busy.failureReason?.contains("queued or running") == true)
+        #expect(!SessionChainDelete.isNoSession("No session database at /x (nothing to repair)."))
+    }
+
     @Test func chainDeleteRunsTipFirstAndStopsAtAFailure() {
         #expect(SessionChainDelete.deletionOrder(lineage: Self.chain, rowId: "chainTip")
                 == ["chainTip", "chainMid", "chainRoot"])

@@ -108,6 +108,11 @@ struct ChatTranscriptPane: View {
                 workingSince: richChat.workingSince,
                 resumeNotice: richChat.resumeContinuityNotice
             )
+            // One view per chat. Every chat numbers its groups and local
+            // messages from the same start, and `MessageGroupView` and
+            // `RichMessageBubble` skip their bodies on equal ids (issue #46),
+            // so going to another chat kept painting the last chat's text.
+            .id(chatViewModel.focusedChat.id)
 
             Divider()
             if let hint = richChat.transientHint {

@@ -583,7 +583,7 @@ import ScarfCore
         var engines: [FakeEngine] = []
         let vm = await Self.connectedChat(home: home, channel: chA) { engines.append($0) }
         defer { vm.stopAllChats() }
-        vm.sessionDeleteRunner = { _, _ in 0 }
+        vm.sessionDeleteRunner = { _, _ in (0, "") }
         let chatA = vm.focusedChat
         // B first; then A's reconnect ladder gets a channel of its own.
         let chReconnect = VoiceScriptedChannel(sessionId: "sess-bg")

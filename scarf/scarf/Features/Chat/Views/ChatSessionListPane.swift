@@ -391,7 +391,7 @@ struct ChatSessionListPane: View {
     // MARK: - Filtering
 
     private var visibleSessions: [HermesSession] {
-        var base = chatViewModel.recentSessions
+        var base = chatViewModel.sessionsForList
         // Cron-source filter — applied first so subsequent filters
         // operate on the smaller set. Authoritative signal: Hermes
         // tags every session row with `source` (`"cron"` for
@@ -476,7 +476,7 @@ struct ChatSessionListPane: View {
     }
 
     private var footerCountText: String {
-        let total = chatViewModel.recentSessions.count
+        let total = chatViewModel.sessionsForList.count
         let visible = visibleSessions.count
         let suffix = total == 1 ? "" : "s"
         if visible == total {

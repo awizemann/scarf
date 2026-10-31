@@ -59,7 +59,7 @@ import ScarfCore
         let ch = Lifecycle.ScriptedACPChannel(behavior: .happy(sessionId: "chainRoot"))
         let vm = await Self.attachedChat(home: home, channel: ch, sessionId: "chainRoot")
         let deletes = Lifecycle.DeleteRecorder()
-        vm.sessionDeleteRunner = { _, id in deletes.record(id); return 0 }
+        vm.sessionDeleteRunner = { _, id in deletes.record(id); return (0, "") }
 
         let chainRow = Self.row("chainTip", lineage: Self.chain)
         #expect(vm.isAttached(to: chainRow), "the tip row must match a chat attached to the root")
@@ -79,7 +79,7 @@ import ScarfCore
         defer { home.cleanup() }
         let vm = ChatViewModel(context: home.context)
         let deletes = Lifecycle.DeleteRecorder()
-        vm.sessionDeleteRunner = { _, id in deletes.record(id); return id == "chainMid" ? 1 : 0 }
+        vm.sessionDeleteRunner = { _, id in deletes.record(id); return (id == "chainMid" ? 1 : 0, "") }
 
         await vm.deleteConversation(Self.row("chainTip", lineage: Self.chain))
         #expect(deletes.recorded == ["chainTip", "chainMid"])
@@ -92,7 +92,7 @@ import ScarfCore
         defer { home.cleanup() }
         let vm = ChatViewModel(context: home.context)
         let deletes = Lifecycle.DeleteRecorder()
-        vm.sessionDeleteRunner = { _, id in deletes.record(id); return 0 }
+        vm.sessionDeleteRunner = { _, id in deletes.record(id); return (0, "") }
         await vm.deleteConversation(Self.row("solo"))
         #expect(deletes.recorded == ["solo"])
     }

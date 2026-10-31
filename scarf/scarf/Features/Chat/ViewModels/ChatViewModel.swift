@@ -501,8 +501,9 @@ final class ChatViewModel {
     /// Always called off the main actor (`deleteSession` hops to
     /// `OffPool`): on a remote host it is an SSH exec (charter C10).
     @ObservationIgnored
-    var sessionDeleteRunner: @Sendable (ServerContext, String) -> Int32 = { ctx, sessionId in
-        ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId)).exitCode
+    var sessionDeleteRunner: @Sendable (ServerContext, String) -> (exitCode: Int32, output: String) = { ctx, sessionId in
+        let result = ctx.runHermes(SessionsViewModel.deleteArgv(sessionId: sessionId))
+        return (result.exitCode, result.output)
     }
 
     /// Runs `hermes sessions rename -- <id> <title>` for `renameSession`
@@ -1898,6 +1899,11 @@ final class ChatViewModel {
             // Eliminates the brief "list flashes / project chips appear
             // late" reload artifact during session switches.
             recentSessions = fetchedSessions
+            for chat in chats where chat.unstoredRow != nil {
+                if let id = chat.richChatViewModel.sessionId, fetchedSessions.contains(where: { $0.covers(id) }) {
+                    chat.noteStoredByHermes()
+                }
+            }
             sessionPreviews = fetchedPreviews
             sessionProjectNames = HermesSession.carryingLineageLabels(bundle.names, onto: fetchedSessions)
             allProjects = bundle.projects
@@ -2053,17 +2059,35 @@ final class ChatViewModel {
     private func deleteSessionIds(_ ids: [String]) async {
         let runner = sessionDeleteRunner
         let ctx = context
-        let outcome = await OffPool.run { SessionChainDelete.run(ids) { runner(ctx, $0) } }
+        // Stop first (design §6): Hermes refuses to delete a session with a
+        // turn running ("Cannot delete active session",
+        // hermes_cli/sessions_cmd.py:645 @ v0.22.5), and below that it would
+        // delete the session under a turn that goes on writing to it.
+        // A chat Hermes hasn't stored yet (its temporary row) has nothing to
+        // delete: "No session" then means done.
+        let isUnstored = chats.contains { $0.unstoredRow != nil && ids.contains(where: $0.covers) }
+            && !recentSessions.contains { row in ids.contains(where: row.covers) }
+        let stopping = await stopChatsBeforeDeleting(ids)
+        let outcome = await OffPool.run {
+            SessionChainDelete.run(ids, deleteReporting: { id in
+                SessionChainDelete.retrying(afterStoppingTurns: stopping) { runner(ctx, id) }
+            })
+        }
         guard !outcome.deleted.isEmpty else {
+            if isUnstored, outcome.failedBecauseNoSession {
+                tearDownChats(where: { chat in ids.contains(where: chat.covers) })
+                return
+            }
             // Nothing was deleted. The row staying put is right; saying
-            // nothing about it read as a UI glitch. Same wording as the
-            // Sessions tab's delete error.
+            // nothing about it read as a UI glitch.
             if let failed = outcome.failed {
-                richChatViewModel.transientHint = String(
-                    localized: "Couldn't delete that session on \(ctx.displayName) (hermes sessions delete exited \(failed.exitCode))."
-                )
+                richChatViewModel.transientHint = SessionsViewModel.deleteFailureMessage(
+                    host: ctx.displayName, deletedCount: 0, segmentCount: ids.count,
+                    exitCode: failed.exitCode, reason: outcome.failureReason)
                 scheduleHintClear()
             }
+            // A chat the delete stopped may have nothing left to keep it.
+            reapBackgroundChats()
             return
         }
         let deleted = Set(outcome.deleted)
@@ -2073,13 +2097,13 @@ final class ChatViewModel {
             sessionProjectNames.removeValue(forKey: id)
         }
         tearDownChats(where: { chat in deleted.contains(where: chat.covers) })
-        if outcome.failed != nil {
+        if let failed = outcome.failed {
             // Some segments went, the rest are still there (and chained):
             // reload so the list shows the shorter conversation, and say so.
             scheduleSessionsRefresh()
-            richChatViewModel.transientHint = String(
-                localized: "Deleted \(outcome.deleted.count) of \(ids.count) linked segments — the rest couldn't be deleted."
-            )
+            richChatViewModel.transientHint = SessionsViewModel.deleteFailureMessage(
+                host: ctx.displayName, deletedCount: outcome.deleted.count, segmentCount: ids.count,
+                exitCode: failed.exitCode, reason: outcome.failureReason)
             scheduleHintClear()
         }
         // Audit fix (t-5f1d9008 wave 1): this sidebar is ALSO an
@@ -2143,6 +2167,30 @@ final class ChatViewModel {
         tearDownChats(where: { $0.covers(sessionId) })
     }
 
+    /// Stop the chats working on these sessions, in every window on this
+    /// session store, and wait (bounded) for their teardowns. True when any
+    /// was stopped: Hermes may hold the session a moment longer while the
+    /// cancelled turn unwinds.
+    private func stopChatsBeforeDeleting(_ ids: [String]) async -> Bool {
+        let teardowns = stopWorkingChats(covering: ids)
+            + ChatWindowDirectory.shared.stopWorkingChats(covering: ids, context: context, except: self)
+        guard !teardowns.isEmpty else { return false }
+        await AppQuitGuard.waitForAll(teardowns.compactMap { $0 }, upTo: AppQuitGuard.teardownBudget)
+        return true
+    }
+
+    /// Tear down this window's chats that are working on `ids`. One entry
+    /// per chat stopped, nil when it had no connection left to wait for.
+    func stopWorkingChats(covering ids: [String]) -> [Task<Void, Never>?] {
+        var teardowns: [Task<Void, Never>?] = []
+        for chat in chats where chat.isWorking && ids.contains(where: chat.covers) {
+            // Only stopped: the session may yet survive the delete, and the
+            // teardown follows when Hermes confirms (`tearDownChats`).
+            teardowns.append(chat.stopForDeletion())
+        }
+        return teardowns
+    }
+
     /// The delete teardown for every chat in this window on a deleted
     /// session, focused or not (`ChatSession.tearDownDeletedActiveSession`:
     /// a working chat gets its bounded `session/cancel` first). A
@@ -2172,6 +2220,29 @@ final class ChatViewModel {
         guard let attached = richChatViewModel.sessionId else { return false }
         return session.covers(attached)
             || richChatViewModel.transcriptSessionIds.contains(where: session.covers)
+    }
+
+    /// What the chat list shows: `recentSessions`, after a row for each live
+    /// chat Hermes hasn't stored yet. Below v0.22 a new session's row appears
+    /// once its first turn has flushed (session.py:329-331 @ v2026.9.24), so
+    /// a chat sent to the background during that turn, perhaps waiting on an
+    /// approval, had no row to read or to go back by. The row gives way to
+    /// Hermes's own as soon as that lists the session.
+    var sessionsForList: [HermesSession] {
+        guard mode == .window, displayMode == .richChat else { return recentSessions }
+        let unstored = chats.compactMap { chat -> HermesSession? in
+            guard chat.isLive, let row = chat.unstoredRow,
+                  let id = chat.richChatViewModel.sessionId,
+                  !recentSessions.contains(where: { $0.covers(id) }) else { return nil }
+            return HermesSession(
+                id: id, source: "acp", userId: nil, model: nil, title: row.title,
+                parentSessionId: nil, startedAt: row.since, endedAt: nil, endReason: nil,
+                messageCount: 0, toolCallCount: 0, inputTokens: 0, outputTokens: 0,
+                cacheReadTokens: 0, cacheWriteTokens: 0, estimatedCostUSD: nil,
+                reasoningTokens: 0, actualCostUSD: nil, costStatus: nil, billingProvider: nil
+            )
+        }
+        return unstored.reversed() + recentSessions
     }
 
     func previewFor(_ session: HermesSession) -> String {

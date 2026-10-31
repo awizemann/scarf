@@ -268,7 +268,7 @@ import ScarfCore
         let deletes = Lifecycle.DeleteRecorder()
         vmA.sessionDeleteRunner = { _, sid in
             deletes.record(sid)
-            return 0
+            return (0, "")
         }
         await vmA.deleteSession("sess-A")
         #expect(deletes.recorded == ["sess-A"])
@@ -334,12 +334,12 @@ import ScarfCore
         let vm = ChatViewModel(context: home.context)
         let deletes = Lifecycle.DeleteRecorder()
 
-        vm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 1 }
+        vm.sessionDeleteRunner = { _, sid in deletes.record(sid); return (1, "") }
         await vm.deleteSession("sess-F")
         #expect(signals.recorded(for: home.context).isEmpty,
                 "failed sidebar CLI delete broadcast SessionDeletedSignal")
 
-        vm.sessionDeleteRunner = { _, sid in deletes.record(sid); return 0 }
+        vm.sessionDeleteRunner = { _, sid in deletes.record(sid); return (0, "") }
         await vm.deleteSession("sess-S")
         #expect(deletes.recorded == ["sess-F", "sess-S"])
         #expect(signals.recorded(for: home.context) == ["sess-S"],

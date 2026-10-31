@@ -35,6 +35,11 @@ public enum SessionChainDelete {
             self.failureReason = failureReason
         }
 
+        /// The failed delete was Hermes saying it has no such session.
+        public var failedBecauseNoSession: Bool {
+            failed != nil && failureReason?.hasPrefix("No session '") == true
+        }
+
         public static func == (lhs: Outcome, rhs: Outcome) -> Bool {
             lhs.deleted == rhs.deleted
                 && lhs.failed?.id == rhs.failed?.id
@@ -58,6 +63,43 @@ public enum SessionChainDelete {
         run(ids, deleteReporting: { (exitCode: delete($0), output: "") })
     }
 
+    /// How long Hermes gets to let go of a session whose turn was just
+    /// cancelled, before its refusal stands (attempts, seconds between them).
+    public nonisolated static let turnUnwindRetries = (attempts: 8, delay: 2.0 as TimeInterval)
+
+    /// Hermes refusing because a turn hasn't ended yet, the one refusal that
+    /// time cures (`_cmd_delete`, hermes_cli/sessions_cmd.py:646,654 @ v0.22.5;
+    /// v2026.9.24 has neither). "No session" and a turn lost across a gateway
+    /// restart (:651) stay as they are however long we wait.
+    public static func isTurnStillUnwinding(_ output: String) -> Bool {
+        output.contains("Cannot delete active session") || output.contains("queued or running turn")
+    }
+
+    /// Hermes has no such session (`_not_found`, sessions_cmd.py:49-51 on both
+    /// tags). The quote keeps "No session database at …" out.
+    public static func isNoSession(_ output: String) -> Bool {
+        output.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("No session '") }
+    }
+
+    /// One segment's delete, tried again while a turn the caller just stopped
+    /// unwinds. Nothing stopped, or any other refusal: one attempt, so it is
+    /// reported at once. Blocking.
+    public static func retrying(
+        afterStoppingTurns stopped: Bool,
+        delay: TimeInterval = turnUnwindRetries.delay,
+        _ delete: () -> (exitCode: Int32, output: String)
+    ) -> (exitCode: Int32, output: String) {
+        var result = delete()
+        guard stopped else { return result }
+        var attempt = 1
+        while attempt < turnUnwindRetries.attempts, result.exitCode != 0, isTurnStillUnwinding(result.output) {
+            Thread.sleep(forTimeInterval: delay)
+            result = delete()
+            attempt += 1
+        }
+        return result
+    }
+
     /// `run(_:delete:)` for a `delete` that also hands back the CLI's
     /// combined output, so the failure carries Hermes's own reason
     /// (`Outcome.failureReason`).
@@ -69,6 +111,14 @@ public enum SessionChainDelete {
         for id in ids {
             let result = delete(id)
             guard result.exitCode == 0 else {
+                // On v0.22.5 deleting one segment of a gateway-local
+                // conversation deletes all of it (hermes_state_sessions.py:1753-1755,
+                // hermes_state_local.py:185-190), so the next segment is
+                // already gone: that is done, not "Deleted 1 of N".
+                if !deleted.isEmpty, isNoSession(result.output) {
+                    deleted.append(id)
+                    continue
+                }
                 return Outcome(
                     deleted: deleted,
                     failed: (id, result.exitCode),

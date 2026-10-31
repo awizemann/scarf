@@ -131,6 +131,16 @@ final class ChatWindowDirectory {
         }
     }
 
+    /// Stop the chats working on these sessions in every window viewing this
+    /// session store: a session is about to be deleted. One entry per chat
+    /// stopped (`ChatViewModel.stopWorkingChats`).
+    func stopWorkingChats(covering ids: [String], context: ServerContext, except: ChatViewModel? = nil) -> [Task<Void, Never>?] {
+        prune()
+        return windows
+            .filter { $0.serverID == context.id && $0.hermesHome == context.paths.home && $0.chat !== except }
+            .flatMap { $0.chat?.stopWorkingChats(covering: ids) ?? [] }
+    }
+
     enum Outcome: Equatable {
         /// A window had a live chat on the session: focused there.
         case focusedLiveChat

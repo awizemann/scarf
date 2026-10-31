@@ -713,7 +713,15 @@ final class SessionsViewModel {
             // (OffPool, P60 — a blocking wait, not cooperative-pool work).
             // The injected `sessionDeleteRunner` seam is preserved exactly —
             // tests still stub it, they just await instead of returning.
-            let outcome = await OffPool.run { SessionChainDelete.run(ids, deleteReporting: { runner(ctx, $0) }) }
+            // A chat working on it stops first: Hermes refuses to delete a
+            // session with a turn running (see `ChatViewModel.deleteSessionIds`).
+            let teardowns = ChatWindowDirectory.shared.stopWorkingChats(covering: ids, context: ctx)
+            if !teardowns.isEmpty {
+                await AppQuitGuard.waitForAll(teardowns.compactMap { $0 }, upTo: AppQuitGuard.teardownBudget)
+            }
+            let stopping = !teardowns.isEmpty
+            let outcome = await OffPool.run { SessionChainDelete.run(ids, deleteReporting: { id in
+                SessionChainDelete.retrying(afterStoppingTurns: stopping) { runner(ctx, id) } } ) }
             guard let self else { return }
             self.isDeleting = false
             let deleted = Set(outcome.deleted)
