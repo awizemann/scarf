@@ -1,7 +1,7 @@
 ---
 id: t-f759fabb
 title: Parallel chats P1: live registry, background chats, budget, approvals and notifications
-status: doing
+status: done
 added: 2026-10-29
 ---
 

@@ -109,13 +109,13 @@
 - [ ] De-flake Kanban chip count Live UI test (id: t-ccd07453) (added: 2026-10-26)
 - [ ] Upload ScarfGo 3.7.0 (Mac 3.7.0 shipped) (id: t-126e3304) (added: 2026-10-05) (priority: high)
 - [ ] Investigate slow chat resume (gh#150) (id: t-9eed811c) (added: 2026-10-27)
-- [ ] Parallel chats P2: handoffs, voice, close confirm, banners, analytics (id: t-9aec8776) (added: 2026-10-29)
-- [ ] Parallel chats P3: live UI tests in the scarf-ui VM (v0.22.5 + v0.21.5) (id: t-c254a28b) (added: 2026-10-29)
 - [ ] Fix 3 failing iOS ChatControllerP7bTests (reconnect / scene-phase) (id: t-89569440) (added: 2026-10-29)
+- [ ] ScarfCore: three tests fail only in the full package run (id: t-a997d4b9) (added: 2026-10-30) (priority: low)
+- [ ] Parallel chats: intermittent main-thread hang (blocks v3.8.0) (id: t-9fa47b95) (added: 2026-10-31) (priority: high)
+- [ ] Stop Scarf tests bloating com.scarf.app settings, and read chat density once per list (id: t-3aa25481) (added: 2026-10-31)
 
 ## Doing
 
-- [ ] Parallel chats P1: live registry, background chats, budget, approvals and notifications (id: t-f759fabb) (added: 2026-10-29)
 - [ ] Run several chats at once (switching chats cancels the running reply) (id: t-0583409d) (added: 2026-10-29) (priority: high)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
@@ -125,6 +125,9 @@
 
 ## Done
 
+- [x] Parallel chats P3: live UI tests in the scarf-ui VM (v0.22.5 + v0.21.5) (id: t-c254a28b) (added: 2026-10-29)
+- [x] Parallel chats P2: handoffs, voice, close confirm, banners, analytics (id: t-9aec8776) (added: 2026-10-29)
+- [x] Parallel chats P1: live registry, background chats, budget, approvals and notifications (id: t-f759fabb) (added: 2026-10-29)
 - [x] P1 step 3: row state, per-chat drafts, background approvals, notifications (id: t-f874d2cc) (added: 2026-10-29)
 - [x] P1 step 2: live-chat budget, re-attach, approval mode, SSH single-flight recovery (id: t-8d3fafa5) (added: 2026-10-29)
 - [x] P1 step 1: chat registry and focus core (id: t-67400d44) (added: 2026-10-29)
