@@ -71,12 +71,14 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted and followed over time without knowing who you are. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context and Hermes's replies so the voice can speak them, and both apps ask before the first session.
 
-## What's New in 3.7.1
+## What's New in 3.8.0
 
-- **`/undo` and `/retry` work in chat** — on Hermes v0.22.3 and later, Scarf sends both commands to Hermes instead of pointing you to the CLI, then redraws the chat to match what Hermes kept. `/undo N` removes the last N turns; `/retry` asks the model again and replaces the last answer.
-- **Transcript stays put on a failed read** — if Scarf can't read a chat's history (for example, a remote host drops the connection), the transcript no longer goes blank.
-- **Carried over from 3.7.0** — Hermes v0.22.5 support: chat on Hermes's gateway, gateway safety (Scarf never kills a gateway Hermes refused to stop), strict `config.yaml` checks, and setup for features that moved into Hermes plugins. See the [3.7.0 notes](releases/v3.7.0/RELEASE_NOTES.md).
-- Full notes: [releases/v3.7.1/RELEASE_NOTES.md](releases/v3.7.1/RELEASE_NOTES.md).
+- **Chats keep running when you click away** — a window now keeps several chats live at once, each with its own connection, transcript and half-typed message.
+- **See every chat at a glance** — sidebar rows show needs an answer, error, replying, or finished and unread. A background approval shows in its row and can notify you.
+- **A limit that looks after your hosts** — up to 4 live chats per SSH server and 8 on your Mac. Scarf releases the oldest idle chat when it needs room, and asks if all of them are busy.
+- **Asks before stopping your work** — closing a window, quitting or switching profile confirms first when a chat is working.
+- **Prompts are harder to lose** — they reach Hermes in the order you sent them, a failed start hands back what you typed, and a gateway failure shows Hermes's own message and never resends.
+- Full notes: [releases/v3.8.0/RELEASE_NOTES.md](releases/v3.8.0/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
