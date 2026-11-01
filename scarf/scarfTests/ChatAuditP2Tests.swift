@@ -274,6 +274,26 @@ import ScarfCore
         try await Self.heldThenSentOnce { $0.resumeSession("sess-slow") }
     }
 
+    /// With a real `state.db`, so the history load replaces the transcript.
+    @Test @MainActor func aSendDuringAResumeKeepsItsBubbleAfterTheHistoryLoads() async throws {
+        let home = try ChatResumeFallback146Tests.home(sessions: [("sess-slow", "stored history")])
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        vm.resumeSession("sess-slow")
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+
+        vm.sendText("typed while loading")
+        await channel.finishOpen()
+        #expect(await Lifecycle.waitUntil { await channel.promptTexts == ["typed while loading"] })
+        #expect(await Lifecycle.waitUntil {
+            vm.richChatViewModel.messages.filter { $0.isUser && $0.content == "typed while loading" }.count == 1
+        }, "the history load wiped the held send's bubble")
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(vm.richChatViewModel.messages.filter { $0.isUser && $0.content == "typed while loading" }.count == 1)
+        vm.leaveChat()
+    }
+
     @Test @MainActor func aFailedStartPutsTheHeldTextBackWithTheReason() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }
