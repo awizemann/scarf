@@ -6,7 +6,7 @@ source_paths: [scarf/Scarf iOS/Info.plist, scarf/Scarf iOS/Scarf_iOS.entitlement
 source_paths_inferred: false
 source_sha: 066664901806e40290fd1d630d87d06f20d97157
 created: 2026-08-14
-updated: 2026-08-19
+updated: 2026-11-01
 reviewed: 2026-10-28
 reviewed_by: audit:claude-code (background)
 ---
@@ -16,7 +16,7 @@ reviewed_by: audit:claude-code (background)
 - [decision] Reviewer onboarding MUST use the 'Import existing key' path: the default flow generates an Ed25519 key on-device that the user must add to the host's authorized_keys, which a reviewer cannot do. We pre-authorize a throwaway keypair (vault 'scarfgo-appstore-review-sshkey') and hand Apple the private half to paste. #onboarding
 - [fact] iOS transport is direct Citadel SSH with host key pinning validation via PinnedSSHConnect (CitadelServerTransport, ACPClient+iOS) — a standard Cloudflare Tunnel cannot front it; the reviewer needs a directly reachable public host:port (plain VPS, e.g. DigitalOcean). Onboarding now detects and surfaces host key changes via OnboardingHostKeyChangeCard for security verification. #transport #security
 - [done] Submission build blockers fixed and verified (BUILD SUCCEEDED, manifest bundled 2026-08-14 and updated 2026-10): PrivacyInfo.xcprivacy includes UserDefaults (CA92.1, tracking=false) and FileTimestamp (C617.1); removed phantom push (UIBackgroundModes + aps-environment); declared ITSAppUsesNonExemptEncryption=NO and NSLocalNetworkUsageDescription. Files auto-included via PBXFileSystemSynchronizedRootGroup. App version bumped to 3.7.1 (build 77) with host key pinning security enhancement. #config #security
-- [fact] Review kit lives at documents/appstore-review/scarfgo-reviewer-access.md (ASC notes block + walkthrough) and scratchpad review-kit/ (provision-scarfgo-review.sh + review keypair). Test droplet 24.199.89.183, user scarfreview, OpenRouter model, spend-capped. #artifacts
+- [fact] Review kit lives at documents/appstore-review/scarfgo-reviewer-access.md (ASC notes block + walkthrough) and scratchpad review-kit/ (provision-scarfgo-review.sh + review keypair). Test droplet 104.248.216.194 (replaced 2026-11-01; 2 GB memory, 48 GB disk, Hermes v0.22.5 from its own installer, the old 1 GB box was too small to run four chats), user scarfreview, OpenRouter model from vault openrouter-hermes-agent-test. #artifacts
 
 ## Relations
 - relates_to [[ScarfGo iOS Companion App]]
