@@ -116,7 +116,7 @@ import ScarfCore
         #expect(await Lifecycle.waitUntil { await channel.hasPendingLoad })
         vm.sendText("second")
 
-        vm.focusedChat.releaseProcess(stoppingTurn: true)
+        vm.focusedChat.releaseProcess()
         #expect(!vm.focusedChat.hasHeldSends)
         #expect(vm.richChatViewModel.transientHint?.contains("couldn't be sent") == true)
         #expect(!vm.richChatViewModel.isAgentWorking)
