@@ -19,6 +19,7 @@ DigitalOcean droplet; it stays online through review, then gets destroyed.
 
 - Test server (throwaway): DigitalOcean droplet, public IP **104.248.216.194**, SSH port **22**
 - Review SSH user: **scarfreview** (unprivileged; only the review key is authorized)
+- The review key must NOT be in root's `authorized_keys`: these notes hand the private key to the reviewer, and logging in as root shows empty data ("Pick a model", `/root/.hermes/state.db`).
 - Size: 1 vCPU, 2 GB memory + 2 GB swap, 48 GB disk. Hermes v0.22.5, from its own installer.
 - Model: OpenRouter `openai/gpt-4o-mini` (OpenAI-compatible) — verified answering live
 
