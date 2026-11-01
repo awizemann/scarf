@@ -803,7 +803,8 @@ final class ChatSession {
             let unsent = self.currentUnsentStartInput
             // Counted before `stop()`, which drops sends held for a client
             // not spawned yet (a re-attach's) without a word.
-            let dropped = self.heldSends.count
+            // (Without a session they go back to the composer instead.)
+            let dropped = self.richChatViewModel.sessionId == nil ? 0 : self.heldSends.count
             // Self-supersede so the wedged pipeline's generation checks
             // abandon silently if its awaits ever resume, instead of
             // stomping the error state painted below.
@@ -1294,6 +1295,10 @@ final class ChatSession {
     /// never go out. Their echoes stay in the transcript, so say so.
     private func dropHeldSends(for client: ACPClient) {
         guard heldSendsClient === client else { return }
+        if richChatViewModel.sessionId == nil {
+            returnHeldSendsToComposer()
+            return
+        }
         let dropped = heldSends.count
         heldSends = []
         heldSendsClient = nil
@@ -1303,6 +1308,21 @@ final class ChatSession {
             )
             scheduleHintClear()
         }
+    }
+
+    /// Held sends that never had a session to go to: there is no transcript to
+    /// keep their echoes for, so the text goes back where it was typed.
+    private func returnHeldSendsToComposer() {
+        let sends = heldSends
+        heldSends = []
+        heldSendsClient = nil
+        guard !sends.isEmpty else { return }
+        for send in sends {
+            richChatViewModel.withdrawUserEcho(text: send.text)
+            composer.appendUnsent(text: send.text, images: send.images)
+        }
+        if !hasTurnInFlight { richChatViewModel.cancelPendingSend() }
+        showHint(String(localized: "Not sent — the chat didn't finish starting. Your message is back in the composer."))
     }
 
     /// Start ACP for the current session (or create a new one), then send the
@@ -1585,6 +1605,10 @@ final class ChatSession {
         }
 
         guard let sessionId = richChatViewModel.sessionId else {
+            // Only a start just failing gets here (its client is still set);
+            // whatever the reason, the text is not lost.
+            if localEchoAlreadyAdded { richChatViewModel.withdrawUserEcho(text: text) }
+            composer.appendUnsent(text: text, images: images)
             clearACPErrorState()
             acpError = "No session ID — cannot send"
             return
@@ -2435,10 +2459,12 @@ final class ChatSession {
         // (it reads them from the process cwd, not the ACP session cwd).
         let client = makeACPClient(projectPath: projectPath)
         self.acpClient = client
-        // A re-attach: what was typed since it began, and anything typed
-        // until its load's replay has drained, waits for this client.
+        // Until the session exists there is nothing to send to, however long
+        // `session/new` takes, so what is typed waits for this client. A
+        // re-attach also carries what was typed since it began, and holds
+        // until its load's replay has drained.
         let reattaching = isReattaching
-        if reattaching { beginHoldingSends(for: client) }
+        beginHoldingSends(for: client)
         let attribution = SessionAttributionService(context: context)
 
         // If the caller passed a project path, hand Scarf's project
@@ -2628,6 +2654,18 @@ final class ChatSession {
                 isStartingSession = false
                 disarmStartWatchdog()
 
+                // Sends typed while it started go now (a kickoff goes first,
+                // below). From here on sends aren't held, as ever. A resume's
+                // replay is handled before a held send opens the gate.
+                let hasKickoff = !(initialPrompt?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
+                if !reattaching && !hasKickoff {
+                    if !heldSends.isEmpty {
+                        await awaitEventLoopDrain(client: client)
+                        guard startStillCurrent(intent, client: client) else { return }
+                    }
+                    releaseHeldSends(for: client, turnAlreadyRunning: false)
+                }
+
                 // Attribute this session to the project it was started
                 // under, so the per-project Sessions tab can surface it
                 // without a user action. No-op when projectPath is nil.
@@ -2729,6 +2767,7 @@ final class ChatSession {
                     richChatViewModel.addUserMessage(text: prompt)
                     startCarriesUserInput = false
                     sendViaACP(client: client, text: prompt, images: [], localEchoAlreadyAdded: true)
+                    releaseHeldSends(for: client, turnAlreadyRunning: true)
                 }
             } catch {
                 dropHeldSends(for: client)
@@ -3161,6 +3200,7 @@ final class ChatSession {
         // caller with something to say counts them first). Left behind, they
         // would keep the chat counting as working for good.
         clientLooserThanPick = nil
+        if richChatViewModel.sessionId == nil { returnHeldSendsToComposer() }
         let droppedHeldSends = !heldSends.isEmpty
         heldSends = []
         heldSendsClient = nil

@@ -170,6 +170,154 @@ import ScarfCore
         vm.leaveChat()
     }
 
+    // MARK: - Sends while the session is still being created
+
+    /// Holds `session/new` and `session/load` until told, then answers or fails.
+    actor SlowOpenChannel: ACPChannel {
+        nonisolated let incoming: AsyncThrowingStream<String, Error>
+        nonisolated let stderr: AsyncThrowingStream<String, Error>
+        private let incomingCont: AsyncThrowingStream<String, Error>.Continuation
+        private let stderrCont: AsyncThrowingStream<String, Error>.Continuation
+        private var heldOpen: Int?
+        private(set) var promptTexts: [String] = []
+        var diagnosticID: String? { "slow-open-channel" }
+        var isOpening: Bool { heldOpen != nil }
+
+        init() {
+            (incoming, incomingCont) = AsyncThrowingStream<String, Error>.makeStream()
+            (stderr, stderrCont) = AsyncThrowingStream<String, Error>.makeStream()
+        }
+
+        func send(_ line: String) async throws {
+            guard let data = line.data(using: .utf8),
+                  let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let method = obj["method"] as? String else { return }
+            if method == "session/prompt",
+               let prompt = (obj["params"] as? [String: Any])?["prompt"] as? [[String: Any]] {
+                promptTexts.append(prompt.compactMap { $0["text"] as? String }.joined())
+            }
+            guard let id = obj["id"] as? Int else { return }
+            switch method {
+            case "session/new", "session/load": heldOpen = id
+            case "session/prompt": reply(["jsonrpc": "2.0", "id": id, "result": ["stopReason": "end_turn"]])
+            default: reply(["jsonrpc": "2.0", "id": id, "result": [String: Any]()])
+            }
+        }
+
+        func finishOpen() {
+            guard let id = heldOpen else { return }
+            heldOpen = nil
+            reply(["jsonrpc": "2.0", "id": id,
+                   "result": ["sessionId": "sess-slow", "modes": ["currentModeId": "default"]]])
+        }
+
+        func failOpen() {
+            guard let id = heldOpen else { return }
+            heldOpen = nil
+            reply(["jsonrpc": "2.0", "id": id, "error": ["code": -32603, "message": "scripted open failure"]])
+        }
+
+        func close() async {
+            incomingCont.finish()
+            stderrCont.finish()
+        }
+
+        private func reply(_ obj: [String: Any]) {
+            guard let data = try? JSONSerialization.data(withJSONObject: obj),
+                  let line = String(data: data, encoding: .utf8) else { return }
+            incomingCont.yield(line)
+        }
+    }
+
+    @MainActor
+    private static func slowVM(_ home: TempHermesHome, _ channel: SlowOpenChannel) -> ChatViewModel {
+        let vm = Rows.makeVM(home, Rows.RecordingNotifier())
+        vm.acpClientFactory = { ctx, _ in ACPClient(context: ctx) { _ in channel } }
+        return vm
+    }
+
+    /// Typed during the wait: shown, counted as working, and sent once.
+    @MainActor
+    private static func heldThenSentOnce(start: (ChatViewModel) -> Void) async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        start(vm)
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+
+        vm.sendText("typed while starting")
+        #expect(vm.acpError == nil, "a send during the wait failed")
+        #expect(vm.richChatViewModel.messages.contains { $0.isUser && $0.content == "typed while starting" })
+        #expect(vm.focusedChat.hasHeldSends)
+        #expect(vm.focusedChat.isBusyForBudget)
+        #expect(vm.workingChats.count == 1, "a held send didn't count for the close prompts")
+
+        await channel.finishOpen()
+        #expect(await Lifecycle.waitUntil { await channel.promptTexts == ["typed while starting"] },
+                "the held send never went out")
+        #expect(!vm.focusedChat.hasHeldSends)
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await channel.promptTexts == ["typed while starting"], "the send went out twice")
+        #expect(vm.acpError == nil)
+        vm.leaveChat()
+    }
+
+    @Test @MainActor func aSendWhileANewChatStartsIsHeldAndSentOnce() async throws {
+        try await Self.heldThenSentOnce { $0.startNewSession() }
+    }
+
+    @Test @MainActor func aSendWhileAResumeLoadsIsHeldAndSentOnce() async throws {
+        try await Self.heldThenSentOnce { $0.resumeSession("sess-slow") }
+    }
+
+    @Test @MainActor func aFailedStartPutsTheHeldTextBackWithTheReason() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        vm.startNewSession()
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        let chat = vm.focusedChat
+        vm.sendText("one")
+        vm.sendText("two")
+
+        await channel.failOpen()
+        #expect(await Lifecycle.waitUntil { chat.composer.text == "one\n\ntwo" }, "the held text was lost")
+        #expect(await Lifecycle.waitUntil { chat.acpError != nil }, "no reason shown")
+        #expect(!chat.richChatViewModel.messages.contains { $0.isUser }, "an unsent echo stayed")
+        #expect(!chat.richChatViewModel.isAgentWorking)
+        #expect(!chat.hasHeldSends)
+        #expect(await channel.promptTexts.isEmpty)
+    }
+
+    @Test @MainActor func stoppingDuringTheWaitPutsTheHeldTextBack() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        vm.startNewSession()
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        vm.sendText("typed")
+
+        vm.focusedChat.stop()
+        #expect(vm.focusedChat.composer.text == "typed")
+        #expect(!vm.focusedChat.hasHeldSends)
+        #expect(!vm.richChatViewModel.isAgentWorking)
+        #expect(vm.richChatViewModel.transientHint?.contains("back in the composer") == true)
+    }
+
+    /// The last-resort path keeps the text too.
+    @Test @MainActor func aSendWithNoSessionNeverLosesItsText() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let vm = Rows.makeVM(home, Rows.RecordingNotifier())
+        let chat = vm.focusedChat
+        chat.sendViaACP(client: ACPClient(context: home.context) { _ in SlowOpenChannel() }, text: "kept")
+        #expect(chat.composer.text == "kept")
+        #expect(chat.acpError != nil)
+    }
+
     // MARK: - Needs-answer notification copy (#7)
 
     @Test func theNeedsAnswerBodyDependsOnlyOnTheKind() {
@@ -328,6 +476,8 @@ import ScarfCore
         defer { vm.leaveChat() }
         let chat = vm.focusedChat
         chat.composer.text = ""
+        // However the banner went, a refused send puts it back.
+        vm.richChatViewModel.clearACPErrorState()
 
         vm.sendText("again")
         #expect(chat.composer.text == "again")
