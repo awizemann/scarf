@@ -2786,6 +2786,16 @@ public final class RichChatViewModel {
     /// tear down a long-running command.
     public var hasToolCallInFlight: Bool { !openToolCallIds.isEmpty }
 
+    /// Take back the newest local echo of `text`: it was never sent, so it
+    /// must not stay in the transcript or come back from the pending cache.
+    public func withdrawUserEcho(text: String) {
+        guard let echo = messages.last(where: { $0.isUser && $0.id < 0 && $0.content == text }) else { return }
+        messages.removeAll { $0.id == echo.id }
+        for key in pendingLocalUserMessages.keys {
+            pendingLocalUserMessages[key]?.removeAll { $0.message.id == echo.id }
+        }
+    }
+
     /// Add a user message immediately (before DB write) for instant UI feedback.
     public func addUserMessage(text: String) {
         // Fresh prompt → clear any stale error banner from a prior

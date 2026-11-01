@@ -176,6 +176,14 @@ final class ChatSession {
     @ObservationIgnored
     private(set) var userPickedApprovalMode: ACPApprovalMode?
 
+    /// The client whose session may allow more than the user's pick: the
+    /// re-send failed (`reassertPickedApprovalMode`). No prompt goes to it
+    /// (`sendViaACP`) until the mode is back. A new client asserts afresh.
+    @ObservationIgnored
+    private weak var clientLooserThanPick: ACPClient?
+    @ObservationIgnored
+    private var isRetryingPickedMode = false
+
     /// Single-flight ControlMaster recovery shared by every chat on a host
     /// (`SSHMasterRecovery`). The window sets its own (tests inject one).
     @ObservationIgnored
@@ -1567,6 +1575,15 @@ final class ChatSession {
             return
         }
 
+        // The session may allow more than the user picked: nothing goes out.
+        if clientLooserThanPick === client {
+            returnUnsentToComposer(text: text, images: images, echoed: localEchoAlreadyAdded)
+            // A fresh attempt by the user is the moment to try again; the
+            // start paths arrive here straight after the failure.
+            if !localEchoAlreadyAdded { retryPickedMode(client: client) }
+            return
+        }
+
         guard let sessionId = richChatViewModel.sessionId else {
             clearACPErrorState()
             acpError = "No session ID — cannot send"
@@ -2058,6 +2075,11 @@ final class ChatSession {
                 if self?.richChatViewModel.sessionId == sessionId {
                     self?.userPickedApprovalMode = mode
                 }
+                // The session now runs what the user just chose.
+                if let self, self.clientLooserThanPick === client {
+                    self.clientLooserThanPick = nil
+                    self.clearACPErrorState()
+                }
                 self?.logger.info("session edit auto-approval mode switched to \(mode.rawValue)")
             } catch {
                 self?.logger.warning("session/set_mode failed: \(error.localizedDescription)")
@@ -2193,8 +2215,49 @@ final class ChatSession {
             logger.warning("couldn't re-apply the picked approval mode \(picked.rawValue): \(error.localizedDescription)")
             guard acpClient === client,
                   Self.mayAllowMore(session: sessionMode, than: picked) else { return }
-            acpError = "Couldn't restore the edit approval mode you picked (\(picked.displayName)). This session may allow more than you chose."
-            acpErrorHint = "Pick the mode again from the chat header, or reconnect."
+            clientLooserThanPick = client
+            raiseLooserThanPickBanner()
+        }
+    }
+
+    private func raiseLooserThanPickBanner() {
+        let name = userPickedApprovalMode?.displayName ?? ""
+        acpError = "Couldn't restore the edit approval mode you picked (\(name)). This session may allow more than you chose, so Scarf won't send anything to it."
+        acpErrorHint = "Your message stays in the composer. Send it again to retry, pick a mode from the chat header, or reconnect."
+    }
+
+    /// A send refused because of `clientLooserThanPick`: back in the composer,
+    /// after any draft, its echo gone, and the banner up (typing can clear it).
+    private func returnUnsentToComposer(text: String, images: [ChatImageAttachment], echoed: Bool) {
+        if echoed {
+            richChatViewModel.withdrawUserEcho(text: text)
+            if !hasTurnInFlight { richChatViewModel.cancelPendingSend() }
+        }
+        composer.appendUnsent(text: text, images: images)
+        raiseLooserThanPickBanner()
+    }
+
+    /// Try the pick again. Back: sends flow again, and the user re-sends what
+    /// is in the composer, having seen why it stopped. Refused: the banner stays.
+    private func retryPickedMode(client: ACPClient) {
+        guard let picked = userPickedApprovalMode,
+              let sessionId = richChatViewModel.sessionId,
+              !isRetryingPickedMode else { return }
+        isRetryingPickedMode = true
+        Task { @MainActor [weak self] in
+            do {
+                try await client.setSessionMode(sessionId: sessionId, modeId: picked.rawValue)
+                guard let self else { return }
+                self.isRetryingPickedMode = false
+                guard self.clientLooserThanPick === client else { return }
+                self.clientLooserThanPick = nil
+                self.richChatViewModel.activeApprovalMode = picked
+                self.clearACPErrorState()
+                self.showHint(String(localized: "Edit approval mode restored. Send your message again."))
+            } catch {
+                self?.isRetryingPickedMode = false
+                self?.logger.warning("retry of the picked approval mode failed: \(error.localizedDescription)")
+            }
         }
     }
 
@@ -3097,6 +3160,7 @@ final class ChatSession {
         // Nothing held can go out now, whichever path was holding it (a
         // caller with something to say counts them first). Left behind, they
         // would keep the chat counting as working for good.
+        clientLooserThanPick = nil
         let droppedHeldSends = !heldSends.isEmpty
         heldSends = []
         heldSendsClient = nil
@@ -3673,10 +3737,13 @@ final class ChatSession {
         // (`markPromptSent`) mid-replay and jump the held sends, so answer
         // busy like a typed turn in flight does.
         let replayPending = heldSendsClient === client
-        if isBusyWithNonVoiceTurn || replayPending {
+        let looserThanPick = clientLooserThanPick === client
+        if isBusyWithNonVoiceTurn || replayPending || looserThanPick {
             busyVoiceRequestIDs.append(request.id)
             if busyVoiceRequestIDs.count > 8 { busyVoiceRequestIDs.removeFirst(busyVoiceRequestIDs.count - 8) }
-            richChatViewModel.transientHint = replayPending
+            richChatViewModel.transientHint = looserThanPick
+                ? String(localized: "Live Voice didn't send that — this chat's edit approval mode couldn't be restored.")
+                : replayPending
                 ? String(localized: "Live Voice didn't send that — the chat is still loading its session. Ask again in a moment.")
                 : String(localized: "Live Voice didn't interrupt your typed request. Ask again when it's finished.")
             scheduleHintClear()

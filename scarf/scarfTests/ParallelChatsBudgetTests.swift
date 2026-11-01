@@ -31,7 +31,7 @@ import ScarfCore
         private let stderrCont: AsyncThrowingStream<String, Error>.Continuation
         private let sessionId: String
         private let loadMode: String?
-        private let rejectSetMode: Bool
+        private var rejectSetMode: Bool
 
         private(set) var closed = false
         private(set) var sentMethods: [String] = []
@@ -49,6 +49,8 @@ import ScarfCore
             stderr = errStream
             stderrCont = errCont
         }
+
+        func acceptSetMode() { rejectSetMode = false }
 
         func send(_ line: String) async throws {
             if closed { throw ACPChannelError.writeEndClosed }

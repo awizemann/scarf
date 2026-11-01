@@ -155,4 +155,12 @@ final class ComposerDraft {
         text = current.isEmpty ? unsent : unsent + "\n\n" + text
         slots.restore(images)
     }
+
+    /// `restoreUnsent`, but after what is there: several sends handed back
+    /// one by one keep their order.
+    func appendUnsent(text unsent: String, images: [ChatImageAttachment]) {
+        let current = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        text = current.isEmpty ? unsent : text + "\n\n" + unsent
+        slots.restore(images)
+    }
 }

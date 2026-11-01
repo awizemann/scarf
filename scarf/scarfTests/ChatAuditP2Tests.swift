@@ -283,6 +283,103 @@ import ScarfCore
         #expect(vm.acpError == nil)
     }
 
+    // MARK: - No prompts into a session looser than the pick
+
+    /// A chat released, re-attached by typing: the re-send fails on a session
+    /// that came back looser. The held text returns, and nothing goes out.
+    @MainActor
+    private static func refusedAfterReattach(
+        _ home: TempHermesHome, first: ModeChannel, second: ModeChannel
+    ) async throws -> ChatViewModel {
+        let vm = try await Self.projectChat(home, first: first, second: second, pick: .default)
+        await vm.focusedChat.releaseProcess()?.value
+        vm.sendText("typed while released")
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 15) {
+            let set = await second.modeIds == ["default"]
+            return set && vm.focusedChat.composer.text == "typed while released"
+        }, "the held send never came back to the composer")
+        return vm
+    }
+
+    @Test @MainActor func aHeldSendComesBackInsteadOfGoingToALooserSession() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "accept_edits", rejectSetMode: true)
+        let vm = try await Self.refusedAfterReattach(home, first: first, second: second)
+        defer { vm.leaveChat() }
+
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await second.sentMethods.contains("session/prompt") == false, "a prompt went to a looser session")
+        #expect(vm.acpError?.contains("Default") == true)
+        #expect(!vm.richChatViewModel.isAgentWorking)
+        #expect(!vm.richChatViewModel.messages.contains { $0.isUser && $0.content == "typed while released" },
+                "the unsent message's echo stayed in the transcript")
+    }
+
+    /// The next send is refused too, keeps the banner and retries the mode;
+    /// once the mode is back, sends flow again.
+    @Test @MainActor func theNextSendRetriesTheModeAndOnlyFlowsOnceItIsBack() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "accept_edits", rejectSetMode: true)
+        let vm = try await Self.refusedAfterReattach(home, first: first, second: second)
+        defer { vm.leaveChat() }
+        let chat = vm.focusedChat
+        chat.composer.text = ""
+
+        vm.sendText("again")
+        #expect(chat.composer.text == "again")
+        #expect(vm.acpError != nil, "the next send cleared the banner while the mode stayed looser")
+        #expect(await Lifecycle.waitUntil { await second.modeIds == ["default", "default"] }, "no retry")
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        #expect(vm.acpError != nil)
+        #expect(await second.sentMethods.contains("session/prompt") == false)
+
+        await second.acceptSetMode()
+        chat.composer.text = ""
+        vm.sendText("third")
+        #expect(chat.composer.text == "third")
+        #expect(await Lifecycle.waitUntil { vm.acpError == nil }, "a successful retry left the banner")
+        #expect(await second.sentMethods.contains("session/prompt") == false, "the refused send went out anyway")
+        #expect(vm.richChatViewModel.activeApprovalMode == .default)
+
+        vm.sendText("fourth")
+        #expect(await Lifecycle.waitUntil { await second.sentMethods.contains("session/prompt") },
+                "sends didn't flow once the mode was back")
+    }
+
+    /// Picking a mode the host accepts settles it as well.
+    @Test @MainActor func pickingAModeTheHostAcceptsLiftsTheRefusal() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "dont_ask", rejectSetMode: true)
+        let vm = try await Self.refusedAfterReattach(home, first: first, second: second)
+        defer { vm.leaveChat() }
+
+        await second.acceptSetMode()
+        vm.switchApprovalMode(.acceptEdits)
+        #expect(await Lifecycle.waitUntil { vm.acpError == nil })
+        vm.sendText("now")
+        #expect(await Lifecycle.waitUntil { await second.sentMethods.contains("session/prompt") })
+    }
+
+    @Test @MainActor func liveVoiceIsRefusedOnALooserSession() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "accept_edits", rejectSetMode: true)
+        let vm = try await Self.refusedAfterReattach(home, first: first, second: second)
+        defer { vm.leaveChat() }
+
+        vm.voiceChat = vm.focusedChat
+        try await vm.submitVoiceTurn(VoiceTurnRequest(id: "v1", prompt: "spoken", context: ""))
+        #expect(vm.voiceTurnReply(for: "v1")?.text == ChatViewModel.voiceBusyReply)
+        #expect(await second.sentMethods.contains("session/prompt") == false)
+    }
+
     /// The reconnect ladder too, whose own clean-up must not wipe the banner.
     @Test @MainActor func aFailedResendOnTheReconnectLadderKeepsItsError() async throws {
         let home = try Lifecycle.configuredHome()
