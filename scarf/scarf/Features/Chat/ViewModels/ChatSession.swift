@@ -610,6 +610,12 @@ final class ChatSession {
     @ObservationIgnored
     var beforePromptIssueForTesting: (@MainActor (String) async -> Void)?
 
+    /// Test seam: awaited (with the prompt's wire text) right after a turn
+    /// has closed, before its post-processing — stands in for a slow
+    /// state.db read there. Nil in the app.
+    @ObservationIgnored
+    var afterTurnClosedForTesting: (@MainActor (String) async -> Void)?
+
     /// Origins of the interruptive turns started since the chat was last
     /// idle. Kept until EVERY interruptive turn has returned, because a
     /// typed prompt Hermes queued behind a voice turn returns at once but
@@ -1769,9 +1775,12 @@ final class ChatSession {
         // Chain this prompt's issue behind the previous one's.
         let previousIssued = lastPromptIssued
         let issueHook = beforePromptIssueForTesting
+        let closedHook = afterTurnClosedForTesting
         let (issued, issuedContinuation) = AsyncStream<Never>.makeStream()
         lastPromptIssued = issued
         let task = Task { @MainActor in
+            // A turn that doesn't close the chat's busy period settles here;
+            // one that does settles first, just before it closes.
             defer { settlePromptTurn(token) }
             // Whatever happens below, the next prompt must not wait forever.
             defer { issuedContinuation.finish() }
@@ -1807,9 +1816,15 @@ final class ChatSession {
                 let isRewind = RichChatViewModel.isGatewayRewindSlash(
                     wireText, capabilities: richChatViewModel.capabilitiesGate)
                 acpStatus = ACPPhase.ready
+                // The turn is over. The post-processing below awaits state.db,
+                // and a later turn returning meanwhile must not read this one
+                // as still running, or it skips its own completion and the
+                // chat stays on "Agent working".
+                settlePromptTurn(token)
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: result)
                 )
+                if let closedHook { await closedHook(wireText) }
                 if ChatViewModel.isModelSwitchCommand(wireText),
                    let reply = richChatViewModel.messages.last(where: { $0.isAssistant })?.content {
                     await followTypedModelSwitch(reply: reply)
@@ -1857,6 +1872,7 @@ final class ChatSession {
                 if endsBusyPeriod { acpStatus = ACPPhase.error }
                 await recordACPFailure(error, client: client, context: "ACP prompt failed")
                 guard endsBusyPeriod else { return }
+                settlePromptTurn(token)
                 richChatViewModel.handleACPEvent(
                     .promptComplete(sessionId: sessionId, response: ACPPromptResult(
                         stopReason: "error",
@@ -1864,6 +1880,7 @@ final class ChatSession {
                         thoughtTokens: 0, cachedReadTokens: 0
                     ))
                 )
+                if let closedHook { await closedHook(wireText) }
                 // A `/retry` whose resent turn failed has still rewound
                 // the session (gh#147); no-op for anything else. Not while
                 // any other turn (a queued one included) is in flight: the
