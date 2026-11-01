@@ -312,7 +312,7 @@ import UserNotifications
         let chatA = vm.focusedChat
         #expect(await Self.startWorking(vm, chB, "work in B"))
 
-        await chA.emitPermissionRequest(requestId: 0, title: "rm -rf build", toolCallId: "perm-check-1")
+        await chA.emitPermissionRequest(requestId: 0, title: "curl -H 'Authorization: Bearer s3cret' x", toolCallId: "perm-check-1")
         #expect(await Lifecycle.waitUntil { chatA.rowState == .needsAnswer })
         #expect(vm.presentedPermission == nil, "the focused chat showed a background chat's approval")
         let note = try #require(notifier.posted.last)
@@ -320,12 +320,15 @@ import UserNotifications
         #expect(note.kind == .needsAnswer)
         #expect(note.identifier == expectedId)
         #expect(note.title == ChatNotificationPolicy.needsAnswerTitle(chatName: "work in A"))
-        #expect(note.body == "rm -rf build")
+        // The kind, never the command: the title can hold a secret.
+        #expect(note.body == ChatNotificationPolicy.needsAnswerBody(kind: "execute", prompt: .toolApproval))
+        #expect(!note.body.contains("s3cret"), "the tool title reached the notification")
         #expect(note.route?.sessionId == "sess-A")
 
         vm.resumeSession("sess-A")
         let presented = try #require(vm.presentedPermission, "focusing the chat didn't bring its approval up")
         #expect(presented.chat === chatA)
+        #expect(presented.permission.title.contains("s3cret"), "the card lost the detail")
         #expect(notifier.removed.contains(expectedId) == false, "focusing withdrew an unanswered approval")
         presented.chat.respondToPermission(requestId: presented.permission.requestId, optionId: "allow_once")
         #expect(notifier.removed.contains(expectedId), "answering didn't withdraw its notification")

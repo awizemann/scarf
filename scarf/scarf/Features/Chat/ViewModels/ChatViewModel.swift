@@ -2801,7 +2801,7 @@ extension ChatViewModel: ChatSessionHost {
                 kind: .needsAnswer,
                 identifier: identifier,
                 title: ChatNotificationPolicy.needsAnswerTitle(chatName: chat.displayTitle),
-                body: ChatNotificationPolicy.needsAnswerBody(requestTitle: request.title),
+                body: ChatNotificationPolicy.needsAnswerBody(kind: request.kind, prompt: request.prompt),
                 route: notificationRoute(for: chat)
             ))
         }

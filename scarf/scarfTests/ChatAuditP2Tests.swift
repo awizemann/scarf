@@ -170,6 +170,22 @@ import ScarfCore
         vm.leaveChat()
     }
 
+    // MARK: - Needs-answer notification copy (#7)
+
+    @Test func theNeedsAnswerBodyDependsOnlyOnTheKind() {
+        func body(_ kind: String, _ prompt: RichChatViewModel.PermissionPrompt = .toolApproval) -> String {
+            ChatNotificationPolicy.needsAnswerBody(kind: kind, prompt: prompt)
+        }
+        #expect(body("execute") == "A command is waiting for your approval.")
+        #expect(body("edit") == "A file edit is waiting for your approval.")
+        #expect(body("delete") == "A deletion is waiting for your approval.")
+        #expect(body("other") == "A tool is waiting for your approval.")
+        #expect(body("") == "A tool is waiting for your approval.")
+        // A gateway question's title is the question itself: not shown either.
+        #expect(body("other", .clarify) == "Hermes has a question for you.")
+        #expect(body("execute", .modelConfirmation) == "Hermes wants to confirm a model switch.")
+    }
+
     // MARK: - Project accept_edits vs the user's pick (#8)
 
     typealias Budget = ParallelChatsBudgetTests

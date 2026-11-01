@@ -120,12 +120,28 @@ enum ChatNotificationPolicy {
         String(localized: "Hermes needs your answer — \(chatName)")
     }
 
-    /// The needs-answer body: what is being asked about.
-    nonisolated static func needsAnswerBody(requestTitle: String) -> String {
-        let title = requestTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        return title.isEmpty
-            ? String(localized: "A tool is waiting for your approval.")
-            : trimmedPreview(title)
+    /// The needs-answer body says what kind of thing waits, never what it
+    /// is: a tool title can hold a command with a token in it, and banners
+    /// and Notification Center show on a locked or shared screen. The detail
+    /// is on the card. `kind` is the ACP tool kind the card's icon reads.
+    nonisolated static func needsAnswerBody(
+        kind: String,
+        prompt: RichChatViewModel.PermissionPrompt
+    ) -> String {
+        switch prompt {
+        case .clarify:
+            return String(localized: "Hermes has a question for you.")
+        case .modelConfirmation:
+            return String(localized: "Hermes wants to confirm a model switch.")
+        case .toolApproval:
+            break
+        }
+        switch kind {
+        case "execute": return String(localized: "A command is waiting for your approval.")
+        case "edit": return String(localized: "A file edit is waiting for your approval.")
+        case "delete": return String(localized: "A deletion is waiting for your approval.")
+        default: return String(localized: "A tool is waiting for your approval.")
+        }
     }
 
     /// First non-empty line, capped at ~140 chars so the notification
