@@ -26,11 +26,15 @@ Closing a window, quitting, or switching profile now asks first when a chat is s
 - Deleting a chat that's still replying now works on Hermes v0.22.5, which refuses to delete a session with a turn running. Scarf stops the turn first, then deletes it, and says "session deleted" only once Hermes confirms. This also applies to the Sessions tab.
 - If Hermes refuses to delete a session, Scarf shows Hermes's reason instead of an exit code.
 - ScarfGo asks before you switch away from a chat that's still replying, since parallel chats aren't on iOS yet.
+- A message sent while a chat is still starting now waits and goes out when the chat is ready, instead of failing with "No session ID". If the start fails, your text comes back to the composer.
+- SSH recovery no longer closes a healthy connection during a network blip or just after waking, which could drop every chat on that server.
+- Approval cards ignore number keys for a moment after they appear, so a digit you were typing can't approve something you haven't read. "Needs your answer" notifications no longer show the command itself.
+- If Scarf can't confirm the approval mode you picked after a chat reconnects, it stops sending prompts and says so, rather than carrying on with looser approvals.
 
 ## Under the hood
 
 - Chat is rebuilt around a per-chat session object, with one window holding many.
-- New live UI tests run against real Hermes on v0.22.5 and v0.21.5: chats replying at once, background approvals, deleting a working chat, closing with chats running, and a real SSH connection at the chat limit.
+- New live UI tests run against real Hermes on v0.22.5 and v0.21.5, and over a real SSH server: chats replying at once, background approvals, deleting a working chat, closing with chats running, and a real SSH connection at the chat limit.
 
 ## Known issue
 
