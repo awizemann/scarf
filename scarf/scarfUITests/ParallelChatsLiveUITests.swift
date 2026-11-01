@@ -741,6 +741,11 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         guard let path = ProcessInfo.processInfo.environment["SCARF_UITEST_ACP_PROCS"] else { return nil }
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         let lines = text.split(separator: "\n").map(String.init)
+        // A real server's list comes from real-remote-server.py, which matches
+        // on /proc and has already proved that match against a running process.
+        if overSSH, ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil {
+            return lines.filter { $0.hasPrefix("real-remote-acp ") }.count
+        }
         // Hermes's own Python process, not a wrapping shell or an ssh client.
         // SSHTransport pins a remote root home with `-p default`; a local chat
         // runs bare `hermes acp`, so this also tells the two apart.
@@ -794,6 +799,11 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         while Date() < end {
             if let count = acpProcessCount(overSSH: overSSH), count > limit {
                 XCTFail("\(count) hermes acp connections \(context), over the budget of \(limit):\n\(acpProcessList())", file: file, line: line)
+                return
+            }
+            // "At most" would pass on a count that matched nothing.
+            if ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil, overSSH, acpProcessCount(overSSH: true) == 0 {
+                XCTFail("No hermes acp seen on the real server \(context), with chats open:\n\(acpProcessList())", file: file, line: line)
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(1))

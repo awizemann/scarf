@@ -58,12 +58,19 @@ def our_pids(home):
     return pids
 
 
-def cmdline(pid):
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as f:
-            return f.read().rstrip(b"\0").replace(b"\0", b" ").decode(errors="replace")
-    except OSError:
-        return ""
+def acp_pids(home):
+    """This home's `hermes acp` processes, by their last arguments: from v0.22.5
+    the launcher's command line carries a whole bootstrap script before them, and
+    the interpreter isn't in a venv. Its gateway and tool children don't end so."""
+    found = []
+    for pid in our_pids(home):
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                if f.read().rstrip(b"\0").split(b"\0")[-3:] == [b"-p", b"default", b"acp"]:
+                    found.append(pid)
+        except OSError:
+            pass
+    return found
 
 
 def stop(home):
@@ -211,6 +218,9 @@ def probe(home):
     try:
         call(1, "initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 60)
         result["initialize_seconds"] = round(time.time() - started, 1)
+        if child.pid not in acp_pids(home):
+            # The tests count with this match: never let it count nothing unnoticed.
+            raise RuntimeError("the process match in acp_pids doesn't recognise a running hermes acp")
         result["after_initialize"] = proc_memory(child.pid)
         session = call(2, "session/new", {"cwd": home, "mcpServers": []}, 60)["result"]["sessionId"]
         result["session_new_seconds"] = round(time.time() - started, 1)
@@ -247,10 +257,8 @@ def tick(home):
         except OSError:
             signature.append("-")
     print("SIG " + ",".join(signature))
-    for pid in our_pids(home):
-        line = cmdline(pid)
-        if "hermes" in line and " acp" in line:
-            print("P " + line)
+    for pid in acp_pids(home):
+        print(f"P real-remote-acp pid={pid}")
 
 
 def copy_db(home):
