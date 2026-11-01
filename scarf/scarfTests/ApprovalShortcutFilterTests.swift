@@ -59,6 +59,51 @@ import AppKit
         #expect(!monitor.shouldDrop(try Self.key("1", at: 100.6), windowNumber: Self.window))
     }
 
+    /// AZERTY types digits with Shift: they reach the gate as the digit. A
+    /// shifted symbol is typing, and passes.
+    @Test @MainActor func shiftedDigitsAreGatedAndShiftedSymbolsAreNot() throws {
+        let monitor = Self.monitor()
+        #expect(monitor.shouldDrop(try Self.key("1", at: 100, modifiers: .shift), windowNumber: Self.window))
+        #expect(monitor.shouldDrop(try Self.key("1", at: 200, isRepeat: true, modifiers: .shift), windowNumber: Self.window))
+        #expect(!monitor.shouldDrop(try Self.key("1", at: 200, modifiers: .shift), windowNumber: Self.window))
+        #expect(!monitor.shouldDrop(try Self.key("!", at: 100, modifiers: .shift), windowNumber: Self.window))
+        #expect(!monitor.shouldDrop(try Self.key("&", at: 100), windowNumber: Self.window))
+    }
+
+    /// The installed monitor itself, through AppKit's event dispatch. The
+    /// window is never ordered in, so nothing appears or takes focus.
+    @Test @MainActor func theInstalledMonitorReallyDropsAndUninstallStopsIt() throws {
+        let app = NSApplication.shared
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10),
+                              styleMask: [.borderless], backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        let view = NSView()
+        window.contentView = view
+        let filter = ApprovalShortcutFilter.Monitor()
+        filter.gate.cardShown(id: "card", at: 100)
+
+        var seen = 0
+        let observer = try #require(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            if event.characters == "1" { seen += 1 }
+            return nil // never reaches the responder chain
+        })
+        defer { NSEvent.removeMonitor(observer) }
+        func send2(at time: TimeInterval) throws { app.sendEvent(try Self.key("1", at: time, window: window.windowNumber)) }
+        func send() throws { try send2(at: 100.1) }
+
+        try send()
+        #expect(seen == 1, "AppKit's dispatch didn't reach the monitors")
+        filter.install(on: view)
+        try send()
+        #expect(seen == 1, "the installed monitor let a digit through during the wait")
+        try send2(at: 100.6)
+        #expect(seen == 2, "the installed monitor dropped a digit after the wait")
+        filter.uninstall()
+        try send()
+        #expect(seen == 3, "uninstall left the monitor dropping digits")
+        window.close()
+    }
+
     /// Only the card's digits: Esc, ⌘C, a 0, or another window's typing pass.
     @Test @MainActor func everythingElsePassesThrough() throws {
         let monitor = Self.monitor()

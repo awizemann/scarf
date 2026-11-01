@@ -69,12 +69,14 @@ struct ApprovalShortcutFilter: NSViewRepresentable {
             token = nil
         }
 
-        /// A bare 1-9 key-down for this window that the gate refuses.
+        /// A 1-9 key-down for this window that the gate refuses. Shift doesn't
+        /// exempt it: AZERTY types digits with Shift. It reaches here as the
+        /// digit only there; QWERTY's Shift-1 reads "!" and passes.
         /// `NSEvent.timestamp` runs on the same clock as `systemUptime`.
         func shouldDrop(_ event: NSEvent, windowNumber: Int) -> Bool {
             guard event.type == .keyDown,
                   event.windowNumber == windowNumber,
-                  event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+                  event.modifierFlags.intersection([.command, .control, .option]).isEmpty,
                   let key = event.charactersIgnoringModifiers,
                   key.count == 1, let digit = key.first?.wholeNumberValue, (1...9).contains(digit)
             else { return false }
