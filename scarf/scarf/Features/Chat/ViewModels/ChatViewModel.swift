@@ -1370,6 +1370,10 @@ final class ChatViewModel {
         // comes to the chat the user is in once the open has run.
         let unsent = chat.richChatViewModel.sessionId == nil && chat.targetSessionId == nil
             ? chat.unsentAutostartInput : nil
+        // Sends held with it. A chat this window doesn't show was handed on
+        // when it settled (`chatSettledWithoutConnection`).
+        let held = chat === focusedChat && chat.richChatViewModel.sessionId == nil && chat.targetSessionId == nil
+            ? chat.heldSendsForHandOff : nil
         let stopped = chat.releaseProcess(stoppingTurn: true)
         Task { @MainActor [weak self] in
             // The process is gone (or the cancel's bound passed) before
@@ -1380,6 +1384,9 @@ final class ChatViewModel {
             // with the session boundary): the text survives nowhere else.
             if let unsent, chat.wasDropped || !chat.composer.text.contains(unsent.text), let self {
                 self.focusedChat.takeUnsentFromStoppedChat(text: unsent.text, images: unsent.images)
+            }
+            if let held, chat.wasDropped || !chat.composer.text.contains(held.text), let self {
+                self.focusedChat.takeHeldSendsFromOtherChat(text: held.text, images: held.images)
             }
         }
     }
@@ -2730,6 +2737,8 @@ extension ChatViewModel: ChatSessionHost {
         if case let .kickoff(projectPath, prompt) = unsent {
             parkKickoff(projectPath: projectPath, initialPrompt: prompt)
         }
+        // Back in this chat's composer: fine while the chat stays.
+        let returnedHeld = chat.takeReturnedHeldSends()
         guard chat !== focusedChat else { return }
         var typed: (text: String, images: [ChatImageAttachment])?
         if case let .typed(text, images) = unsent { typed = (text, images) }
@@ -2737,6 +2746,11 @@ extension ChatViewModel: ChatSessionHost {
             notifyConnectionFailed(chat)
         } else if let typed {
             focusedChat.takeUnsentFromFailedChat(text: typed.text, images: typed.images)
+            if let returnedHeld {
+                focusedChat.takeHeldSendsFromOtherChat(text: returnedHeld.text, images: returnedHeld.images)
+            }
+        } else if let returnedHeld {
+            focusedChat.takeHeldSendsFromOtherChat(text: returnedHeld.text, images: returnedHeld.images)
         }
         reapBackgroundChats()
     }

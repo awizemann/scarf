@@ -259,6 +259,9 @@ import ScarfCore
         #expect(!vm.focusedChat.hasHeldSends)
         try? await Task.sleep(nanoseconds: 200_000_000)
         #expect(await channel.promptTexts == ["typed while starting"], "the send went out twice")
+        // After the open and any history load: the bubble is still there, once.
+        #expect(vm.richChatViewModel.messages.filter { $0.isUser && $0.content == "typed while starting" }.count == 1,
+                "the sent message lost its bubble")
         #expect(vm.acpError == nil)
         vm.leaveChat()
     }
@@ -305,6 +308,112 @@ import ScarfCore
         #expect(!vm.focusedChat.hasHeldSends)
         #expect(!vm.richChatViewModel.isAgentWorking)
         #expect(vm.richChatViewModel.transientHint?.contains("back in the composer") == true)
+    }
+
+    // Held sends when the chat goes away, images that can't fit, slash commands.
+
+    /// A background new chat: its start fails and it is dropped. What was held
+    /// comes to the chat the user is in, after their draft.
+    @Test @MainActor func aDroppedBackgroundChatHandsOnItsHeldText() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let other = Rows.ControlledChannel(sessionId: "sess-B")
+        let vm = Rows.makeVM(home, Rows.RecordingNotifier())
+        Rows.install([channel, other], on: vm)
+
+        vm.startNewSession()
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        let slow = vm.focusedChat
+        vm.sendText("held in the background")
+        vm.startNewSession()
+        #expect(vm.focusedChat !== slow, "a chat with a held send wasn't kept")
+        #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-B"))
+        vm.focusedChat.composer.text = "my draft"
+
+        await channel.failOpen()
+        #expect(await Lifecycle.waitUntil { !vm.chats.contains { $0 === slow } }, "the failed chat wasn't dropped")
+        #expect(vm.focusedChat.composer.text == "my draft\n\nheld in the background",
+                "the held text was lost or overwrote the draft")
+        vm.leaveChat()
+    }
+
+    /// Budget Stop on the shown chat: the open reuses it and clears its draft,
+    /// so the held text has to survive that.
+    @Test @MainActor func budgetStopOnTheShownChatKeepsItsHeldText() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let budget = LiveChatBudget(localLimit: 1)
+        let vm = ChatViewModel(context: home.context, liveChatBudget: budget)
+        let channel = SlowOpenChannel()
+        let other = Lifecycle.ScriptedACPChannel(behavior: .happy(sessionId: "sess-O"))
+        let calls = Lifecycle.CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            let first = calls.next() == 1
+            return first ? ACPClient(context: ctx) { _ in channel } : ACPClient(context: ctx) { _ in other }
+        }
+        vm.startNewSession()
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        vm.sendText("held at stop")
+        let working = vm.focusedChat
+
+        vm.startNewSession()
+        let block = try #require(vm.budgetBlocked, "a chat with a held send didn't block the open")
+        vm.stopChatForBudget(block, chatID: working.id)
+        #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-O"))
+        #expect(await Lifecycle.waitUntil { vm.focusedChat.composer.text.contains("held at stop") },
+                "budget Stop lost the held text")
+        #expect(vm.focusedChat.composer.text.components(separatedBy: "held at stop").count == 2,
+                "the held text was handed on twice")
+        vm.leaveChat()
+    }
+
+    @Test @MainActor func imagesThatCannotFitAreNamedInTheHint() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        vm.startNewSession()
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        let chat = vm.focusedChat
+        vm.sendText("with image", images: [Rows.image()])
+        chat.composer.slots.restore(Array(repeating: Rows.image(), count: ComposerAttachmentSlots.defaultCapacity))
+
+        chat.stop()
+        #expect(chat.composer.text == "with image")
+        #expect(chat.richChatViewModel.transientHint?.contains("didn't fit") == true, "a lost image went unmentioned")
+    }
+
+    /// A held `/new` in a chat now in the background: no orphan bubble, and not
+    /// stuck working.
+    @Test @MainActor func aHeldSlashCommandLeavesNoOrphanBubble() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let other = Rows.ControlledChannel(sessionId: "sess-B")
+        let vm = Rows.makeVM(home, Rows.RecordingNotifier())
+        Rows.install([channel, other], on: vm)
+        vm.resumeSession("sess-slow")
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        let held = vm.focusedChat
+        vm.sendText("/new")
+        #expect(held.hasHeldSends)
+        vm.startNewSession()
+        #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-B"))
+
+        await channel.finishOpen()
+        #expect(await Lifecycle.waitUntil { !held.hasHeldSends })
+        #expect(!held.richChatViewModel.messages.contains { $0.isUser && $0.content == "/new" }, "orphan bubble")
+        #expect(!held.richChatViewModel.isAgentWorking, "stuck working")
+        vm.leaveChat()
+    }
+
+    /// `RichChatInputBar`'s order: a send refused during delivery keeps its text.
+    @Test @MainActor func aSendHandedBackDuringDeliveryIsNotCleared() {
+        let draft = ComposerDraft()
+        draft.text = "typed"
+        draft.clearThenSend { draft.appendUnsent(text: "typed", images: []) }
+        #expect(draft.text == "typed")
     }
 
     /// The last-resort path keeps the text too.

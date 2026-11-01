@@ -708,9 +708,7 @@ struct RichChatInputBar: View {
     private func send() {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard canSend else { return }
-        // Cleared first: a refused send hands its text back during `onSend`.
-        text = ""
-        onSend(trimmed, slots.drain(), .typed)
+        draft.clearThenSend { onSend(trimmed, slots.drain(), .typed) }
         showMenu = false
         selectedIndex = 0
     }

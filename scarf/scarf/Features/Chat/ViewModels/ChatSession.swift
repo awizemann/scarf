@@ -183,6 +183,12 @@ final class ChatSession {
     private weak var clientLooserThanPick: ACPClient?
     @ObservationIgnored
     private var isRetryingPickedMode = false
+    /// See `takeReturnedHeldSends`.
+    @ObservationIgnored
+    private var returnedHeldSends: (text: String, images: [ChatImageAttachment])?
+    /// Sends `releaseHeldSends` has yet to hand over after the current one.
+    @ObservationIgnored
+    private var heldSendsLeftToRelease = 0
 
     /// Single-flight ControlMaster recovery shared by every chat on a host
     /// (`SSHMasterRecovery`). The window sets its own (tests inject one).
@@ -1231,6 +1237,7 @@ final class ChatSession {
     private func beginHoldingSends(for client: ACPClient) {
         // The new client inherits what was typed while it was coming.
         if !holdingForPendingClient { heldSends = [] }
+        returnedHeldSends = nil
         holdingForPendingClient = false
         heldSendsClient = client
     }
@@ -1284,6 +1291,7 @@ final class ChatSession {
         heldSendsClient = nil
         guard acpClient === client else { return }
         for (index, send) in sends.enumerated() {
+            heldSendsLeftToRelease = sends.count - index - 1
             sendViaACP(
                 client: client, text: send.text, images: send.images, localEchoAlreadyAdded: true,
                 turnInFlight: turnAlreadyRunning || index > 0
@@ -1310,6 +1318,17 @@ final class ChatSession {
         }
     }
 
+    /// The history just replaced the transcript, and echoes made before the
+    /// session had an id aren't cached to survive that: show them again.
+    private func restoreHeldEchoes(for client: ACPClient) {
+        guard heldSendsClient === client else { return }
+        for send in heldSends
+        where !richChatViewModel.messages.contains(where: { $0.isUser && $0.id < 0 && $0.content == send.text }) {
+            richChatViewModel.addUserMessage(text: send.text)
+            richChatViewModel.closeReplayGate()
+        }
+    }
+
     /// Held sends that never had a session to go to: there is no transcript to
     /// keep their echoes for, so the text goes back where it was typed.
     private func returnHeldSendsToComposer() {
@@ -1317,12 +1336,44 @@ final class ChatSession {
         heldSends = []
         heldSendsClient = nil
         guard !sends.isEmpty else { return }
+        var imagesLost = 0
         for send in sends {
             richChatViewModel.withdrawUserEcho(text: send.text)
-            composer.appendUnsent(text: send.text, images: send.images)
+            imagesLost += composer.appendUnsent(text: send.text, images: send.images)
         }
+        returnedHeldSends = (
+            sends.map(\.text).joined(separator: "\n\n"),
+            sends.flatMap(\.images)
+        )
         if !hasTurnInFlight { richChatViewModel.cancelPendingSend() }
         showHint(String(localized: "Not sent — the chat didn't finish starting. Your message is back in the composer."))
+        noteImagesDidNotFit(imagesLost)
+    }
+
+    /// The sends held right now, as one message.
+    var heldSendsForHandOff: (text: String, images: [ChatImageAttachment])? {
+        guard !heldSends.isEmpty else { return nil }
+        return (heldSends.map(\.text).joined(separator: "\n\n"), heldSends.flatMap(\.images))
+    }
+
+    /// What `returnHeldSendsToComposer` last put in this composer, for the
+    /// window to hand on if this chat goes away. Taking it forgets it.
+    func takeReturnedHeldSends() -> (text: String, images: [ChatImageAttachment])? {
+        defer { returnedHeldSends = nil }
+        return returnedHeldSends
+    }
+
+    /// Held sends of a chat that went away: after any draft here, never over it.
+    func takeHeldSendsFromOtherChat(text: String, images: [ChatImageAttachment]) {
+        let imagesLost = composer.appendUnsent(text: text, images: images)
+        showHint(String(localized: "Not sent — that chat didn't finish starting. Your message is in the composer."))
+        noteImagesDidNotFit(imagesLost)
+    }
+
+    /// The composer's attachment slots are full: say what couldn't come back.
+    private func noteImagesDidNotFit(_ count: Int) {
+        guard count > 0 else { return }
+        showHint(String(localized: "Your message is back in the composer, but ^[\(count) image](inflect: true) didn't fit. Attach again to send."))
     }
 
     /// Start ACP for the current session (or create a new one), then send the
@@ -1573,6 +1624,12 @@ final class ChatSession {
         if let intercept = RichChatViewModel.clientSideSlashCommand(
             for: text, capabilities: richChatViewModel.capabilitiesGate
         ) {
+            // Echoed before anyone knew it wouldn't go out (a held send, an
+            // autostart): nothing on the wire will answer that bubble.
+            if localEchoAlreadyAdded {
+                richChatViewModel.withdrawUserEcho(text: text)
+                if heldSendsLeftToRelease == 0 && !hasTurnInFlight { richChatViewModel.cancelPendingSend() }
+            }
             switch intercept {
             case .newSession(let name):
                 // Mac startNewSession doesn't yet honor v0.13's optional
@@ -1608,7 +1665,7 @@ final class ChatSession {
             // Only a start just failing gets here (its client is still set);
             // whatever the reason, the text is not lost.
             if localEchoAlreadyAdded { richChatViewModel.withdrawUserEcho(text: text) }
-            composer.appendUnsent(text: text, images: images)
+            noteImagesDidNotFit(composer.appendUnsent(text: text, images: images))
             clearACPErrorState()
             acpError = "No session ID — cannot send"
             return
@@ -2257,7 +2314,7 @@ final class ChatSession {
             richChatViewModel.withdrawUserEcho(text: text)
             if !hasTurnInFlight { richChatViewModel.cancelPendingSend() }
         }
-        composer.appendUnsent(text: text, images: images)
+        noteImagesDidNotFit(composer.appendUnsent(text: text, images: images))
         raiseLooserThanPickBanner()
     }
 
@@ -2601,6 +2658,7 @@ final class ChatSession {
                             host?.transcriptLineage(for: sessionId) ?? [], for: sessionId, addingLoadedHead: loadedHead)
                     )
                     guard startStillCurrent(intent, client: client) else { return }
+                    restoreHeldEchoes(for: client)
                     // After the history, so the notice anchors below it.
                     if let fallback = outcome.fallbackReason {
                         noteResumeFallback(from: sessionId, to: resolvedSessionId)

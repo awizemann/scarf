@@ -158,9 +158,18 @@ final class ComposerDraft {
 
     /// `restoreUnsent`, but after what is there: several sends handed back
     /// one by one keep their order.
-    func appendUnsent(text unsent: String, images: [ChatImageAttachment]) {
+    /// Returns how many images didn't fit.
+    @discardableResult
+    func appendUnsent(text unsent: String, images: [ChatImageAttachment]) -> Int {
         let current = text.trimmingCharacters(in: .whitespacesAndNewlines)
         text = current.isEmpty ? unsent : text + "\n\n" + unsent
-        slots.restore(images)
+        return slots.restore(images)
+    }
+
+    /// Clears the text, then runs `deliver`, in that order: a refused send
+    /// hands its text back during `deliver`, and must not be cleared after.
+    func clearThenSend(_ deliver: () -> Void) {
+        text = ""
+        deliver()
     }
 }
