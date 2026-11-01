@@ -54,14 +54,22 @@ struct ApprovalShortcutFilter: NSViewRepresentable {
         var gate = ApprovalShortcutGate()
         private weak var view: NSView?
         private var token: Any?
+        private(set) var handledCount = 0
 
         func install(on view: NSView) {
             self.view = view
             token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self, let window = self.view?.window,
-                      self.shouldDrop(event, windowNumber: window.windowNumber) else { return event }
-                return nil
+                self?.handle(event) ?? event
             }
+        }
+
+        /// The installed monitor's body: nil drops the event. Counted so a
+        /// test can see AppKit calling it, and stop calling it.
+        func handle(_ event: NSEvent) -> NSEvent? {
+            handledCount += 1
+            guard let window = view?.window,
+                  shouldDrop(event, windowNumber: window.windowNumber) else { return event }
+            return nil
         }
 
         func uninstall() {

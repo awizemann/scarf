@@ -82,25 +82,24 @@ import AppKit
         let filter = ApprovalShortcutFilter.Monitor()
         filter.gate.cardShown(id: "card", at: 100)
 
-        var seen = 0
-        let observer = try #require(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-            if event.characters == "1" { seen += 1 }
-            return nil // never reaches the responder chain
-        })
-        defer { NSEvent.removeMonitor(observer) }
-        func send2(at time: TimeInterval) throws { app.sendEvent(try Self.key("1", at: time, window: window.windowNumber)) }
-        func send() throws { try send2(at: 100.1) }
+        defer { filter.uninstall() }
+        func key(at time: TimeInterval) throws -> NSEvent {
+            try Self.key("1", at: time, window: window.windowNumber)
+        }
 
-        try send()
-        #expect(seen == 1, "AppKit's dispatch didn't reach the monitors")
+        // The body drops during the wait and passes after it.
         filter.install(on: view)
-        try send()
-        #expect(seen == 1, "the installed monitor let a digit through during the wait")
-        try send2(at: 100.6)
-        #expect(seen == 2, "the installed monitor dropped a digit after the wait")
+        try #expect(filter.handle(key(at: 100.1)) == nil, "a digit got through during the wait")
+        try #expect(filter.handle(key(at: 100.6)) != nil, "a digit was dropped after the wait")
+
+        // AppKit really calls it while installed, and not after. (An observing
+        // monitor can't show the drop itself: monitors run in no fixed order.)
+        let before = filter.handledCount
+        app.sendEvent(try key(at: 100.1))
+        #expect(filter.handledCount == before + 1, "the installed monitor never saw the event")
         filter.uninstall()
-        try send()
-        #expect(seen == 3, "uninstall left the monitor dropping digits")
+        app.sendEvent(try key(at: 100.1))
+        #expect(filter.handledCount == before + 1, "uninstall left the monitor running")
         window.close()
     }
 
