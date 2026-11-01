@@ -2634,8 +2634,9 @@ extension ChatViewModel {
     }
 
     /// Tear down every chat this window holds (window close, server
-    /// switch): the focused one as `stopACP` does, the background ones
-    /// superseded and dropped — nothing can reach them afterwards.
+    /// switch): the focused one is kept, the background ones dropped —
+    /// nothing can reach them afterwards. All are superseded, so a start
+    /// still in its pre-spawn read can't spawn for a gone window.
     ///
     /// Returns each chat's teardown (the bounded `session/cancel` of a turn
     /// in flight, then `client.stop()`), for a caller that must let them
@@ -2647,7 +2648,7 @@ extension ChatViewModel {
             if let task = chat.supersede() { teardowns.append(task) }
             chat.wasDropped = true
         }
-        if let task = focusedChat.stop() { teardowns.append(task) }
+        if let task = focusedChat.supersede() { teardowns.append(task) }
         chats = [focusedChat]
         if preflightChat !== focusedChat { preflightChat = nil }
         return teardowns

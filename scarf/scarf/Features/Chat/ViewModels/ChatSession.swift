@@ -266,9 +266,12 @@ final class ChatSession {
     /// Stop for a delete Hermes hasn't answered yet: the transcript stays, and
     /// nothing claims the session is gone (`tearDownDeletedActiveSession` does
     /// once it is).
+    ///
+    /// Supersedes: a start still in its pre-spawn read must not spawn after
+    /// this. The chat stays; a survivor is re-attached by the user clicking it.
     func stopForDeletion() -> Task<Void, Never>? {
         stoppedForDelete = true
-        return stop(reason: "Turn cancelled.")
+        return supersede()
     }
 
     /// Same category the code logged under before the extraction, so log
@@ -808,8 +811,6 @@ final class ChatSession {
             self.acpErrorHint = "The agent never finished starting — the process may be wedged. Click the chat again (or start a new one) to retry."
             // Sends held for the wedged start's client will never go out.
             if dropped > 0 {
-                self.heldSends = []
-                self.heldSendsClient = nil
                 self.richChatViewModel.transientHint = String(
                     localized: "^[\(dropped) message](inflect: true) couldn't be sent — the connection didn't come up."
                 )
@@ -1236,14 +1237,14 @@ final class ChatSession {
     }
 
     /// The ladder (or re-attach) ended without a client: what
-    /// was held will never go out. `announce` is false for a deliberate
-    /// teardown, whose transcript is being replaced anyway.
-    private func dropReconnectHeldSends(announce: Bool) {
+    /// was held will never go out. (A deliberate teardown drops them in
+    /// `tearDownConnection`, without a word.)
+    private func dropReconnectHeldSends() {
         guard holdingForPendingClient else { return }
         holdingForPendingClient = false
         let dropped = heldSends.count
         heldSends = []
-        if announce && dropped > 0 {
+        if dropped > 0 {
             richChatViewModel.transientHint = String(
                 localized: "^[\(dropped) message](inflect: true) couldn't be sent — the connection didn't come up."
             )
@@ -2337,7 +2338,7 @@ final class ChatSession {
             if isReattaching {
                 // Still released: a pick re-attaches it (the window's
                 // replay checks), and nothing typed can wait on a sheet.
-                dropReconnectHeldSends(announce: true)
+                dropReconnectHeldSends()
                 isReattaching = false
                 isReleased = true
             }
@@ -2969,7 +2970,7 @@ final class ChatSession {
                         // Another path installed a client without tearing
                         // this ladder down: the held sends were typed for
                         // this session's client, which will not come.
-                        if !Task.isCancelled { dropReconnectHeldSends(announce: true) }
+                        if !Task.isCancelled { dropReconnectHeldSends() }
                         await client.stop()
                         return
                     }
@@ -3043,7 +3044,7 @@ final class ChatSession {
             // `acpClient` is nil (`canHostVoiceTurns`).
             guard !Task.isCancelled else { return }
             showConnectionFailure()
-            dropReconnectHeldSends(announce: true)
+            dropReconnectHeldSends()
             isHandlingDisconnect = false
             host?.chatSettledWithoutConnection(self)
         }
@@ -3083,7 +3084,13 @@ final class ChatSession {
         isReattaching = false
         reconnectTask?.cancel()
         reconnectTask = nil
-        dropReconnectHeldSends(announce: false)
+        // Nothing held can go out now, whichever path was holding it (a
+        // caller with something to say counts them first). Left behind, they
+        // would keep the chat counting as working for good.
+        let droppedHeldSends = !heldSends.isEmpty
+        heldSends = []
+        heldSendsClient = nil
+        holdingForPendingClient = false
         // Capture BEFORE cancelling the prompt task. Keyed off
         // ChatViewModel-owned turn state — NOT `richChatViewModel` —
         // because in the session-switch paths `reset()` already wiped
@@ -3092,6 +3099,8 @@ final class ChatSession {
         // t-5451bd1b).
         let inFlightSessionId = inFlightPromptSessionId
         let turnWasInFlight = inFlightSessionId != nil
+        // Their echoes raised the working flag, and no turn will lower it.
+        if droppedHeldSends && !turnWasInFlight { richChatViewModel.cancelPendingSend() }
         // The in-flight turns' tasks, so the teardown below can wait for
         // their `session/prompt` answers. `cancelAllPromptTurns` cancels
         // the Swift tasks, but that doesn't abandon the pending RPC — the
@@ -3209,9 +3218,6 @@ final class ChatSession {
         }
         // Nothing held can go out now; say so where it was typed.
         let held = heldSends.count
-        heldSends = []
-        heldSendsClient = nil
-        holdingForPendingClient = false
         if held > 0 {
             richChatViewModel.transientHint = String(
                 localized: "^[\(held) message](inflect: true) couldn't be sent — the connection didn't come up."
