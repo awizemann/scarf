@@ -17,6 +17,7 @@
 #                         [--with-unit-tests] [--skip-display-check]
 #                         [--only Class[/test]]… [--allow-oauth-provider]
 #                         [--summary FILE]
+#                         [--real-remote user@host[:port] --real-remote-key FILE]
 #
 #   --hermes-tag TAG   Hermes tag to install in the guest (v0.22.5, v2026.9.24, …).
 #                      Must exist in the Hermes checkout ($SCARF_VM_HERMES_SRC,
@@ -44,6 +45,18 @@
 #   --summary FILE     Also copy summary.md here when the plans have run
 #                      (scripts/release.sh's UI-GATE.md). Not written when the
 #                      run stops before the plans.
+#   --real-remote U@H[:P]  Live plan only: the journeys that use the loopback
+#                      "remote" go to this real SSH server instead, against a
+#                      throwaway Hermes home (~/scarf-ui-gate-<stamp>, holding
+#                      copies of its config.yaml and .env) made for this run and
+#                      removed on every exit. Its ~/.hermes is only ever read.
+#                      Processes are stopped, and counted, only when their
+#                      /proc/<pid>/environ names that home. The run stops if the
+#                      server's available memory falls under 100 MB.
+#   --real-remote-key FILE  The server's private key. Never kept in the repo: for
+#                      the App Review server, fetch it from the Memophant vault
+#                      entry scarfgo-appstore-review-sshkey into a private file.
+#                      The host's known_hosts must already hold the server.
 #   --credentials-only Build the guest's credentials on the host, print the
 #                      NAMES that would go in, delete them, and stop (no VM).
 #
@@ -133,6 +146,8 @@ ALLOW_OAUTH=0
 CREDS_ONLY=0
 LOCK_TEST=""
 SUMMARY_COPY=""
+REAL_REMOTE=""
+REAL_REMOTE_KEY=""
 ONLY=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -147,15 +162,25 @@ while [[ $# -gt 0 ]]; do
     --allow-oauth-provider) ALLOW_OAUTH=1; shift ;;
     --summary) SUMMARY_COPY="${2:?--summary needs a file}"; shift 2 ;;
     --credentials-only) CREDS_ONLY=1; BUILD=0; shift ;;
+    --real-remote) REAL_REMOTE="${2:?--real-remote needs user@host[:port]}"; shift 2 ;;
+    --real-remote-key) REAL_REMOTE_KEY="${2:?--real-remote-key needs a file}"; shift 2 ;;
     --lock-test) LOCK_TEST="${2:?}"; HERMES_TAG="${HERMES_TAG:-none}"; shift 2 ;;
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,98p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,111p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
 [[ -n "$HERMES_TAG" ]] || die "--hermes-tag is required (see --help)"
+RR_USER=""; RR_HOST=""; RR_PORT=22
+if [[ -n "$REAL_REMOTE$REAL_REMOTE_KEY" ]]; then
+  [[ -n "$REAL_REMOTE" && -n "$REAL_REMOTE_KEY" ]] || die "--real-remote and --real-remote-key go together"
+  [[ "$PLANS_ARG" == Live ]] || die "--real-remote runs with --plans Live only"
+  [[ -f "$REAL_REMOTE_KEY" ]] || die "--real-remote-key: no such file"
+  [[ "$REAL_REMOTE" =~ ^([a-z_][a-z0-9_-]*)@([A-Za-z0-9.-]+)(:([0-9]+))?$ ]] || die "--real-remote takes user@host[:port]"
+  RR_USER="${BASH_REMATCH[1]}"; RR_HOST="${BASH_REMATCH[2]}"; RR_PORT="${BASH_REMATCH[4]:-22}"
+fi
 [[ -z "$SUMMARY_COPY" || -d "$(dirname "$SUMMARY_COPY")" ]] || die "--summary: no such directory: $(dirname "$SUMMARY_COPY")"
 case "$REUSE" in *[!A-Za-z0-9_-]*|"") die "--reuse takes a clone's name" ;; esac
 # The lock below is Scarf's own (flock), not ScarfRack's mkdir lock, so a clone
@@ -278,7 +303,7 @@ GW="work/scarf-$STAMP"          # the guest run dir, relative to the guest's $HO
 GUEST_RESULTS="results/scarf-$STAMP"
 
 # ---------- cleanup on every exit ----------
-GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
+RR_HOME=""; GUEST_UP=0; GUEST_HOME=""; STARTED_AT="$(date +%s)"; TESTS_PID=""; WATCH_PID=""
 gssh_in() {   # gssh with this process's stdin (lib.sh's gssh reads /dev/null)
   SSH_ASKPASS="$ASKPASS" SSH_ASKPASS_REQUIRE=force DISPLAY=none \
     ssh "${SSH_OPTS[@]}" "$GUEST_USER@$VM_IP" "$@"
@@ -292,6 +317,24 @@ gbash() { gssh_in "bash -s" <<<"$1"; }
 # guest.sh's cleanup runs the same lines.
 HERMES_MARK=".scarf-ui-gate-vm-created"
 SWEEP='for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do [ -d "$d" ] && find "$d" -maxdepth 1 -name "scarf-uitest-home-*" -exec rm -rf {} + 2>/dev/null; done; [ -f "$HOME/.hermes/'"$HERMES_MARK"'" ] && rm -rf "$HOME/.hermes"; [ -f "$HOME/.ssh/authorized_keys" ] && sed -i "" /scarf-ui-gate-vm-loopback/d "$HOME/.ssh/authorized_keys"; [ -f "$HOME/.ssh/known_hosts" ] && ssh-keygen -q -R 127.0.0.1 >/dev/null 2>&1; rm -f "$HOME/.ssh/known_hosts.old"; f="$HOME/Library/Application Support/scarf/servers.json"; grep -q 5CA2F00D-0000-4000-9000-000000000C01 "$f" 2>/dev/null && rm -f "$f"; pkill -f scarf-ssh- ; true'
+# The real server, driven from this Mac so its clean-up doesn't depend on the guest.
+rr_known_name() { if [[ $RR_PORT == 22 ]]; then echo "$RR_HOST"; else echo "[$RR_HOST]:$RR_PORT"; fi; }
+rr_ssh() {
+  ssh -i "$REAL_REMOTE_KEY" -p "$RR_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+    -o ConnectTimeout=20 "$RR_USER@$RR_HOST" "$@"
+}
+RR_TOOL="$REPO_ROOT/scripts/ui-fixture/real-remote-server.py"
+rr_tool() { local cmd="$1"; shift; rr_ssh "python3 -I - $cmd $*" <"$RR_TOOL"; }
+rr_teardown() {
+  local out="" try
+  for try in 1 2 3; do
+    out="$(rr_tool teardown "$RR_HOME" 2>&1)" && break
+    sleep 10
+  done
+  printf '%s\n' "$out" | tee "$RESULT/real-remote-verify.txt" >&2
+  [[ "$out" == *$'\n'CLEAN* ]] || { warn "the server is NOT verified clean: $RR_HOME (see $RESULT/real-remote-verify.txt)"; return 1; }
+  log "server verified clean: throwaway home and its processes gone"
+}
 cleanup() {
   local status=$?
   trap '' INT TERM
@@ -309,8 +352,10 @@ cleanup() {
       || gbash "d=~/$GW; pkill -f \"\$d/\" ; r=\$(cd \$d 2>/dev/null && pwd -P) && pkill -f \"\$r/\" ; rm -rf ~/$GW ~/$GUEST_RESULTS-* ; grep -q 'scarf-ui-gate-vm $STAMP' ~/.local/bin/hermes 2>/dev/null && rm -f ~/.local/bin/hermes; $SWEEP" >>"$RESULT/cleanup.log" 2>&1 || true
     # Belt and braces: the sweep again, whichever path ran above.
     gbash "$SWEEP" >>"$RESULT/cleanup.log" 2>&1 || true
+    [[ -z "$RR_HOST" ]] || gbash "ssh-keygen -q -R '$(rr_known_name)' >/dev/null 2>&1; rm -f ~/.ssh/known_hosts.old; rm -f /tmp/scarf-ssh-rr-$STAMP; true" >>"$RESULT/cleanup.log" 2>&1 || true
     verify_guest_clean || status=1
   fi
+  [[ -z "$RR_HOME" ]] || rr_teardown || status=1
   exec 9>&- 2>/dev/null || true   # releases the clone's lock (exit would too)
   rm -rf "$SCRATCH"
   [[ ! -e "$SCRATCH" ]] || { warn "could not delete the host scratch dir $SCRATCH"; status=1; }
@@ -322,7 +367,7 @@ cleanup() {
 # only matching FILE NAMES come back).
 verify_guest_clean() {
   local left mins found
-  left="$(gbash "ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l scarf-ui-gate-vm-loopback ~/.ssh/authorized_keys 2>/dev/null; grep -l 5CA2F00D-0000-4000-9000-000000000C01 \"\$HOME/Library/Application Support/scarf/servers.json\" 2>/dev/null; ssh-keygen -F 127.0.0.1 >/dev/null 2>&1 && echo known_hosts:127.0.0.1; pgrep -fl scarf-ssh- 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
+  left="$(gbash "${RR_HOST:+ssh-keygen -F '$(rr_known_name)' >/dev/null 2>&1 && echo known_hosts:real-remote; }ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l scarf-ui-gate-vm-loopback ~/.ssh/authorized_keys 2>/dev/null; grep -l 5CA2F00D-0000-4000-9000-000000000C01 \"\$HOME/Library/Application Support/scarf/servers.json\" 2>/dev/null; ssh-keygen -F 127.0.0.1 >/dev/null 2>&1 && echo known_hosts:127.0.0.1; pgrep -fl scarf-ssh- 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
   mins=$(( ( $(date +%s) - STARTED_AT ) / 60 + 5 ))
   found=""; local searched="searched for"
   if [[ ! -s "$SCRATCH/secret-values" ]]; then
@@ -618,6 +663,67 @@ acp_watch() {
   ACP_WATCH=$!
   trap 'kill "$ACP_WATCH" 2>/dev/null || true' EXIT
 }
+# --real-remote: the same journeys and the same server id, but on a real server.
+# The sandboxed runner can't ssh, so as with acp_watch this loop writes what it
+# reads: the process list (this guest's, plus the server's that name the
+# throwaway home) and a local read-only copy of the home's state.db, at
+# SCARF_UITEST_LOOPBACK_HOME. A stalled copy can only make a "gone" check fail.
+RR="$W/real-remote"
+rr() {
+  ssh -i "$RR/id" -p "$RR_PORT" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o ConnectTimeout=10 \
+    -o ControlMaster=auto -o ControlPath="/tmp/scarf-ssh-rr-$STAMP" -o ControlPersist=120 -o ServerAliveInterval=10 \
+    "$RR_USER@$RR_HOST" "$@"
+}
+rr_mirror() {
+  rr "python3 -I '$RR_HOME/.gate/server.py' db '$RR_HOME'" 2>/dev/null | gzip -dc >"$RR/mirror/state.tmp" 2>/dev/null \
+    && [ -s "$RR/mirror/state.tmp" ] && mv "$RR/mirror/state.tmp" "$RR/mirror/state.db"
+}
+real_remote_up() {
+  . "$RR/conf"
+  if [ -e "$SERVERS" ] && ! grep -q "$LOOPBACK_ID" "$SERVERS"; then
+    echo "a server list that is not ours is at $SERVERS: refusing --real-remote" >&2; exit 1
+  fi
+  mkdir -p "$RR/mirror" "$HOME/.ssh" "$(dirname "$SERVERS")"
+  chmod 700 "$RR" "$HOME/.ssh"; chmod 600 "$RR/id"
+  cat "$RR/known_hosts" >>"$HOME/.ssh/known_hosts"
+  local port=""; [ "$RR_PORT" = 22 ] || port="\"port\":$RR_PORT,"
+  cat >"$SERVERS" <<EOF
+{"schemaVersion":1,"entries":[{"id":"$LOOPBACK_ID","displayName":"Real remote","openOnLaunch":false,"kind":{"ssh":{"_0":{"host":"$RR_HOST","user":"$RR_USER",$port"identityFile":"$RR/id","remoteHome":"$RR_HOME","hermesBinaryHint":"$RR_BIN","hermesBinaryHintIsPath":true}}}}]}
+EOF
+  rr_mirror || { echo "could not copy the throwaway home's state.db from the server" >&2; exit 1; }
+  export TEST_RUNNER_SCARF_UITEST_LOOPBACK_ID="$LOOPBACK_ID"
+  export TEST_RUNNER_SCARF_UITEST_LOOPBACK_HOME="$RR/mirror"
+  export TEST_RUNNER_SCARF_UITEST_REAL_REMOTE=1
+}
+real_remote_watch() {
+  export TEST_RUNNER_SCARF_UITEST_ACP_PROCS="$W/acp-procs.txt"
+  ( sig=""
+    while [ -d "$W" ]; do
+      t0="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%d", time*1000')"
+      if out="$(rr "python3 -I '$RR_HOME/.gate/server.py' tick '$RR_HOME'" 2>/dev/null)"; then
+        t1="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%d", time*1000')"
+        mem="$(printf '%s\n' "$out" | sed -n 's/^MEM //p')"
+        now="$(printf '%s\n' "$out" | sed -n 's/^SIG //p')"
+        { ps -axwwo command= | grep ' acp' | grep hermes; printf '%s\n' "$out" | sed -n 's/^P //p'; } >"$W/acp-procs.tmp" || true
+        mv "$W/acp-procs.tmp" "$W/acp-procs.txt"
+        echo "$(date +%H:%M:%S) rtt_ms=$((t1 - t0)) available_mb=$mem acp=$(printf '%s\n' "$out" | grep -c '^P ')" >>"$RR/watch.log"
+        if [ "$now" != "$sig" ] && rr_mirror; then sig="$now"; fi
+        if [ -n "$mem" ] && [ "$mem" -lt 100 ]; then
+          echo "$(date +%H:%M:%S) available memory $mem MB is under 100 MB" >"$RR/aborted"
+          rr "python3 -I '$RR_HOME/.gate/server.py' killall '$RR_HOME'" >>"$RR/watch.log" 2>&1 || true
+          RW="$(cd "$W" && pwd -P)"
+          for d in "$W" "$RW"; do pkill -f "$d/Products/" 2>/dev/null || true; done
+          pkill -f test-without-building 2>/dev/null || true
+          break
+        fi
+      else
+        echo "$(date +%H:%M:%S) tick-failed" >>"$RR/watch.log"
+      fi
+      sleep 1
+    done ) >/dev/null 2>&1 &
+  ACP_WATCH=$!
+  trap 'kill "$ACP_WATCH" 2>/dev/null || true; rr -O exit 2>/dev/null || true' EXIT
+}
 case "$CMD" in
 setup)
   py="$1"; expect="$2"
@@ -656,7 +762,9 @@ fixture)
 plan)
   plan="$1"; xctestrun="$2"; bundle="$3"; per_test="$4"; per_test_max="$5"; shift 5
   cd "$W"
-  if [ "$plan" = Live ]; then loopback_up; acp_watch; fi
+  if [ "$plan" = Live ]; then
+    if [ -f "$RR/conf" ]; then real_remote_up; real_remote_watch; else loopback_up; acp_watch; fi
+  fi
   TEST_RUNNER_SCARF_UITEST_FIXTURE="$FIXTURE" \
   xcodebuild test-without-building \
     -xctestrun "$W/Products/$xctestrun" \
@@ -759,6 +867,31 @@ echo "free: ${FREE_GB} GB where ~/work lives, ${BOOT_GB} GB on the boot volume" 
 # rounds down, so 11 means at least 1 GiB above the threshold.
 [[ $BOOT_GB -ge 11 ]] || warn "$REUSE's boot volume has $BOOT_GB GB free: near or under its 10 GB low-disk threshold, macOS's purge kills the test runner mid-test (\"Test crashed with signal kill\"; such tests get one rerun) — free space in the guest (see scripts/ui-fixture/README.md)"
 
+# ---------- 3b. the real server ----------
+if [[ -n "$RR_HOST" ]]; then
+  log "preparing a throwaway Hermes home on $RR_HOST"
+  KNOWN="$(ssh-keygen -F "$(rr_known_name)" 2>/dev/null | grep -v '^#' || true)"
+  [[ -n "$KNOWN" ]] || die "$(rr_known_name) is not in this Mac's known_hosts"
+  rr_tool sweep | tee "$RESULT/real-remote-setup.txt" >&2 || die "could not reach $RR_HOST"
+  RR_BASE="$(rr_ssh 'echo $HOME')"
+  [[ "$RR_BASE" == /* ]] || die "could not read the server's home"
+  RR_NEW="$RR_BASE/scarf-ui-gate-${STAMP//[!0-9-]/}"
+  rr_ssh "mkdir -m 700 '$RR_NEW' '$RR_NEW/.gate' && cat >'$RR_NEW/.gate/server.py'" <"$RR_TOOL" || die "could not make the throwaway home"
+  RR_HOME="$RR_NEW"   # from here on, every exit removes it
+  rr_ssh "python3 -I '$RR_HOME/.gate/server.py' setup '$RR_HOME'" | tee -a "$RESULT/real-remote-setup.txt" >&2 || die "could not fill the throwaway home"
+  RR_BIN="$RR_HOME/.gate/hermes"
+  rr_ssh "'$RR_BIN' --version" 2>&1 | head -1 | tee -a "$RESULT/real-remote-setup.txt" >&2
+  log "measuring one hermes acp in it (one short prompt)"
+  rr_ssh "python3 -I '$RR_HOME/.gate/server.py' probe '$RR_HOME'" | tee "$RESULT/real-remote-memory.json" >&2 || die "the memory probe failed"
+  mkdir -p "$STAGE/real-remote"; chmod 700 "$STAGE/real-remote"
+  cp "$REAL_REMOTE_KEY" "$STAGE/real-remote/id"; chmod 600 "$STAGE/real-remote/id"
+  printf '%s\n' "$KNOWN" >"$STAGE/real-remote/known_hosts"
+  printf 'RR_USER=%s\nRR_HOST=%s\nRR_PORT=%s\nRR_HOME=%s\nRR_BIN=%s\n' "$RR_USER" "$RR_HOST" "$RR_PORT" "$RR_HOME" "$RR_BIN" >"$STAGE/real-remote/conf"
+  # The key's body joins the values searched for after the run (not its header
+  # and footer lines, which any key has).
+  grep -v '^-----' "$REAL_REMOTE_KEY" >>"$SCRATCH/secret-values"
+fi
+
 # ---------- 4. copy in ----------
 log "copying the products, uv, Hermes and the sanitized home into $REUSE:~/$GW"
 GUEST_UP=1
@@ -771,7 +904,7 @@ gbash "[ -e ~/.hermes ] || { mkdir -m 700 ~/.hermes && echo 'scarf-ui-gate-vm $S
 tar -C "$DERIVED/Build" -cf - Products -C "$STAGE" . | \
   gssh_in "mkdir -p ~/results ~/$GW && chmod 700 ~/$GW && tar -C ~/$GW -xf -" \
   || die "could not copy into $REUSE"
-rm -rf "$STAGE/source-home"
+rm -rf "$STAGE/source-home" "$STAGE/real-remote"
 
 # ---------- 5. Hermes and the fixture in the guest ----------
 log "installing Hermes $HERMES_TAG in the guest (log: $RESULT/guest-setup.log)"
@@ -951,6 +1084,16 @@ for plan in "${PLANS[@]}"; do
   fi
   purge_report "$GUEST_T0" "$RESULT/$plan.guest-purge.log"
   NOTES_OUT+=("- $plan: boot volume ${BOOT_BEFORE} GB free before, $(gb_boot) GB after; macOS low-disk purges: ${PURGES:-?}, runner terminations by the purge: ${RUNNER_KILLS:-?} ($plan.guest-purge.log)")
+  if [[ -n "$RR_HOST" ]]; then
+    gssh "cat ~/$GW/real-remote/watch.log" >"$RESULT/real-remote-watch.log" 2>/dev/null || true
+    gbash "log show --start '$GUEST_T0' --style compact --info --predicate 'subsystem == \"com.scarf\" AND category == \"ACPClient\" AND (eventMessage CONTAINS[c] \"reconnect\" OR eventMessage CONTAINS[c] \"disconnect\" OR eventMessage CONTAINS[c] \"closed\" OR eventMessage CONTAINS[c] \"terminated\")' 2>/dev/null | grep '^20'; true" >"$RESULT/real-remote-acp-events.log" 2>/dev/null || true
+    RR_ABORT="$(gssh "cat ~/$GW/real-remote/aborted 2>/dev/null; true" 2>/dev/null || true)"
+    if [[ -n "$RR_ABORT" ]]; then
+      OVERALL=1; SAW_FAIL=1; RESULT_CELL="STOPPED by the memory watcher"
+      warn "the memory watcher stopped the run: $RR_ABORT"
+    fi
+    NOTES_OUT+=("- real server: $(awk '/rtt_ms=/ { n++; split($2,a,"="); if (a[2]+0>x) x=a[2]+0; split($3,b,"="); if (m==""||b[2]+0<m) m=b[2]+0 } /tick-failed/ { f++ } END { print n+0 " ticks, slowest " x+0 " ms, lowest available " m+0 " MB, failed ticks " f+0 }' "$RESULT/real-remote-watch.log"); ACP connection events: $(grep -c . "$RESULT/real-remote-acp-events.log" || true); stopped: ${RR_ABORT:-no}")
+  fi
   ROWS+=("| $plan | $RESULT_CELL | $COUNTS | ${PLAN_WALL}s |")
   [[ -z "$FAILED_NAMES" ]] || FAILURES+=("$(printf '**%s failures (first run)**\n\n%s\n' "$plan" "$FAILED_NAMES")")
   [[ -z "$RERUN_LINES" ]] || FAILURES+=("$(printf '**%s reruns** (\"crashed with signal kill\" only — the guest'"'"'s low-disk purge terminating the runner; each test once, alone; the rerun decides)\n%s\n' "$plan" "$RERUN_LINES")")

@@ -21,6 +21,9 @@
 //  The two budget journeys reach a remote host over real SSH: the guest's own
 //  sshd on 127.0.0.1, set up by scripts/ui-gate-vm.sh for the Live plan. Without
 //  that they skip, so they never touch a developer's server list.
+//  With the gate's --real-remote the same journeys reach a real server instead:
+//  SCARF_UITEST_LOOPBACK_HOME is then a local read-only copy of that host's
+//  state.db, and the process list includes that host's own `hermes acp`s.
 //
 
 import XCTest
@@ -353,6 +356,11 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
             self.rowIsReplying(app, idA) && self.rowIsReplying(app, idB)
         }, "Both chats should be replying before the delete.")
         assertACPProcessesBecome(2, "with two chats running", overSSH: true)
+        // On a real server state.db is read through a copy a moment behind (see
+        // launchLoopback): "gone" below only means something once it was seen there.
+        if ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil {
+            XCTAssertTrue(waitUntil(timeout: 30, "the host's copy to hold the session") { self.sessionExists(idA) }, "The session never reached the host's state.db.")
+        }
 
         let row = element(app, Self.rowIdPrefix + idA)
         row.rightClick()
