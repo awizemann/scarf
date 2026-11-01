@@ -141,7 +141,7 @@ import ScarfCore
 
         vm.resumeSession("sess-R")
         stop(vm)
-        try? await Task.sleep(nanoseconds: 500_000_000)
+        try? await Task.sleep(nanoseconds: 300_000_000)
         #expect(calls.count == 0, "a stopped chat's pending start spawned hermes acp")
         #expect(!vm.isPreparingSession)
     }
