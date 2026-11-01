@@ -87,10 +87,16 @@ import AppKit
             try Self.key("1", at: time, window: window.windowNumber)
         }
 
-        // The body drops during the wait and passes after it.
+        // The closure AppKit holds: drops during the wait and on repeat,
+        // passes after the wait and for other windows.
         filter.install(on: view)
-        try #expect(filter.handle(key(at: 100.1)) == nil, "a digit got through during the wait")
-        try #expect(filter.handle(key(at: 100.6)) != nil, "a digit was dropped after the wait")
+        let installed = try #require(filter.installedHandler)
+        try #expect(installed(key(at: 100.1)) == nil, "the installed monitor let a digit through during the wait")
+        try #expect(installed(Self.key("1", at: 200, isRepeat: true, window: window.windowNumber)) == nil,
+                    "the installed monitor let key repeat through")
+        try #expect(installed(key(at: 100.6)) != nil, "the installed monitor dropped a digit after the wait")
+        try #expect(installed(Self.key("1", at: 100.1, window: window.windowNumber + 1)) != nil,
+                    "the installed monitor dropped another window's digit")
 
         // AppKit really calls it while installed, and not after. (An observing
         // monitor can't show the drop itself: monitors run in no fixed order.)
@@ -100,6 +106,7 @@ import AppKit
         filter.uninstall()
         app.sendEvent(try key(at: 100.1))
         #expect(filter.handledCount == before + 1, "uninstall left the monitor running")
+        #expect(filter.installedHandler == nil)
         window.close()
     }
 

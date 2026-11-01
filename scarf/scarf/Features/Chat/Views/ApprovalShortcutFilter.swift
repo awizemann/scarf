@@ -55,12 +55,21 @@ struct ApprovalShortcutFilter: NSViewRepresentable {
         private weak var view: NSView?
         private var token: Any?
         private(set) var handledCount = 0
+        /// The closure AppKit holds while installed. A local monitor's result
+        /// can't be seen from outside (monitors run in no fixed order), so
+        /// tests call this.
+        private(set) var installedHandler: ((NSEvent) -> NSEvent?)?
 
         func install(on view: NSView) {
             self.view = view
-            token = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                self?.handle(event) ?? event
+            let handler: (NSEvent) -> NSEvent? = { [weak self] event in
+                // Not `self?.handle(event) ?? event`: that reads a drop (nil)
+                // as "no self" and lets every key through.
+                guard let self else { return event }
+                return self.handle(event)
             }
+            installedHandler = handler
+            token = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: handler)
         }
 
         /// The installed monitor's body: nil drops the event. Counted so a
@@ -75,6 +84,7 @@ struct ApprovalShortcutFilter: NSViewRepresentable {
         func uninstall() {
             if let token { NSEvent.removeMonitor(token) }
             token = nil
+            installedHandler = nil
         }
 
         /// A 1-9 key-down for this window that the gate refuses. Shift doesn't
