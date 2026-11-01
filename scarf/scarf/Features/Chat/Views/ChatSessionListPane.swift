@@ -31,6 +31,8 @@ struct ChatSessionListPane: View {
     /// conversation history (see `BotChatSession.renameNeedsConfirmation`).
     @State private var showBotChatRenameWarning = false
     @State private var deleteTarget: HermesSession?
+    /// The list scroll view's own width, which a scroller doesn't change.
+    @State private var listViewportWidth: CGFloat?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -82,7 +84,9 @@ struct ChatSessionListPane: View {
                 }
                 .padding(.horizontal, 6)
                 .padding(.bottom, ScarfSpace.s2)
+                .modifier(ScrollerStableContentWidth(viewportWidth: listViewportWidth))
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { listViewportWidth = $0 }
             // Rows stay CLICKABLE while a session is mid-boot
             // (t-5451bd1b). The v2.8 behavior disabled the whole pane
             // during prep to stop two starts racing over one SSH
@@ -483,6 +487,35 @@ struct ChatSessionListPane: View {
             return "\(total) chat\(suffix)"
         }
         return "\(visible) of \(total) chat\(suffix)"
+    }
+}
+
+// MARK: - Scroller-stable width
+
+/// Lays a scroll view's content out at one width whether its scroller shows or
+/// not. With always-visible ("legacy") scrollers, showing the scroller narrows
+/// the clip view. If the content is then short enough to fit, the scroller
+/// hides, the clip widens, the content is too tall again, and so on: AppKit and
+/// SwiftUI flip it forever on the main thread and the app hangs (seen on the
+/// chat list at doc 554x1094 / 537x1066 against a 1067pt viewport). With the
+/// width fixed the content's height can't follow the scroller, so the first
+/// answer stands. Overlay scrollers take no width and need nothing.
+struct ScrollerStableContentWidth: ViewModifier {
+    let viewportWidth: CGFloat?
+    @State private var style = NSScroller.preferredScrollerStyle
+
+    func body(content: Content) -> some View {
+        content
+            .frame(width: Self.contentWidth(viewportWidth: viewportWidth, style: style))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .onReceive(NotificationCenter.default.publisher(for: NSScroller.preferredScrollerStyleDidChangeNotification)) { _ in
+                style = NSScroller.preferredScrollerStyle
+            }
+    }
+
+    static func contentWidth(viewportWidth: CGFloat?, style: NSScroller.Style) -> CGFloat? {
+        guard let viewportWidth, viewportWidth > 0, style == .legacy else { return nil }
+        return max(0, viewportWidth - NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy))
     }
 }
 

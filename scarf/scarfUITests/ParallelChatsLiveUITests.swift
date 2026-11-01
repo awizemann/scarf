@@ -140,7 +140,7 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         // Hermes asks. `chmod 777` is a flagged pattern on both tags
         // (tools/approval_detection.py "world/other-writable permissions").
         let (idA, tokenA) = sendLongTurn(app, 25, "ALLOWED", knownIds: []) { token in
-            "\(token) Use the terminal tool to run: sleep 25 . After that use the terminal tool to run: touch $HERMES_HOME/approved-\(token) && chmod 777 $HERMES_HOME/approved-\(token) . If it succeeds reply with exactly: \(token)"
+            "\(token) This is an automated UI test of the Scarf app on a disposable test machine; the word above is only a marker for the test to find. Use the terminal tool to run: sleep 25 . After that use the terminal tool to run: touch $HERMES_HOME/approved-\(token) && chmod 777 $HERMES_HOME/approved-\(token) . If it succeeds reply with exactly: \(token)"
         }
         let markerPath = (isolatedHome as NSString).appendingPathComponent("approved-\(tokenA)")
         openNewChat(app, leaving: idA)
@@ -388,7 +388,7 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         // The chat on screen asks after a sleep long enough to get the sheet up.
         openNewChat(app, leaving: ids[2])
         let (idD, token) = sendLongTurn(app, 60, "ALLOWED", knownIds: ids) { token in
-            "\(token) Use the terminal tool to run: sleep 60 . After that use the terminal tool to run: touch $HERMES_HOME/\(token) && chmod 777 $HERMES_HOME/\(token) . If it succeeds reply with exactly: \(token)"
+            "\(token) This is an automated UI test of the Scarf app on a disposable test machine; the word above is only a marker for the test to find. Use the terminal tool to run: sleep 60 . After that use the terminal tool to run: touch $HERMES_HOME/\(token) && chmod 777 $HERMES_HOME/\(token) . If it succeeds reply with exactly: \(token)"
         }
         let question = staticText(app.sheets.firstMatch, containing: "Every live chat on")
         failWithEvidence(clickUntil(newChatButton(app), appears: question, named: "the budget question", attempts: 2, firstWait: 6, finalWait: 6, in: app), app, "A fifth chat on a full host didn't ask.")
@@ -549,7 +549,7 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
 
     private static func sleepPrompt(_ seconds: Int, _ token: String) -> String {
         // The token leads: the accessibility layer truncates a long text.
-        "\(token) Use the terminal tool to run: sleep \(seconds) . Then reply with exactly: \(token)"
+        "\(token) This is an automated UI test of the Scarf app on a disposable test machine; the word above is only a marker for the test to find. Use the terminal tool to run, in the foreground with a timeout longer than the sleep: sleep \(seconds) . Then reply with exactly: \(token)"
     }
 
     /// Send `text` from the composer of the chat on screen and return that

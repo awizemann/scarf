@@ -34,7 +34,7 @@ Closing a window, quitting, or switching profile now asks first when a chat is s
 
 ## Known issue
 
-In rare cases during our automated testing, a Scarf window froze just after clicking New or Wait while connected over SSH, and had to be force quit. We haven't seen this outside those test runs and haven't found the cause yet. If it happens to you, please open an issue on GitHub.
+In rare cases during our automated testing, a Scarf window froze after clicking New or Wait, and had to be force quit. We traced it to the chat list switching its scrollbar on and off without end, on Macs set to always show scrollbars, and this release includes a fix. We haven't seen the freeze since, but it was rare enough that we can't promise it's gone. If it happens to you, please open an issue on GitHub.
 
 ## Upgrade notes
 
