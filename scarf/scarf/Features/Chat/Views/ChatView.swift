@@ -669,6 +669,7 @@ struct ChatView: View {
             // is focused when the button is pressed.
             let chat = presented.chat
             PermissionApprovalView(
+                cardID: presented.id,
                 title: permission.title,
                 kind: permission.kind,
                 options: permission.options,
@@ -938,6 +939,9 @@ struct WrapRowLayout: Layout {
 }
 
 struct PermissionApprovalView: View {
+    /// Which card this is: a new one makes the digit shortcuts wait again
+    /// (`ApprovalShortcutFilter`).
+    var cardID: String = ""
     let title: String
     let kind: String
     let options: [(optionId: String, name: String)]
@@ -1033,7 +1037,9 @@ struct PermissionApprovalView: View {
             // hints; the actual key binding goes through
             // `.keyboardShortcut`. Capped at 9 — extra options stay
             // tappable but unbound (they'd need modifiers to
-            // disambiguate beyond 9, which isn't worth it).
+            // disambiguate beyond 9, which isn't worth it). A new card
+            // ignores them for a moment, and key repeat always
+            // (`ApprovalShortcutFilter`); clicks are immediate.
             // Buttons keep their intrinsic width and wrap onto more
             // rows when they don't fit, so no label is ever clipped.
             WrapRowLayout(spacing: 12) {
@@ -1081,6 +1087,7 @@ struct PermissionApprovalView: View {
         }
         .padding(24)
         .frame(minWidth: 640, maxWidth: 720)
+        .background(ApprovalShortcutFilter(cardID: cardID))
     }
 
     private var kindIcon: String {
