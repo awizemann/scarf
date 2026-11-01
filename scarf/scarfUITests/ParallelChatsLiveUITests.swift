@@ -21,6 +21,9 @@
 //  The two budget journeys reach a remote host over real SSH: the guest's own
 //  sshd on 127.0.0.1, set up by scripts/ui-gate-vm.sh for the Live plan. Without
 //  that they skip, so they never touch a developer's server list.
+//  With the gate's --real-remote the same journeys reach a real server instead:
+//  SCARF_UITEST_LOOPBACK_HOME is then a local read-only copy of that host's
+//  state.db, and the process list includes that host's own `hermes acp`s.
 //
 
 import XCTest
@@ -353,6 +356,11 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
             self.rowIsReplying(app, idA) && self.rowIsReplying(app, idB)
         }, "Both chats should be replying before the delete.")
         assertACPProcessesBecome(2, "with two chats running", overSSH: true)
+        // On a real server state.db is read through a copy a moment behind (see
+        // launchLoopback): "gone" below only means something once it was seen there.
+        if ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil {
+            XCTAssertTrue(waitUntil(timeout: 30, "the host's copy to hold the session") { self.sessionExists(idA) }, "The session never reached the host's state.db.")
+        }
 
         let row = element(app, Self.rowIdPrefix + idA)
         row.rightClick()
@@ -733,6 +741,11 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         guard let path = ProcessInfo.processInfo.environment["SCARF_UITEST_ACP_PROCS"] else { return nil }
         guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return nil }
         let lines = text.split(separator: "\n").map(String.init)
+        // A real server's list comes from real-remote-server.py, which matches
+        // on /proc and has already proved that match against a running process.
+        if overSSH, ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil {
+            return lines.filter { $0.hasPrefix("real-remote-acp ") }.count
+        }
         // Hermes's own Python process, not a wrapping shell or an ssh client.
         // SSHTransport pins a remote root home with `-p default`; a local chat
         // runs bare `hermes acp`, so this also tells the two apart.
@@ -786,6 +799,11 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         while Date() < end {
             if let count = acpProcessCount(overSSH: overSSH), count > limit {
                 XCTFail("\(count) hermes acp connections \(context), over the budget of \(limit):\n\(acpProcessList())", file: file, line: line)
+                return
+            }
+            // "At most" would pass on a count that matched nothing.
+            if ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil, overSSH, acpProcessCount(overSSH: true) == 0 {
+                XCTFail("No hermes acp seen on the real server \(context), with chats open:\n\(acpProcessList())", file: file, line: line)
                 return
             }
             RunLoop.current.run(until: Date().addingTimeInterval(1))
