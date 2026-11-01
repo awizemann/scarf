@@ -169,4 +169,117 @@ import ScarfCore
         #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-A"))
         vm.leaveChat()
     }
+
+    // MARK: - Project accept_edits vs the user's pick (#8)
+
+    typealias Budget = ParallelChatsBudgetTests
+    typealias ModeChannel = ParallelChatsBudgetTests.ModeChannel
+
+    /// A chat in an opted-in project, on `first`, then `second` for the next
+    /// spawn; the user has picked `pick` in it.
+    @MainActor
+    private static func projectChat(
+        _ home: TempHermesHome, first: ModeChannel, second: ModeChannel, pick: ACPApprovalMode
+    ) async throws -> ChatViewModel {
+        let suite = "audit-mode-\(UUID().uuidString)"
+        let vm = try await Budget.modeVM(home, suite: suite)
+        let store = ProjectAutoAcceptEditsStore(suiteName: suite, testServiceSuffix: "aae-\(UUID().uuidString)")
+        #expect(store.setEnabled(true, projectId: "/p/opted-in"))
+        vm.autoAcceptEditsStore = store
+        let calls = Lifecycle.CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            let channel = calls.next() == 1 ? first : second
+            return ACPClient(context: ctx) { _ in channel }
+        }
+        vm.startNewSession(projectPath: "/p/opted-in")
+        #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-A"))
+        #expect(await Lifecycle.waitUntil { await first.modeIds == ["accept_edits"] })
+        vm.switchApprovalMode(pick)
+        #expect(await Lifecycle.waitUntil { vm.focusedChat.userPickedApprovalMode == pick })
+        return vm
+    }
+
+    @MainActor
+    private static func releaseAndReattach(_ vm: ChatViewModel, on second: ModeChannel) async {
+        let chat = vm.focusedChat
+        await chat.releaseProcess()?.value
+        vm.focus(chat)
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 15) {
+            let loaded = await second.sentMethods.contains("session/load")
+            return loaded && vm.acpStatus == ChatViewModel.ACPPhase.ready
+        })
+        try? await Task.sleep(nanoseconds: 200_000_000)
+    }
+
+    /// A Default pick stands: the project's accept_edits is not applied on
+    /// the way back, not even for a moment.
+    @Test @MainActor func aReattachDoesNotApplyTheProjectsAcceptEditsOverAPick() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "default")
+        let vm = try await Self.projectChat(home, first: first, second: second, pick: .default)
+        defer { vm.leaveChat() }
+
+        await Self.releaseAndReattach(vm, on: second)
+        #expect(await second.modeIds.isEmpty, "a mode was set over the user's Default pick")
+        #expect(vm.richChatViewModel.activeApprovalMode == .default)
+    }
+
+    /// The session came back looser than the pick and the re-send failed: say so.
+    @Test @MainActor func aFailedReattachResendThatLeavesMoreAllowedRaisesAnError() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "accept_edits", rejectSetMode: true)
+        let vm = try await Self.projectChat(home, first: first, second: second, pick: .default)
+        defer { vm.leaveChat() }
+
+        await Self.releaseAndReattach(vm, on: second)
+        #expect(await second.modeIds == ["default"])
+        #expect(vm.acpError?.contains("Default") == true, "a failed re-send was only logged")
+    }
+
+    /// A host that doesn't report its mode might be in anything.
+    @Test @MainActor func aFailedResendOnAnUnreportedModeRaisesAnError() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: nil, rejectSetMode: true)
+        let vm = try await Self.projectChat(home, first: first, second: second, pick: .default)
+        defer { vm.leaveChat() }
+
+        await Self.releaseAndReattach(vm, on: second)
+        #expect(vm.acpError != nil)
+    }
+
+    /// Failing to restore a looser pick only means more prompts: no alert.
+    @Test @MainActor func aFailedResendThatCanOnlyAskMoreStaysQuiet() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "default", rejectSetMode: true)
+        let vm = try await Self.projectChat(home, first: first, second: second, pick: .dontAsk)
+        defer { vm.leaveChat() }
+
+        await Self.releaseAndReattach(vm, on: second)
+        #expect(await second.modeIds == ["dont_ask"])
+        #expect(vm.acpError == nil)
+    }
+
+    /// The reconnect ladder too, whose own clean-up must not wipe the banner.
+    @Test @MainActor func aFailedResendOnTheReconnectLadderKeepsItsError() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let first = ModeChannel(sessionId: "sess-A")
+        let second = ModeChannel(sessionId: "sess-A", loadMode: "accept_edits", rejectSetMode: true)
+        let vm = try await Self.projectChat(home, first: first, second: second, pick: .default)
+        defer { vm.leaveChat() }
+
+        await first.close()
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 10) { await second.modeIds == ["default"] })
+        #expect(await Lifecycle.waitUntil(timeoutSeconds: 10) { vm.acpStatus == ChatViewModel.ACPPhase.ready })
+        try? await Task.sleep(nanoseconds: 200_000_000)
+        #expect(vm.acpError?.contains("Default") == true, "the ladder wiped the failed re-send's error")
+    }
 }

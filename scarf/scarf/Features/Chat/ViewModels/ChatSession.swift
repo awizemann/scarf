@@ -1415,9 +1415,8 @@ final class ChatSession {
                 // presets are deliberately not re-applied here; the mode
                 // is cheap, one RPC, and its absence is user-visible as
                 // a dialog per edit.)
-                var autoAcceptApplied = false
                 if let projectPath {
-                    autoAcceptApplied = await applyProjectAutoAcceptEdits(
+                    await applyProjectAutoAcceptEdits(
                         client: client,
                         sessionId: resolvedSessionId,
                         projectPath: projectPath
@@ -1426,8 +1425,7 @@ final class ChatSession {
                 }
                 // The mode the user picked in this chat, if the session
                 // came back without it (none picked: no-op).
-                await reassertPickedApprovalMode(
-                    client: client, sessionId: resolvedSessionId, autoAcceptApplied: autoAcceptApplied)
+                await reassertPickedApprovalMode(client: client, sessionId: resolvedSessionId)
                 guard startStillCurrent(intent, client: client) else { return }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
@@ -2135,19 +2133,21 @@ final class ChatSession {
     ///
     /// Runs after both `session/new` and `session/load`, because the
     /// mode is scoped to the ACP session and a resume is a fresh one.
-    /// True when the session is now in `accept_edits` by this call.
-    @discardableResult
+    ///
+    /// A mode the user picked in this chat wins: applied anyway, a failed
+    /// re-send of a Default pick would leave the session in `accept_edits`.
     private func applyProjectAutoAcceptEdits(
         client: ACPClient,
         sessionId: String,
         projectPath: String
-    ) async -> Bool {
-        guard autoAcceptEditsStore.isEnabled(projectId: projectPath) else { return false }
+    ) async {
+        guard userPickedApprovalMode == nil,
+              autoAcceptEditsStore.isEnabled(projectId: projectPath) else { return }
 
         let caps = host?.capabilitiesStore?.capabilities ?? .empty
         guard caps.hasSessionEditAutoApproval else {
             logger.info("host doesn't support session/set_mode (pre-v0.15) — project auto-accept edits not applied")
-            return false
+            return
         }
 
         do {
@@ -2159,36 +2159,30 @@ final class ChatSession {
             // chip never claims a posture the session isn't in.
             richChatViewModel.activeApprovalMode = .acceptEdits
             logger.info("applied project auto-accept edits (accept_edits) to session \(sessionId)")
-            return true
         } catch {
             logger.warning("session/set_mode accept_edits failed for project '\(projectPath)': \(error.localizedDescription) — session stays on the default ask-first mode")
-            return false
         }
     }
 
     /// Put back the approval mode the user picked in this chat
     /// (`userPickedApprovalMode`) when the session just reopened on another
-    /// one — legacy Hermes forgets it with the process. Call after
-    /// `adoptSessionState` and `applyProjectAutoAcceptEdits`, so it wins
-    /// over the project default as the user's later pick did. Nothing
-    /// picked, or a host without `session/set_mode`: no RPC.
+    /// one — legacy Hermes forgets it with the process. Nothing picked, or a
+    /// host without `session/set_mode`: no RPC. (With a pick, the project's
+    /// auto-accept stood aside: `applyProjectAutoAcceptEdits`.)
     ///
     /// "Already in that mode" is what the SESSION is in, not the chip: the
-    /// mode the open reported, or `accept_edits` when the project
-    /// auto-accept just set it (`autoAcceptApplied`). A host that reports no
-    /// mode leaves the chip on its old value, which says nothing about the
-    /// fresh session — unreported is sent. The chip mirrors only what the
-    /// host accepted.
-    private func reassertPickedApprovalMode(client: ACPClient, sessionId: String, autoAcceptApplied: Bool) async {
+    /// mode the open reported. A host that reports no mode leaves the chip
+    /// on its old value, which says nothing about the fresh session —
+    /// unreported is sent. The chip mirrors only what the host accepted.
+    ///
+    /// A failed re-send that could leave the session allowing more than the
+    /// pick raises `acpError`; one that can only leave it asking more is just
+    /// logged, as "you get asked" needs no alert.
+    private func reassertPickedApprovalMode(client: ACPClient, sessionId: String) async {
         guard let picked = userPickedApprovalMode,
               host?.capabilitiesStore?.capabilities.hasSessionEditAutoApproval == true
         else { return }
-        let sessionMode: ACPApprovalMode?
-        if autoAcceptApplied {
-            sessionMode = .acceptEdits
-        } else {
-            sessionMode = await client.lastSessionState.currentModeId.flatMap(ACPApprovalMode.init(rawValue:))
-        }
+        let sessionMode = await client.lastSessionState.currentModeId.flatMap(ACPApprovalMode.init(rawValue:))
         guard picked != sessionMode else { return }
         do {
             try await client.setSessionMode(sessionId: sessionId, modeId: picked.rawValue)
@@ -2197,7 +2191,25 @@ final class ChatSession {
             logger.info("re-applied the picked approval mode \(picked.rawValue) to session \(sessionId)")
         } catch {
             logger.warning("couldn't re-apply the picked approval mode \(picked.rawValue): \(error.localizedDescription)")
+            guard acpClient === client,
+                  Self.mayAllowMore(session: sessionMode, than: picked) else { return }
+            acpError = "Couldn't restore the edit approval mode you picked (\(picked.displayName)). This session may allow more than you chose."
+            acpErrorHint = "Pick the mode again from the chat header, or reconnect."
         }
+    }
+
+    /// Whether a session in `session` (nil: it didn't say) might auto-approve
+    /// more than `picked` does.
+    private static func mayAllowMore(session: ACPApprovalMode?, than picked: ACPApprovalMode) -> Bool {
+        func rank(_ mode: ACPApprovalMode) -> Int {
+            switch mode {
+            case .default: return 0
+            case .acceptEdits: return 1
+            case .dontAsk: return 2
+            }
+        }
+        guard let session else { return picked != .dontAsk }
+        return rank(session) > rank(picked)
     }
 
     /// Capabilities for the project-context decision (#142): the ones a
@@ -2524,7 +2536,6 @@ final class ChatSession {
                 // RPC error). Runs after both new and resumed sessions so
                 // a project's preset survives a reconnect into the same
                 // chat. No-op when no projectPath was passed.
-                var autoAcceptApplied = false
                 if let projectPath {
                     await applyProjectModelPreset(
                         client: client,
@@ -2535,7 +2546,7 @@ final class ChatSession {
 
                     // Then the project's edit-approval posture, if the
                     // user has opted this project into auto-accept.
-                    autoAcceptApplied = await applyProjectAutoAcceptEdits(
+                    await applyProjectAutoAcceptEdits(
                         client: client,
                         sessionId: resolvedSessionId,
                         projectPath: projectPath
@@ -2546,8 +2557,7 @@ final class ChatSession {
                 // A re-attach (or an in-place restart of this chat's own
                 // session): the approval mode the user picked here, which
                 // legacy Hermes didn't keep. A new session has none.
-                await reassertPickedApprovalMode(
-                    client: client, sessionId: resolvedSessionId, autoAcceptApplied: autoAcceptApplied)
+                await reassertPickedApprovalMode(client: client, sessionId: resolvedSessionId)
                 guard startStillCurrent(intent, client: client) else { return }
 
                 richChatViewModel.setSessionId(resolvedSessionId)
@@ -2997,19 +3007,20 @@ final class ChatSession {
                     // A reconnect is a fresh ACP session, so the
                     // session-scoped edit-approval mode is back at the
                     // default — re-assert the project's opted-in posture.
-                    var autoAcceptApplied = false
                     if let projectPath {
-                        autoAcceptApplied = await applyProjectAutoAcceptEdits(
+                        await applyProjectAutoAcceptEdits(
                             client: client,
                             sessionId: resolvedSessionId,
                             projectPath: projectPath
                         )
                     }
+                    // Whatever the attempts left behind goes now, before the
+                    // re-send below, whose failure has a banner of its own.
+                    if self.acpClient === client { clearACPErrorState() }
                     // …and then the mode the user picked in this chat, which
                     // the reload lost on legacy Hermes (P1: new behaviour —
                     // before, a reconnect came back at the default).
-                    await reassertPickedApprovalMode(
-                        client: client, sessionId: resolvedSessionId, autoAcceptApplied: autoAcceptApplied)
+                    await reassertPickedApprovalMode(client: client, sessionId: resolvedSessionId)
 
                     // Same check after the reconcile awaits: a teardown in
                     // that window already stopped this client (it was
@@ -3019,7 +3030,6 @@ final class ChatSession {
                     guard !Task.isCancelled, self.acpClient === client else { return }
 
                     acpStatus = ACPPhase.ready
-                    clearACPErrorState()
 
                     startACPEventLoop(client: client)
                     startHealthMonitor(client: client)

@@ -31,15 +31,17 @@ import ScarfCore
         private let stderrCont: AsyncThrowingStream<String, Error>.Continuation
         private let sessionId: String
         private let loadMode: String?
+        private let rejectSetMode: Bool
 
         private(set) var closed = false
         private(set) var sentMethods: [String] = []
         private(set) var modeIds: [String] = []
         var diagnosticID: String? { "mode-channel" }
 
-        init(sessionId: String, loadMode: String? = "default") {
+        init(sessionId: String, loadMode: String? = "default", rejectSetMode: Bool = false) {
             self.sessionId = sessionId
             self.loadMode = loadMode
+            self.rejectSetMode = rejectSetMode
             let (inStream, inCont) = AsyncThrowingStream<String, Error>.makeStream()
             let (errStream, errCont) = AsyncThrowingStream<String, Error>.makeStream()
             incoming = inStream
@@ -61,6 +63,9 @@ import ScarfCore
             }
             guard let id = obj["id"] as? Int else { return }
             switch method {
+            case "session/set_mode" where rejectSetMode:
+                reply(["jsonrpc": "2.0", "id": id,
+                       "error": ["code": -32603, "message": "scripted set_mode failure"]])
             case "session/new":
                 reply(["jsonrpc": "2.0", "id": id,
                        "result": ["sessionId": sessionId, "modes": ["currentModeId": "default"]]])
