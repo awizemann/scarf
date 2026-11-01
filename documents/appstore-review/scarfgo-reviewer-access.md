@@ -1,10 +1,11 @@
 # ScarfGo — App Store Review Access Packet
 
-_Updated 2026-08-14. Server provisioned and verified end-to-end through the reviewer's own
-key (non-login SSH). The **verbatim, copy-paste-ready App Review Notes** — including the
-private key — live in the companion file `review-kit/asc-review-notes.txt` (the `documents/`
-tier's secret scanner blocks a raw private key, so it is intentionally NOT inlined here). The
-private key is also in the Memophant vault `scarfgo-appstore-review-sshkey`._
+_Updated 2026-11-01: the server was replaced (the old 1 GB droplet is destroyed), and the same
+review keypair is authorized on the new one. Provisioned and checked through the review key
+over non-login SSH. The private key is in the Memophant vault `scarfgo-appstore-review-sshkey`;
+the `documents/` tier's secret scanner blocks a raw private key, so it is NOT inlined here. The
+old companion file `review-kit/asc-review-notes.txt` was session scratch and no longer exists:
+build the Notes from the block below, adding the full key from the vault._
 
 ---
 
@@ -16,8 +17,9 @@ standalone / demo / offline mode** — every screen reads live data from the hos
 reviewer must be given a live server + a pre-authorized SSH key. We provisioned a dedicated
 DigitalOcean droplet; it stays online through review, then gets destroyed.
 
-- Test server (throwaway): DigitalOcean droplet, public IP **24.199.89.183**, SSH port **22**
+- Test server (throwaway): DigitalOcean droplet, public IP **104.248.216.194**, SSH port **22**
 - Review SSH user: **scarfreview** (unprivileged; only the review key is authorized)
+- Size: 1 vCPU, 2 GB memory + 2 GB swap, 48 GB disk. Hermes v0.22.5, from its own installer.
 - Model: OpenRouter `openai/gpt-4o-mini` (OpenAI-compatible) — verified answering live
 
 ---
@@ -25,10 +27,10 @@ DigitalOcean droplet; it stays online through review, then gets destroyed.
 ## App Store Connect → App Review Information
 
 - **Sign-In required:** No (there is no account/login; access is via the SSH key below).
-- **Notes:** paste the **entire contents of `review-kit/asc-review-notes.txt`** verbatim.
-  That file is the exact text, with the public-key line and private key already inlined.
+- **Notes:** paste the block below, with the full private key from the vault in place of the
+  abbreviated one.
 
-The Notes content (key blocks abbreviated here — the paste file has them in full):
+The Notes content (the private key is abbreviated here: take it from the vault):
 
 ```
 ScarfGo is a remote-control client for a self-hosted "Hermes" AI agent and requires an SSH
@@ -37,7 +39,7 @@ mode. We have provisioned a dedicated test server that will remain online for th
 
 TO CONNECT:
 1. Launch ScarfGo. On the first screen ("Connect to Hermes") enter:
-   - Host: 24.199.89.183
+   - Host: 104.248.216.194
    - Port: 22
    - Username: scarfreview
    (nickname optional). Tap Next.
@@ -58,7 +60,7 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIZuedMOrj5y8wJqyy7x0sUHiBH1JPFtRWH3KBtJp8Ws
 
 PRIVATE KEY:
 -----BEGIN OPENSSH PRIVATE KEY-----
-   … full key in review-kit/asc-review-notes.txt …
+   … full key in the vault entry scarfgo-appstore-review-sshkey …
 -----END OPENSSH PRIVATE KEY-----
 ```
 
@@ -71,7 +73,7 @@ PRIVATE KEY:
 | Dashboard | Gateway running (boot-time systemd service) |
 | Projects | `Demo Project` (1 folder) |
 | Chat | Live OpenRouter reply + a resumable session |
-| Skills | `git` (skills.sh) + builtins, enabled |
+| Skills | `gitnexus-explorer` + builtins (seed attempted; confirm it shows in ScarfGo) |
 | System → Cron | `demo-daily-summary` [active] |
 | System → Profiles | `review-secondary` profile present |
 | System → Settings | Reads config.yaml automatically |
@@ -89,7 +91,7 @@ PRIVATE KEY:
 
 ## Server hygiene / teardown
 
-- Droplet resized to 1 GB; gateway idles ~112 MB, model is remote — fine for review load.
+- 2 GB droplet: the earlier 1 GB box ran out of disk and memory on v0.22.5 (`hermes acp` 166 MB, gateway 276 MB).
 - OpenRouter key should be spend-capped before submitting.
 - Do NOT IP-allowlist SSH — Apple review originates from variable IPs. Keep port 22 open for
   the review window.
