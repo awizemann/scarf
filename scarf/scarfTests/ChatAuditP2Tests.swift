@@ -294,6 +294,99 @@ import ScarfCore
         vm.leaveChat()
     }
 
+    private static func heldEchoes(_ vm: ChatViewModel) -> [String] {
+        vm.richChatViewModel.messages.filter { $0.isUser && $0.id < 0 }.map(\.content)
+    }
+
+    /// A is typed before the session has an id (echo uncached), B once it has
+    /// (cached, so the history load keeps it): bubbles in the order sent.
+    @Test @MainActor func heldBubblesKeepTheirOrderAcrossTheHistoryLoad() async throws {
+        let home = try ChatResumeFallback146Tests.home(sessions: [("sess-slow", "stored history")])
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        vm.resumeSession("sess-slow")
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+
+        vm.sendText("A")
+        // As the history load does on its way in.
+        vm.richChatViewModel.setSessionId("sess-slow")
+        vm.sendText("B")
+        await channel.finishOpen()
+        #expect(await Lifecycle.waitUntil { await channel.promptTexts == ["A", "B"] })
+        #expect(Self.heldEchoes(vm) == ["A", "B"], "the bubbles don't match the order sent")
+        vm.leaveChat()
+    }
+
+    @Test @MainActor func identicalHeldSendsKeepABubbleEach() async throws {
+        let home = try ChatResumeFallback146Tests.home(sessions: [("sess-slow", "stored history")])
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let vm = Self.slowVM(home, channel)
+        vm.resumeSession("sess-slow")
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+
+        vm.sendText("same")
+        vm.sendText("same")
+        await channel.finishOpen()
+        #expect(await Lifecycle.waitUntil { await channel.promptTexts == ["same", "same"] })
+        #expect(Self.heldEchoes(vm) == ["same", "same"], "two prompts, one bubble")
+        vm.leaveChat()
+    }
+
+    /// T starts a blank chat, H is held; it fails in the background. Neither
+    /// is lost, the draft stays first, and one hint says so.
+    @Test @MainActor func aFailedBackgroundAutostartHandsOnBothItsMessages() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let channel = SlowOpenChannel()
+        let other = Rows.ControlledChannel(sessionId: "sess-B")
+        let vm = Rows.makeVM(home, Rows.RecordingNotifier())
+        Rows.install([channel, other], on: vm)
+
+        vm.sendText("T")
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        let slow = vm.focusedChat
+        vm.sendText("H")
+        vm.startNewSession()
+        #expect(vm.focusedChat !== slow)
+        #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-B"))
+        vm.focusedChat.composer.text = "my draft"
+
+        await channel.failOpen()
+        #expect(await Lifecycle.waitUntil { !vm.chats.contains { $0 === slow } })
+        #expect(vm.focusedChat.composer.text == "my draft\n\nT\n\nH", "a message was lost")
+        #expect(vm.richChatViewModel.transientHint?.contains("in the composer") == true)
+        vm.leaveChat()
+    }
+
+    /// The same two, stopped from the budget dialog on the shown chat.
+    @Test @MainActor func budgetStopOnAnAutostartHandsOnBothItsMessages() async throws {
+        let home = try Lifecycle.configuredHome()
+        defer { home.cleanup() }
+        let vm = ChatViewModel(context: home.context, liveChatBudget: LiveChatBudget(localLimit: 1))
+        let channel = SlowOpenChannel()
+        let other = Lifecycle.ScriptedACPChannel(behavior: .happy(sessionId: "sess-O"))
+        let calls = Lifecycle.CallCounter()
+        vm.acpClientFactory = { ctx, _ in
+            let first = calls.next() == 1
+            return first ? ACPClient(context: ctx) { _ in channel } : ACPClient(context: ctx) { _ in other }
+        }
+        vm.sendText("T")
+        #expect(await Lifecycle.waitUntil { await channel.isOpening })
+        vm.sendText("H")
+        let working = vm.focusedChat
+
+        vm.startNewSession()
+        let block = try #require(vm.budgetBlocked)
+        vm.focusedChat.composer.text = ""
+        vm.stopChatForBudget(block, chatID: working.id)
+        #expect(await ParallelChatsRegistryTests.readyOn(vm, "sess-O"))
+        #expect(await Lifecycle.waitUntil { vm.focusedChat.composer.text.contains("H") })
+        #expect(vm.focusedChat.composer.text == "T\n\nH", "a message was lost or repeated")
+        vm.leaveChat()
+    }
+
     @Test @MainActor func aFailedStartPutsTheHeldTextBackWithTheReason() async throws {
         let home = try Lifecycle.configuredHome()
         defer { home.cleanup() }

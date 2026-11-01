@@ -1382,11 +1382,16 @@ final class ChatViewModel {
             block.replay()
             // Dropped, or reused in place for the open (its draft cleared
             // with the session boundary): the text survives nowhere else.
-            if let unsent, chat.wasDropped || !chat.composer.text.contains(unsent.text), let self {
+            guard let self else { return }
+            let isLost = { (text: String) in chat.wasDropped || !chat.composer.text.contains(text) }
+            if let held, isLost(held.text) {
+                // Both in the composer, as in `chatSettledWithoutConnection`.
+                let first = unsent.flatMap { isLost($0.text) ? $0 : nil }
+                self.focusedChat.takeHeldSendsFromOtherChat(
+                    text: (first.map { $0.text + "\n\n" } ?? "") + held.text,
+                    images: (first?.images ?? []) + held.images)
+            } else if let unsent, isLost(unsent.text) {
                 self.focusedChat.takeUnsentFromStoppedChat(text: unsent.text, images: unsent.images)
-            }
-            if let held, chat.wasDropped || !chat.composer.text.contains(held.text), let self {
-                self.focusedChat.takeHeldSendsFromOtherChat(text: held.text, images: held.images)
             }
         }
     }
@@ -2744,11 +2749,13 @@ extension ChatViewModel: ChatSessionHost {
         if case let .typed(text, images) = unsent { typed = (text, images) }
         if chat.keepAfterFailedConnection(lostTypedMessage: typed != nil) {
             notifyConnectionFailed(chat)
+        } else if let typed, let returnedHeld {
+            // Both go in the composer, in the order they were typed: a quote
+            // of the first in a hint would be replaced by the second's.
+            focusedChat.takeHeldSendsFromOtherChat(
+                text: typed.text + "\n\n" + returnedHeld.text, images: typed.images + returnedHeld.images)
         } else if let typed {
             focusedChat.takeUnsentFromFailedChat(text: typed.text, images: typed.images)
-            if let returnedHeld {
-                focusedChat.takeHeldSendsFromOtherChat(text: returnedHeld.text, images: returnedHeld.images)
-            }
         } else if let returnedHeld {
             focusedChat.takeHeldSendsFromOtherChat(text: returnedHeld.text, images: returnedHeld.images)
         }

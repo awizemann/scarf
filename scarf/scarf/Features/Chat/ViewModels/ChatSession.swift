@@ -1319,14 +1319,13 @@ final class ChatSession {
     }
 
     /// The history just replaced the transcript, and echoes made before the
-    /// session had an id aren't cached to survive that: show them again.
+    /// session had an id aren't cached to survive that, while later ones are.
+    /// All of them again, one each, in the order they will go out.
     private func restoreHeldEchoes(for client: ACPClient) {
-        guard heldSendsClient === client else { return }
-        for send in heldSends
-        where !richChatViewModel.messages.contains(where: { $0.isUser && $0.id < 0 && $0.content == send.text }) {
-            richChatViewModel.addUserMessage(text: send.text)
-            richChatViewModel.closeReplayGate()
-        }
+        guard heldSendsClient === client, !heldSends.isEmpty else { return }
+        for send in heldSends { richChatViewModel.withdrawUserEcho(text: send.text) }
+        for send in heldSends { richChatViewModel.addUserMessage(text: send.text) }
+        richChatViewModel.closeReplayGate()
     }
 
     /// Held sends that never had a session to go to: there is no transcript to
