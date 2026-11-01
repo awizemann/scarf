@@ -52,7 +52,9 @@
 #                      removed on every exit. Its ~/.hermes is only ever read.
 #                      Processes are stopped, and counted, only when their
 #                      /proc/<pid>/environ names that home. The run stops if the
-#                      server's available memory falls under 100 MB.
+#                      server's available memory falls under
+#                      $SCARF_VM_REAL_REMOTE_MIN_MB (default 100) or its free
+#                      disk under 30 MB.
 #   --real-remote-key FILE  The server's private key. Never kept in the repo: for
 #                      the App Review server, fetch it from the Memophant vault
 #                      entry scarfgo-appstore-review-sshkey into a private file.
@@ -168,7 +170,7 @@ while [[ $# -gt 0 ]]; do
     --only)
       case "${2:-}" in *[!A-Za-z0-9_/]*|"") die "--only takes Class or Class/test" ;; esac
       ONLY+=("$2"); shift 2 ;;
-    -h|--help) sed -n '2,111p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,113p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
 done
@@ -703,13 +705,17 @@ real_remote_watch() {
       if out="$(rr "python3 -I '$RR_HOME/.gate/server.py' tick '$RR_HOME'" 2>/dev/null)"; then
         t1="$(/usr/bin/perl -MTime::HiRes=time -e 'printf "%d", time*1000')"
         mem="$(printf '%s\n' "$out" | sed -n 's/^MEM //p')"
+        disk="$(printf '%s\n' "$out" | sed -n 's/^DISK //p')"
         now="$(printf '%s\n' "$out" | sed -n 's/^SIG //p')"
         { ps -axwwo command= | grep ' acp' | grep hermes; printf '%s\n' "$out" | sed -n 's/^P //p'; } >"$W/acp-procs.tmp" || true
         mv "$W/acp-procs.tmp" "$W/acp-procs.txt"
-        echo "$(date +%H:%M:%S) rtt_ms=$((t1 - t0)) available_mb=$mem acp=$(printf '%s\n' "$out" | grep -c '^P ')" >>"$RR/watch.log"
+        echo "$(date +%H:%M:%S) rtt_ms=$((t1 - t0)) available_mb=$mem disk_mb=$disk acp=$(printf '%s\n' "$out" | grep -c '^P ')" >>"$RR/watch.log"
         if [ "$now" != "$sig" ] && rr_mirror; then sig="$now"; fi
-        if [ -n "$mem" ] && [ "$mem" -lt 100 ]; then
-          echo "$(date +%H:%M:%S) available memory $mem MB is under 100 MB" >"$RR/aborted"
+        why=""
+        if [ -n "$mem" ] && [ "$mem" -lt "${SCARF_VM_REAL_REMOTE_MIN_MB:-100}" ]; then why="available memory $mem MB is under ${SCARF_VM_REAL_REMOTE_MIN_MB:-100} MB"; fi
+        if [ -n "$disk" ] && [ "$disk" -lt 30 ]; then why="free disk $disk MB is under 30 MB"; fi
+        if [ -n "$why" ]; then
+          echo "$(date +%H:%M:%S) $why" >"$RR/aborted"
           rr "python3 -I '$RR_HOME/.gate/server.py' killall '$RR_HOME'" >>"$RR/watch.log" 2>&1 || true
           RW="$(cd "$W" && pwd -P)"
           for d in "$W" "$RW"; do pkill -f "$d/Products/" 2>/dev/null || true; done
@@ -882,11 +888,12 @@ if [[ -n "$RR_HOST" ]]; then
   RR_BIN="$RR_HOME/.gate/hermes"
   rr_ssh "'$RR_BIN' --version" 2>&1 | head -1 | tee -a "$RESULT/real-remote-setup.txt" >&2
   log "measuring one hermes acp in it (one short prompt)"
-  rr_ssh "python3 -I '$RR_HOME/.gate/server.py' probe '$RR_HOME'" | tee "$RESULT/real-remote-memory.json" >&2 || die "the memory probe failed"
+  rr_ssh "python3 -I '$RR_HOME/.gate/server.py' probe '$RR_HOME'" | tee "$RESULT/real-remote-memory.json" >&2 \
+    || die "hermes acp did not start on $RR_HOST, so no tests ran: see its error above ($RESULT/real-remote-memory.json)"
   mkdir -p "$STAGE/real-remote"; chmod 700 "$STAGE/real-remote"
   cp "$REAL_REMOTE_KEY" "$STAGE/real-remote/id"; chmod 600 "$STAGE/real-remote/id"
   printf '%s\n' "$KNOWN" >"$STAGE/real-remote/known_hosts"
-  printf 'RR_USER=%s\nRR_HOST=%s\nRR_PORT=%s\nRR_HOME=%s\nRR_BIN=%s\n' "$RR_USER" "$RR_HOST" "$RR_PORT" "$RR_HOME" "$RR_BIN" >"$STAGE/real-remote/conf"
+  printf 'RR_USER=%s\nRR_HOST=%s\nRR_PORT=%s\nRR_HOME=%s\nRR_BIN=%s\nSCARF_VM_REAL_REMOTE_MIN_MB=%s\n' "$RR_USER" "$RR_HOST" "$RR_PORT" "$RR_HOME" "$RR_BIN" "${SCARF_VM_REAL_REMOTE_MIN_MB:-100}" >"$STAGE/real-remote/conf"
   # The key's body joins the values searched for after the run (not its header
   # and footer lines, which any key has).
   grep -v '^-----' "$REAL_REMOTE_KEY" >>"$SCRATCH/secret-values"

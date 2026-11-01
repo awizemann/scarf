@@ -67,7 +67,8 @@ def cmdline(pid):
 
 
 def stop(home):
-    for sig, wait in ((signal.SIGTERM, 3), (signal.SIGKILL, 1)):
+    # Twice over: a dying `hermes acp` can leave a background gateway of that home.
+    for sig, wait in ((signal.SIGTERM, 3), (signal.SIGKILL, 1), (signal.SIGTERM, 2), (signal.SIGKILL, 1)):
         pids = our_pids(home)
         for pid in pids:
             try:
@@ -97,10 +98,45 @@ def live_session_count():
 
 
 def real_hermes():
-    for candidate in (os.path.join(HOME, ".local/bin/hermes"), shutil.which("hermes")):
+    # The install's venv first, as the gateway's service runs it. v0.22.5's
+    # launcher (~/.local/bin/hermes -> <checkout>/.hermes/bin/hermes) takes a new
+    # HERMES_HOME for a new data root and installs a whole runtime inside it,
+    # which needs disk this home must not use, and exits 1 when it can't.
+    venv = os.path.join(LIVE, "hermes-agent/venv/bin/hermes")
+    for candidate in (venv, os.path.join(HOME, ".local/bin/hermes"), shutil.which("hermes")):
         if candidate and os.path.exists(candidate):
             return os.path.realpath(candidate)
     sys.exit("no hermes on this server")
+
+
+def share_dependencies(home):
+    """v0.22.5 keeps dependencies per data root and gives a temporary HERMES_HOME
+    its own environment (hermes_cli/venv_sync.py `_prepare_borrowed_launch`,
+    pm/environments.py `install_state_dir`): about 400 MB, and when that doesn't
+    fit the home is left marked as mid-update, so `hermes acp` answers session/new
+    with "Gateway draining: update_paused". Hard links cost only directories and
+    leave ~/.hermes's files alone. Not a symlink: `owning_home_root` would then
+    take this home for the owner, and owner-only update work would run on the
+    install. Lock files and owed work stay the owner's.
+    """
+    source = os.path.join(LIVE, "installs")
+    if not os.path.isdir(source):
+        return
+    target = os.path.join(home, "installs")
+    subprocess.run(["cp", "-al", source, target], check=True)
+    for root, _, files in os.walk(target):
+        for name in files:
+            path = os.path.join(root, name)
+            if name in (".install.lock", ".recovery.lock", "source-completion-pending"):
+                os.unlink(path)
+            elif name == "facts.json":
+                # It names the environment by absolute path, which must lie inside
+                # this root. A new file: the link to the owner's copy is broken first.
+                with open(path) as f:
+                    text = f.read()
+                os.unlink(path)
+                with open(path, "w") as f:
+                    f.write(text.replace(source, target))
 
 
 def setup(home):
@@ -116,6 +152,7 @@ def setup(home):
         sys.exit("the server's config.yaml already has an approvals block: merge it here instead of appending")
     with open(config, "a") as f:
         f.write("\napprovals:\n  mode: manual\n")
+    share_dependencies(home)
     # Hermes's code lives inside ~/.hermes: this keeps Python from writing
     # __pycache__ there, whatever module a test run is the first to import.
     wrapper = os.path.join(home, GATE, "hermes")
@@ -142,8 +179,11 @@ def probe(home):
     prompt: the modules a working chat holds are loaded by then."""
     env = dict(os.environ, HERMES_HOME=home)
     before = available_mb()
+    stderr_path = os.path.join(home, GATE, "probe.stderr")
+    errors = open(stderr_path, "wb")
+    started = time.time()
     child = subprocess.Popen([os.path.join(home, GATE, "hermes"), "-p", "default", "acp"], cwd=home, env=env,
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=errors)
     buffered = b""
 
     def call(request_id, method, params, timeout):
@@ -170,15 +210,21 @@ def probe(home):
     result = {"available_before_mb": before}
     try:
         call(1, "initialize", {"protocolVersion": 1, "clientCapabilities": {}}, 60)
+        result["initialize_seconds"] = round(time.time() - started, 1)
         result["after_initialize"] = proc_memory(child.pid)
         session = call(2, "session/new", {"cwd": home, "mcpServers": []}, 60)["result"]["sessionId"]
+        result["session_new_seconds"] = round(time.time() - started, 1)
         result["after_session_new"] = proc_memory(child.pid)
         answer = call(3, "session/prompt", {"sessionId": session,
                                             "prompt": [{"type": "text", "text": "Reply with exactly: OK"}]}, 120)
         result["stop_reason"] = (answer.get("result") or {}).get("stopReason") or "error"
+        result["prompt_seconds"] = round(time.time() - started, 1)
         result["after_prompt"] = proc_memory(child.pid)
-    except (RuntimeError, KeyError) as error:
+    except (RuntimeError, KeyError, BrokenPipeError) as error:
         result["error"] = str(error)
+        result["exit_code"] = child.poll()
+        with open(stderr_path, errors="replace") as f:
+            result["stderr_tail"] = f.read()[-1500:]
     finally:
         child.terminate()
         try:
@@ -186,10 +232,13 @@ def probe(home):
         except subprocess.TimeoutExpired:
             child.kill()
     print(json.dumps(result))
+    if "error" in result:
+        sys.exit(1)
 
 
 def tick(home):
     print(f"MEM {available_mb()}")
+    print(f"DISK {shutil.disk_usage(HOME).free // (1024 * 1024)}")
     signature = []
     for name in ("state.db", "state.db-wal"):
         try:
@@ -244,10 +293,16 @@ def remove(home):
 def teardown(home):
     changed = writes_in_live(home) if os.path.exists(os.path.join(home, GATE, STAMP_FILE)) else []
     left, exists = remove(home)
+    # Anything of that home still alive would bring it back: look again later.
+    time.sleep(60)
+    came_back = os.path.exists(home) or bool(our_pids(home))
+    if came_back:
+        left, exists = remove(home)
+    print(f"a minute later: {'it came back, removed again' if came_back else 'still gone'}")
     print(f"changed under ~/.hermes during the run: {changed or 'nothing'}")
     print(f"live sessions: {live_session_count()}; available: {available_mb()} MB")
     print(f"processes left: {left or 'none'}; home exists: {exists}")
-    print("CLEAN" if not left and not exists else "NOT CLEAN")
+    print("CLEAN" if not left and not exists and not came_back else "NOT CLEAN")
 
 
 def sweep():
