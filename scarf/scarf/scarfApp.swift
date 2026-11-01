@@ -1020,18 +1020,11 @@ final class ServerLiveStatusRegistry {
                 case .recovered:
                     // `recoverControlMasterIfDead` returns `.recovered` as soon
                     // as it has *issued* `-O exit`; it never checks whether the
-                    // socket actually went away. Re-check to find out: a second
-                    // call returning `.noMaster` means the master is genuinely
-                    // gone (the next ssh handshakes fresh — that's the success
-                    // the metric is about), and `.alive` means a fresh master
-                    // is already up and answering (a chat reconnected in
-                    // between) — success too. Only a corpse that survived the
-                    // teardown (`.recovered` again) leaves the user stuck.
-                    // Cheap: this only runs for hosts that were actually dead,
-                    // and the `-O check` it starts with is a local round-trip.
-                    let verify = transport.recoverControlMasterIfDead(probeTimeout: 3)
+                    // socket actually went away. Look, without touching it (see
+                    // `verifiedRecovery`). Still on this detached task.
+                    let verified = WakeReconnectMetrics.verifiedRecovery(of: transport)
                     recoverySeconds += Date().timeIntervalSince(started)
-                    outcomes.append(verify == .recovered ? .recoveryFailed : .recovered)
+                    outcomes.append(verified)
                 }
             }
             // Deferred, not dropped: a wake is not proof anyone is there
@@ -1109,6 +1102,20 @@ nonisolated enum WakeReconnectMetrics {
         /// A dead master was torn down but the socket survived it — the
         /// reconnect was attempted and did not work.
         case recoveryFailed
+    }
+
+    /// Did the sweep's `-O exit` work? Read-only: this runs seconds after the
+    /// teardown, when a chat may already have built a fresh master, so it must
+    /// never issue a second `-O exit` (a short probe on a slow network would).
+    /// `.noMaster` means the master is genuinely gone (the next ssh handshakes
+    /// fresh — that's the success the metric is about), and `.alive` means a
+    /// fresh master is already up and answering (a chat reconnected in
+    /// between) — success too. Only a corpse that survived the teardown
+    /// (`.dead`) leaves the user stuck. Cheap: this only runs for hosts that
+    /// were actually dead, and its `-O check` is a local round-trip. Blocks on
+    /// ssh, so never call it on the main actor (C10).
+    static func verifiedRecovery(of transport: SSHTransport) -> HostOutcome {
+        transport.checkControlMaster(probeTimeout: 3) == .dead ? .recoveryFailed : .recovered
     }
 
     /// - Parameter recoverySeconds: wall time spent on teardown work only —

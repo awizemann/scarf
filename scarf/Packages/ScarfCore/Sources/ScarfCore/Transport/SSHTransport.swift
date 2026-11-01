@@ -28,15 +28,22 @@ public struct SSHTransport: ServerTransport {
     public let config: SSHConfig
     public let displayName: String
 
-    public nonisolated init(contextID: ServerID, config: SSHConfig, displayName: String) {
+    /// `sshBinary`: the system ssh, unless a test stands in a scripted one.
+    public nonisolated init(
+        contextID: ServerID,
+        config: SSHConfig,
+        displayName: String,
+        sshBinary: String = "/usr/bin/ssh"
+    ) {
         self.contextID = contextID
         self.config = config
         self.displayName = displayName
+        self.sshBinary = sshBinary
     }
 
     // MARK: - ssh/scp binary discovery
 
-    nonisolated private var sshBinary: String { "/usr/bin/ssh" }
+    nonisolated private let sshBinary: String
     nonisolated private var scpBinary: String { "/usr/bin/scp" }
 
     /// The fully-qualified `user@host` spec (or just `host` if no user set).
@@ -172,6 +179,37 @@ public struct SSHTransport: ServerTransport {
 
     @discardableResult
     public func recoverControlMasterIfDead(probeTimeout: TimeInterval = 10) -> ControlMasterRecovery {
+        switch checkControlMaster(probeTimeout: probeTimeout) {
+        case .noMaster:
+            return .noMaster
+        case .alive:
+            return .alive
+        case .dead:
+            closeControlMaster()
+            return .recovered
+        }
+    }
+
+    /// What `checkControlMaster` found. It never changes anything.
+    public enum ControlMasterHealth: Sendable, Equatable {
+        /// No master owns the socket.
+        case noMaster
+        /// A master owns the socket and the session behind it answered.
+        case alive
+        /// A master owns the socket and the session behind it hung or failed.
+        case dead
+    }
+
+    /// The two probes of `recoverControlMasterIfDead`, without the teardown:
+    /// read-only, so a caller that only wants to know can't close a master
+    /// other chats have just rebuilt.
+    ///
+    /// Exempt from the circuit breaker, like `-O check`: an open breaker
+    /// would refuse the probe without running it, and that says nothing
+    /// about the session. `-O check` just found a master, so this muxes over
+    /// it and doesn't dial; and a dead session must not score against the
+    /// breaker a second time.
+    public func checkControlMaster(probeTimeout: TimeInterval = 10) -> ControlMasterHealth {
         ensureControlDir()
         let check = try? runLocal(
             executable: sshBinary,
@@ -186,13 +224,10 @@ public struct SSHTransport: ServerTransport {
             executable: sshBinary,
             args: sshArgs(extra: [hostSpec, "true"]),
             stdin: nil,
-            timeout: probeTimeout
+            timeout: probeTimeout,
+            gate: .none
         )
-        if (probe?.exitCode ?? 1) != 0 {
-            closeControlMaster()
-            return .recovered
-        }
-        return .alive
+        return (probe?.exitCode ?? 1) != 0 ? .dead : .alive
     }
 
     /// Common ssh options used by every invocation. Keep every `-o` flag
@@ -1207,10 +1242,10 @@ public struct SSHTransport: ServerTransport {
         /// failure (it exits 1, where ssh exits 255) — a dead connection
         /// must not be scored as a success.
         case admitOnly
-        /// Exempt entirely. Only for local-only ControlMaster ops
-        /// (`-O check` / `-O exit`) — those never dial the remote, so they
-        /// must neither be blocked nor poison the gate with their
-        /// non-zero "no master running" exits.
+        /// Exempt entirely. Only for ControlMaster ops that don't dial the
+        /// remote (`-O check` / `-O exit`, and the probe muxed over a master
+        /// `-O check` just found) — they must neither be blocked nor poison
+        /// the gate with their non-zero exits.
         case none
     }
 
