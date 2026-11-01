@@ -259,8 +259,13 @@ import Foundation
 
         #expect(await vm.followRewindFromDB(wireText: "/retry") == nil)
         vm.handleACPEvent(.messageChunk(sessionId: "s", text: " more"))
-        try await Task.sleep(for: .milliseconds(200))  // any throttled flush
-        #expect(Self.transcript(vm) == [bravo, "BRAVO!", "C", "partial C answer more"])
+        // The chunk's throttled flush: a busy full run can take far longer than its 50 ms.
+        let expected = [bravo, "BRAVO!", "C", "partial C answer more"]
+        let deadline = ContinuousClock.now + .seconds(10)
+        while Self.transcript(vm) != expected, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        #expect(Self.transcript(vm) == expected)
     }
 
     /// A chunk handled WHILE the rebuild reads the database (a late chunk of
