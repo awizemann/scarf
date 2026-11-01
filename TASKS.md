@@ -111,8 +111,9 @@
 - [ ] Investigate slow chat resume (gh#150) (id: t-9eed811c) (added: 2026-10-27)
 - [ ] Fix 3 failing iOS ChatControllerP7bTests (reconnect / scene-phase) (id: t-89569440) (added: 2026-10-29)
 - [ ] ScarfCore: three tests fail only in the full package run (id: t-a997d4b9) (added: 2026-10-30) (priority: low)
-- [ ] Parallel chats: intermittent main-thread hang (blocks v3.8.0) (id: t-9fa47b95) (added: 2026-10-31) (priority: high)
+- [ ] Parallel chats: chat list scrollbar loop hang (fix in bf9e7f2b, watch after release) (id: t-9fa47b95) (added: 2026-10-31)
 - [ ] Stop Scarf tests bloating com.scarf.app settings, and read chat density once per list (id: t-3aa25481) (added: 2026-10-31)
+- [ ] v3.8.0 audit: remaining P2s (performance, accessibility, test coverage) (id: t-6421a043) (added: 2026-11-01)
 
 ## Doing
 
