@@ -6,6 +6,121 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.8.0</title>
+      <sparkle:version>78</sparkle:version>
+      <sparkle:shortVersionString>3.8.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Mon, 02 Nov 2026 00:25:13 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.8.0</p>
+<p><strong>Chats keep running when you click away.</strong> Until now, clicking into another chat stopped the one you left. In 3.8.0 a Scarf window keeps several chats live at once, so you can start a long job in one chat, work in another, and come back to the finished answer.</p>
+<h2>Parallel chats</h2>
+<p>Each chat now has its own connection to Hermes. Switching chats no longer interrupts anything:</p>
+<ul>
+  <li><strong>Replies keep going in the background.</strong> Each chat keeps its own transcript, and its own half-typed message.</li>
+  <li><strong>The sidebar shows what each chat is doing:</strong> needs an answer, error, replying, or finished and not yet read.</li>
+  <li><strong>Approvals don&#x27;t get lost.</strong> A chat that needs your approval while in the background says so in its row, and sends a notification if your Notify setting is on. Click the notification to go straight to that chat.</li>
+  <li><strong>A limit keeps your hosts healthy.</strong> Each server keeps up to 4 chats live over SSH, or 8 on your own Mac. When you open one more, Scarf quietly releases the oldest idle chat, which picks up where it left off when you return to it. If every chat is busy, Scarf asks which one to stop, or you can wait.</li>
+</ul>
+<h2>Scarf asks before stopping your work</h2>
+<p>Closing a window, quitting, or switching profile now asks first when a chat is still working, and says what would stop. Wizard and Upgrade Project prompts that are waiting to start are named too, so they don&#x27;t vanish silently.</p>
+<h2>Prompts are harder to lose</h2>
+<ul>
+  <li><strong>A chat&#x27;s prompts reach Hermes in the order you sent them.</strong> Prompts sent in quick succession could previously overtake each other.</li>
+  <li><strong>A failed start no longer swallows your message.</strong> If a chat can&#x27;t connect, what you typed comes back to you, or Scarf tells you it couldn&#x27;t be sent. Wizard and Upgrade Project prompts wait with an Open Now or Discard choice.</li>
+  <li><strong>Gateway failures show Hermes&#x27;s own explanation.</strong> If a gateway dies mid-turn, Hermes can&#x27;t say whether the turn finished, so Scarf shows Hermes&#x27;s message and never resends it. If that leaves a lost turn blocking the session, a <strong>Discard Lost Turn</strong> button clears it (on ScarfGo, a hint explains what to do).</li>
+</ul>
+<h2>Smaller fixes</h2>
+<ul>
+  <li>Deleting a chat that&#x27;s still replying now works on Hermes v0.22.5, which refuses to delete a session with a turn running. Scarf stops the turn first, then deletes it, and says &quot;session deleted&quot; only once Hermes confirms. This also applies to the Sessions tab.</li>
+  <li>If Hermes refuses to delete a session, Scarf shows Hermes&#x27;s reason instead of an exit code.</li>
+  <li>ScarfGo asks before you switch away from a chat that&#x27;s still replying, since parallel chats aren&#x27;t on iOS yet.</li>
+  <li>A message sent while a chat is still starting now waits and goes out when the chat is ready, instead of failing with &quot;No session ID&quot;. If the start fails, your text comes back to the composer.</li>
+  <li>SSH recovery no longer closes a healthy connection during a network blip or just after waking, which could drop every chat on that server.</li>
+  <li>Approval cards ignore number keys for a moment after they appear, so a digit you were typing can&#x27;t approve something you haven&#x27;t read. &quot;Needs your answer&quot; notifications no longer show the command itself.</li>
+  <li>If Scarf can&#x27;t confirm the approval mode you picked after a chat reconnects, it stops sending prompts and says so, rather than carrying on with looser approvals.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>Chat is rebuilt around a per-chat session object, with one window holding many.</li>
+  <li>New live UI tests run against real Hermes on v0.22.5 and v0.21.5, and over a real SSH server: chats replying at once, background approvals, deleting a working chat, closing with chats running, and a real SSH connection at the chat limit.</li>
+</ul>
+<h2>Known issue</h2>
+<p>In rare cases during our automated testing, a Scarf window froze after clicking New or Wait, and had to be force quit. We traced it to the chat list switching its scrollbar on and off without end, on Macs set to always show scrollbars, and this release includes a fix. We haven&#x27;t seen the freeze since, but it was rare enough that we can&#x27;t promise it&#x27;s gone. If it happens to you, please open an issue on GitHub.</p>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 15.0+ (Apple Silicon and Intel). ScarfGo gets its confirm and lost-turn hint in its next App Store and TestFlight build.</li>
+  <li>Compatible with Hermes v0.6.0 through v0.22.5. Parallel chats need no particular Hermes version. Each live chat runs its own <code>hermes acp</code> process on the host, so a host with several chats open runs several processes.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.8.0/Scarf-v3.8.0-Universal.zip"
+                 sparkle:edSignature="BPyjNJyUKzppUYzZh5VgrSBElbWI4MkuBTrpWbejC7aTc5Q6VevScguReFN+LDahy2y3ptqs9LFaDKI6g9hxCw=="
+                 length="37101469"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.7.1</title>
       <sparkle:version>77</sparkle:version>
       <sparkle:shortVersionString>3.7.1</sparkle:shortVersionString>
