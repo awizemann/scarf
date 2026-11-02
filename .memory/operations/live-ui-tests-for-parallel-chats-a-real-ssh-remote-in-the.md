@@ -5,9 +5,11 @@ permalink: scarf/operations/live-ui-tests-for-parallel-chats-a-real-ssh-remote-i
 tags: [testing, ui-tests, parallel-chats, vm]
 source_paths: [scarf/scarfUITests/ParallelChatsLiveUITests.swift, scripts/ui-gate-vm.sh]
 source_paths_inferred: false
-source_sha: 79a77949b48a9c24e284aa47aa9f07cefec2ba62
+source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
 created: 2026-10-30
 updated: 2026-10-30
+reviewed: 2026-11-01
+reviewed_by: audit:claude-code (background)
 ---
 
 ## Observations

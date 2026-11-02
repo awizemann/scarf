@@ -5,10 +5,10 @@ permalink: scarf/architecture/project-chats-on-hermes-0-16-carry-the-environment
 tags: [gh142, environment-hint, capabilities, chat]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectEnvironmentHint.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/scarf/Features/Chat/ViewModels/ChatViewModel.swift, scarf/Scarf iOS/Chat/ChatView.swift, scarf/scarf/Core/Services/ProjectAgentContextService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectCronTenantCheck.swift, scarf/scarf/Features/Projects/MiniApp/MiniAppAgentSession.swift, scarf/scarf/Features/Projects/ViewModels/ProjectCockpitViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift]
 source_paths_inferred: false
-source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
+source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-10-30
+reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
 

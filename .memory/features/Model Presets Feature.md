@@ -5,10 +5,10 @@ permalink: scarf/features/model-presets-feature
 tags: [models, presets, acp]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPresetService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectModelPresetReader.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/ACPClient.swift, scarf/scarf/Core/Services/ProjectModelPresetBinding.swift, scarf/scarf/Core/Models/ProjectTemplate.swift, scarf/scarf/Features/Chat/Views/ChatModelBadge.swift, scarf/scarf/Features/Chat/Views/SessionInfoBar.swift, scarf/Scarf iOS/Projects/ProjectDetailView.swift, scarf/scarf/Features/Projects/ViewModels/FleetApplyViewModel.swift]
 source_paths_inferred: false
-source_sha: 70efa831cb229c14ceafbcddfbf611856e610c30
+source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
 created: 2026-05-29
 updated: 2026-09-12
-reviewed: 2026-09-26
+reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -17,3 +17,8 @@ Added for v3.8.0. Loopback never showed the slow-start lost-prompt bug; the real
 - [gotcha] 1 GB and 8.7 GB disk can't host this; 2 GB memory with 2 GB swap never went below 259 MB available #droplet
 - [gotcha] Upgrade a server with Hermes's own installer pinned to a commit, never by hand with uv sync: a hand sync leaves no committed environment and hermes acp refuses to start until hermes pm repair, which installs .[all] #hermes
 - [gotcha] A background hermes -z in a temporary home starts a gateway that recreates the home after deletion; kill by /proc environ HERMES_HOME before removing it #hermes
+
+## Relations
+- relates_to [[scarf/operations/live-ui-tests-for-parallel-chats-a-real-ssh-remote-in-the]]
+- relates_to [[scarf/operations/scarf-ui-gate-runs-in-the-scarf-ui-tart-vm]]
+- relates_to [[scarf/decisions/hermes-v0-22-compatibility-decisions]]

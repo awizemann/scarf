@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/chat-transcript-activitybubble-segmentation
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/scarf/Features/Chat/Views/ActivityBubble.swift, scarf/scarf/Features/Chat/Views/RichChatMessageList.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/ACPMessages.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesMessage.swift]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
 created: 2026-09-02
 updated: 2026-09-27
-reviewed: 2026-10-28
+reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
 

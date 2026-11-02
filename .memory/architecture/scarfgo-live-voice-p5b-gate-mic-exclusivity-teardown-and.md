@@ -5,10 +5,10 @@ permalink: scarf/architecture/scarfgo-live-voice-p5b-gate-mic-exclusivity-teardo
 tags: [voice, gpt-live, ios, scarfgo]
 source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Scarf iOS/Chat/VoiceLive/VoiceLiveSessionModel.swift, scarf/Scarf iOS/Chat/VoiceLive/ChatController+VoiceTurnHost.swift, scarf/Scarf iOS/Info.plist]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
 created: 2026-09-18
 updated: 2026-09-19
-reviewed: 2026-10-28
+reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
 

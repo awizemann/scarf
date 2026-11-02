@@ -5,9 +5,11 @@ permalink: scarf/decisions/hermes-v0-22-compatibility-decisions
 tags: [hermes, capability-gating, versioning, v022]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelCatalogService.swift, scarf/scarf/Features/Plugins/ViewModels/PluginsViewModel.swift]
 source_paths_inferred: false
-source_sha: 60e38b31e53c0c0db6a6853677d27cfaa2f68ce4
+source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
 created: 2026-10-25
 updated: 2026-10-27
+reviewed: 2026-11-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Scarf's Hermes v0.21.6 → v0.22.5 parity cycle (2026-10-24/25), branch `feat/hermes-v0225-parity`. Audit + plan: documents/plans/2026-10-24-hermes-v0-22-5-audit-and-plan.md. Seven slices (S1–S7), each built in its own worktree, fresh-eyes audited, then cherry-picked. Tasks t-5a840e26, t-1301c677, t-69cf8a08, t-9b7739c1, t-434180c7, t-ba7bbc57, t-0cf09691, t-7e2da589.
