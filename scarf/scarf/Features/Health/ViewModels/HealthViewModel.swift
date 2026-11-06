@@ -492,6 +492,10 @@ final class HealthViewModel {
         if !capabilities.hasSessionSearchAux {
             auxCandidates.removeAll { $0.0 == "session_search" }
         }
+        // `auxiliary.skills_hub` removed at v0.23.0 (`config_defaults.py:747`).
+        if capabilities.hasSkillsHubAuxRemoved {
+            auxCandidates.removeAll { $0.0 == "skills_hub" }
+        }
         let auxOnNous = auxCandidates.filter { $0.1 == "nous" }.map(\.0)
         if !auxOnNous.isEmpty {
             checks.append(HealthCheck(

@@ -160,6 +160,7 @@ struct VoiceTab: View {
             case "local", "":
                 PickerRow(label: "Model", selection: viewModel.config.voice.sttLocalModel, options: ["tiny", "base", "small", "medium", "large-v3"]) { viewModel.setSTTLocalModel($0) }
                 EditableTextField(label: "Language", value: viewModel.config.voice.sttLocalLanguage) { viewModel.setSTTLocalLanguage($0) }
+                    .help(capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true ? "Leave blank to inherit the global STT language (stt.language)." : "")
                 // v0.19.1: faster-whisper anti-hallucination VAD tuning —
                 // hidden below v0.19.1 (hasSTTLocalVADTuning).
                 if capabilitiesStore?.capabilities.hasSTTLocalVADTuning == true {
@@ -181,10 +182,12 @@ struct VoiceTab: View {
                 if capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true {
                     PickerRow(label: "Model", selection: viewModel.config.voice.sttGroqModel, options: ["whisper-large-v3", "whisper-large-v3-turbo", "distil-whisper-large-v3-en"]) { viewModel.setSTTGroqModel($0) }
                     EditableTextField(label: "Language", value: viewModel.config.voice.sttGroqLanguage) { viewModel.setSTTGroqLanguage($0) }
+                        .help("Leave blank to inherit the global STT language (stt.language).")
                 }
             case "openai":
                 EditableTextField(label: "Model", value: viewModel.config.voice.sttOpenAIModel) { viewModel.setSTTOpenAIModel($0) }
                 EditableTextField(label: "Language", value: viewModel.config.voice.sttOpenAILanguage) { viewModel.setSTTOpenAILanguage($0) }
+                    .help(capabilitiesStore?.capabilities.hasSTTUnifiedLanguage == true ? "Leave blank to inherit the global STT language (stt.language)." : "")
             case "mistral":
                 EditableTextField(label: "Model", value: viewModel.config.voice.sttMistralModel) { viewModel.setSTTMistralModel($0) }
             default:

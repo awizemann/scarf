@@ -309,7 +309,7 @@ public struct VoiceSettings: Sendable, Equatable {
     public var sttOpenAIModel: String
     public var sttMistralModel: String
     /// `stt.openai.language` — per-provider override of the global STT
-    /// language hint (empty = auto-detect). Predates version tracking,
+    /// language hint (empty = inherit `stt.language`, `tools/transcription_tools.py:101-114`). Predates version tracking,
     /// like the sibling `sttOpenAIModel`; ungated.
     public var sttOpenAILanguage: String
     /// Global STT language hint applied to every provider unless a

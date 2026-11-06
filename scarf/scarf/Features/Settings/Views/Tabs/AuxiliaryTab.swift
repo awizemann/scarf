@@ -82,6 +82,11 @@ struct AuxiliaryTab: View {
         capabilities: HermesCapabilities?
     ) -> [(key: String, title: LocalizedStringKey, icon: String)] {
         var t = baseTasks
+        // v0.23.0: `auxiliary.skills_hub` is gone (`config_defaults.py:747`);
+        // a leftover block falls through to "Other tasks in config.yaml".
+        if capabilities?.hasSkillsHubAuxRemoved ?? false {
+            t.removeAll { $0.key == "skills_hub" }
+        }
         // Pre-v0.15.0 hosts only — restored right after Compression. Done
         // BEFORE the web_extract insert below so the historical order
         // (vision, web_extract, compression, session_search, …) comes back.
