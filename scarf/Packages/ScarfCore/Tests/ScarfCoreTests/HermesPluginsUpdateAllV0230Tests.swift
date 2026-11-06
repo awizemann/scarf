@@ -185,7 +185,7 @@ import Foundation
 
     // MARK: list --json v0.23 shape
 
-    @Test func listJSONV0230ShapeDecodes() {
+    @Test func listJSONV0230ShapeDecodes() throws {
         let json = """
         [
           {"name": "weather", "status": "enabled", "version": "1.2", "description": "d",
@@ -194,12 +194,12 @@ import Foundation
            "source": "git", "removed": "withdrawn by maintainer", "future_key": {"x": 1}}
         ]
         """
-        let entries = HermesPluginList.parseJSON(json)
-        #expect(entries?.count == 2)
-        #expect(entries?[0].removed == nil)
-        #expect(entries?[0].source == "catalog:verified@abcd1234")
-        #expect(entries?[1].removed == "withdrawn by maintainer")
-        #expect(entries?[1].status == .disabled)
+        let entries = try #require(HermesPluginList.parseJSON(json))
+        try #require(entries.count == 2)
+        #expect(entries[0].removed == nil)
+        #expect(entries[0].source == "catalog:verified@abcd1234")
+        #expect(entries[1].removed == "withdrawn by maintainer")
+        #expect(entries[1].status == .disabled)
         // Pre-v0.21.6 shape (no `removed`) still decodes.
         let old = #"[{"name": "a", "status": "not enabled", "version": "1", "description": "", "source": "user"}]"#
         #expect(HermesPluginList.parseJSON(old)?.first?.removed == nil)

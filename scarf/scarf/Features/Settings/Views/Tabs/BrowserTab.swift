@@ -97,7 +97,6 @@ struct BrowserTab: View {
                         .foregroundStyle(.secondary)
                     Text(verbatim: "hermes plugins install camofox")
                         .font(.system(.caption, design: .monospaced))
-                        .textSelection(.enabled)
                 }
                 .padding(.horizontal, 12)
                 .padding(.bottom, 8)

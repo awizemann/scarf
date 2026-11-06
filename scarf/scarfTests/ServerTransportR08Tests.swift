@@ -19,6 +19,13 @@ import ScarfCore
         defer { home.cleanup() }
         if let env { try env.write(toFile: home.context.paths.envFile, atomically: true, encoding: .utf8) }
         if let config { try config.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8) }
+        // Pin the Copilot plugin as installed: the version probe reads this
+        // Mac's real `hermes`, and on v0.22.6+ Copilot's credentials count
+        // only with the `github-copilot` plugin present. With it, every host
+        // answers the same (pre-v0.22.6 never looks).
+        try FileManager.default.createDirectory(
+            atPath: home.context.paths.pluginsDir + "/" + HermesCopilotPlugin.pluginID,
+            withIntermediateDirectories: true)
         return HermesFileService(context: home.context).hasAnyAICredential(environment: [:])
     }
 

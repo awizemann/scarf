@@ -228,10 +228,10 @@ final class PluginsViewModel: OutcomeMessageHosting {
             let managed = HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
             // v0.23.0+: the no-arg form only READS `plugins.auto_apply`.
             let autoUpdate: Bool? = caps.hasPluginsAutoUpdateVerb
-                ? { () -> Bool? in
+                ? await OffPool.run {
                     let r = svc.runHermesCLI(args: HermesPluginsAutoUpdateVerdict.showArgv, timeout: 30)
                     return HermesPluginsAutoUpdateVerdict.parseState(output: r.output, exitCode: r.exitCode)
-                }()
+                }
                 : nil
             await MainActor.run { [weak self] in
                 self?.autoUpdateOn = autoUpdate
