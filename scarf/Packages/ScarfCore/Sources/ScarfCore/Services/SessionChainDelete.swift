@@ -37,7 +37,7 @@ public enum SessionChainDelete {
 
         /// The failed delete was Hermes saying it has no such session.
         public var failedBecauseNoSession: Bool {
-            failed != nil && failureReason?.hasPrefix("No session '") == true
+            failed != nil && failureReason?.hasPrefix(HermesSessionsCLI.noSessionPrefix) == true
         }
 
         public static func == (lhs: Outcome, rhs: Outcome) -> Bool {
@@ -78,7 +78,7 @@ public enum SessionChainDelete {
     /// Hermes has no such session (`_not_found`, sessions_cmd.py:49-51 on both
     /// tags). The quote keeps "No session database at …" out.
     public static func isNoSession(_ output: String) -> Bool {
-        output.split(whereSeparator: \.isNewline).contains { $0.hasPrefix("No session '") }
+        output.split(whereSeparator: \.isNewline).contains { $0.hasPrefix(HermesSessionsCLI.noSessionPrefix) }
     }
 
     /// One segment's delete, tried again while a turn the caller just stopped

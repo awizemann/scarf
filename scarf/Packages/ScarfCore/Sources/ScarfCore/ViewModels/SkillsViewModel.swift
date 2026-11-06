@@ -220,6 +220,14 @@ public final class SkillsViewModel {
                 )
             }.value
         }
+        // v0.22.6+ content locks live beside `pinned` in the same sidecar.
+        // Read only where the verb exists, so an older host never pays the
+        // extra transport read (charter C1).
+        if caps.hasCuratorLock {
+            lockedSkillNames = await Task.detached { Self.readLockedSkillNames(context: ctx) }.value
+        } else {
+            lockedSkillNames = []
+        }
         let totalSkills = cats.reduce(0) { $0 + $1.skills.count }
         ScarfMon.event(.diskIO, "skills.load.count", count: totalSkills)
         categories = cats
@@ -231,6 +239,45 @@ public final class SkillsViewModel {
         }.value
         bundles = loadedBundles
         isLoading = false
+    }
+
+    // MARK: - Content lock (v0.22.6+, caller gates on hasCuratorLock)
+
+    /// Directory names carrying `"locked": true` in `skills/.usage.json`
+    /// (see ``HermesCuratorLock/parseLockedSkillNames(_:)``). Empty on hosts
+    /// without `curator lock`.
+    public var lockedSkillNames: Set<String> = []
+    /// Skill name whose lock/unlock is in flight.
+    public var lockInFlight: String?
+    /// Outcome of the last lock/unlock, shown beside the toggle.
+    public var lockMessage: String?
+
+    nonisolated static func readLockedSkillNames(context: ServerContext) -> Set<String> {
+        guard let data = context.readData(context.paths.skillsUsageFile) else { return [] }
+        return HermesCuratorLock.parseLockedSkillNames(data)
+    }
+
+    /// `hermes curator lock|unlock -- <name>`, then re-read the sidecar so
+    /// the toggle shows what Hermes recorded rather than what was asked for.
+    public func setLocked(_ skill: HermesSkill, locked: Bool) async {
+        guard capabilities.hasCuratorLock, lockInFlight == nil else { return }
+        lockInFlight = skill.name
+        lockMessage = nil
+        let bin = context.paths.hermesBinary
+        let xport = transport
+        let ctx = context
+        let args = HermesCuratorLock.argv(skill: skill.name, locked: locked)
+        let result = await Self.runHermes(executable: bin, args: args, transport: xport, timeout: 30)
+        let verdict = HermesCuratorLock.judge(output: result.output, exitCode: result.exitCode, locked: locked)
+        lockedSkillNames = await Task.detached { Self.readLockedSkillNames(context: ctx) }.value
+        lockInFlight = nil
+        if verdict.succeeded {
+            lockMessage = locked ? "Locked — the agent can no longer change this skill." : "Unlocked — the agent may edit this skill again."
+        } else {
+            logger.warning("curator \(locked ? "lock" : "unlock", privacy: .public) \(skill.name, privacy: .public) failed: \(result.output, privacy: .public)")
+            lockMessage = verdict.detail.map { "Couldn't \(locked ? "lock" : "unlock"): \($0)" }
+                ?? "Couldn't \(locked ? "lock" : "unlock") \(skill.name)."
+        }
     }
 
     /// Names of the skills the curator has pinned.
@@ -331,6 +378,7 @@ public final class SkillsViewModel {
 
     public func selectSkill(_ skill: HermesSkill) async {
         selectedSkill = skill
+        lockMessage = nil
         let mainFile = skill.files.first(where: { $0.hasSuffix(".md") }) ?? skill.files.first
         if let file = mainFile {
             selectedFileName = file
@@ -420,7 +468,12 @@ public final class SkillsViewModel {
         guard contentError == nil else { return }
         skillContent = editText
         isEditing = false
+        contentSaveCount += 1
     }
+
+    /// Bumped on every successful skill-file save; drives the post-save
+    /// "Refresh running sessions" hint on v0.22.6+ hosts.
+    public private(set) var contentSaveCount = 0
 
     public func cancelEditing() {
         isEditing = false

@@ -386,6 +386,9 @@ struct SessionsView: View {
                     .contextMenu {
                         Button("Rename…") { viewModel.beginRename(session) }
                         Button("Export…") { viewModel.exportSession(session, formatsAvailable: hasExportFormats, traceNoRedactAvailable: hasTraceNoRedact, archivedTurnsInMarkdown: hasExportArchivedTurns) }
+                        if capabilitiesStore?.capabilities.hasSessionsRefreshPrompts ?? false {
+                            Button("Refresh System Prompt") { viewModel.refreshPrompt(for: session) }
+                        }
                         Divider()
                         Button("Delete…", role: .destructive) { viewModel.beginDelete(session) }
                     }

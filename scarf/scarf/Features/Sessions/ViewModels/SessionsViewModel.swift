@@ -2,6 +2,7 @@ import Foundation
 import ScarfCore
 import AppKit
 import UniformTypeIdentifiers
+import os
 
 struct SessionStoreStats {
     let totalSessions: Int
@@ -612,6 +613,32 @@ final class SessionsViewModel {
     /// `session_id` is the subparser's only positional and `--yes` its only
     /// flag (`hermes_cli/subcommands/sessions.py:100-102` @ `v2026.9.7`),
     /// which is what makes `--` safe here.
+    /// `hermes sessions refresh-prompts --session=<id> --json` (v0.22.6+,
+    /// caller gates on `hasSessionsRefreshPrompts`). Hermes resolves a
+    /// compressed chain to its tip itself (`sessions_cmd.py:1324` @ v0.23.0).
+    /// The result reuses the header's info banner.
+    private static let promptRefreshLogger = Logger(subsystem: "com.scarf", category: "SessionsPromptRefresh")
+
+    func refreshPrompt(for session: HermesSession) {
+        let ctx = context
+        let id = session.id
+        Task { [weak self] in
+            let outcome = await PromptRefreshRunner.run(context: ctx, sessionId: id)
+            guard let self else { return }
+            if !outcome.succeeded {
+                Self.promptRefreshLogger.warning("refresh-prompts \(id, privacy: .public) failed: \(outcome.message, privacy: .public)")
+            }
+            let banner = outcome.message
+            self.exportMessage = banner
+            if outcome.succeeded {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .seconds(5))
+                    if self?.exportMessage == banner { self?.exportMessage = nil }
+                }
+            }
+        }
+    }
+
     nonisolated static func deleteArgv(sessionId: String) -> [String] {
         ["sessions", "delete", "--yes", "--", sessionId]
     }

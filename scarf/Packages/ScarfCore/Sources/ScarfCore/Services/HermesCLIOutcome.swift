@@ -656,7 +656,10 @@ public enum HermesCLIMarkers {
     public static let sessionsExportSuccess = ["Exported "]
 
     /// The refusals `_cmd_export` and its renderers print, all to stdout:
-    /// - `not found.` — `_not_found` (:47).
+    /// - `not found.` — `_not_found` (:47), the pre-v0.22 sentence.
+    /// - `No session '` — `_not_found`'s real text since then
+    ///   (`sessions_cmd.py:49-51` @ v0.22.5, `:73-75` @ v0.23.0), which
+    ///   `not found.` never matched. ``HermesSessionsCLI/noSessionPrefix``.
     /// - `Error:` — the filter-parse arm (:302).
     /// - the `_FLAT_EXPORTERS` usage messages (:363, :365, :366).
     /// - the markdown/QMD usage refusals (:443, :456, :459, :465-466).
@@ -665,6 +668,7 @@ public enum HermesCLIMarkers {
     /// - `Pass --force to overwrite.` (:476, :500).
     public static let sessionsExportFailure = [
         "not found.",
+        HermesSessionsCLI.noSessionPrefix,
         "Error:",
         "--only user-prompts supports",
         "HTML export requires an output file path.",

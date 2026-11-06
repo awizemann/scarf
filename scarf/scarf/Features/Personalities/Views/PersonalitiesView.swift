@@ -171,6 +171,8 @@ struct PersonalitiesView: View {
             Text("SOUL.md describes the agent's voice, values, and personality at ~/.hermes/SOUL.md. It is injected into every session's context.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            RefreshPromptsHint(context: viewModel.context, isVisible: viewModel.soulSaveCount > 0)
+                .id(viewModel.soulSaveCount)
             if editingSOUL {
                 TextEditor(text: $soulDraft)
                     .font(.system(.caption, design: .monospaced))

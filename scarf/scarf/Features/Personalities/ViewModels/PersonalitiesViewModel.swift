@@ -134,6 +134,9 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
     /// The picker and the Save button disable on it, so the transition
     /// actually renders instead of the window freezing for the round-trip.
     private(set) var isSaving = false
+    /// Bumped on every successful SOUL.md write; drives the post-save
+    /// "Refresh running sessions" hint (v0.22.6+).
+    private(set) var soulSaveCount = 0
 
     func setActive(_ name: String) {
         guard !isSaving else { return }
@@ -211,6 +214,7 @@ final class PersonalitiesViewModel: OutcomeMessageHosting {
             self.isSaving = false
             if ok {
                 self.soulMarkdown = content
+                self.soulSaveCount += 1
                 self.showSuccess(String(localized: "SOUL.md saved"))
             } else {
                 self.logger.error("Failed to write SOUL.md to \(self.context.displayName)")

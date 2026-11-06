@@ -292,6 +292,12 @@ struct SkillsView: View {
                     .foregroundStyle(ScarfColor.accent)
                     .help("Pinned by curator")
             }
+            if viewModel.lockedSkillNames.contains(skill.name) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 9))
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .help("Locked — the agent can't change this skill")
+            }
             if !skill.enabled {
                 Text("OFF")
                     .scarfStyle(.captionUppercase)
@@ -316,6 +322,7 @@ struct SkillsView: View {
     private func skillRowLabel(_ skill: HermesSkill) -> String {
         var parts = [skill.name]
         if skill.pinned { parts.append(String(localized: "pinned")) }
+        if viewModel.lockedSkillNames.contains(skill.name) { parts.append(String(localized: "locked")) }
         if !skill.enabled { parts.append(String(localized: "disabled")) }
         return parts.joined(separator: ", ")
     }
@@ -338,6 +345,11 @@ struct SkillsView: View {
                     }
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    if capabilitiesStore?.capabilities.hasCuratorLock ?? false {
+                        skillLockRow(skill)
+                    }
+                    RefreshPromptsHint(context: viewModel.context, isVisible: viewModel.contentSaveCount > 0)
+                        .id(viewModel.contentSaveCount)
                     if !viewModel.missingConfig.isEmpty {
                         HStack(spacing: 8) {
                             Image(systemName: "exclamationmark.triangle")
@@ -505,6 +517,35 @@ struct SkillsView: View {
         } else {
             ContentUnavailableView("Select a Skill", systemImage: "lightbulb", description: Text("Choose a skill from the list"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    /// v0.22.6+ content lock (`hermes curator lock|unlock`). State comes
+    /// from `skills/.usage.json`'s `locked` field, re-read after each toggle.
+    @ViewBuilder
+    private func skillLockRow(_ skill: HermesSkill) -> some View {
+        let isLocked = viewModel.lockedSkillNames.contains(skill.name)
+        let busy = viewModel.lockInFlight == skill.name
+        HStack(spacing: 8) {
+            Toggle(isOn: Binding(
+                get: { isLocked },
+                set: { newValue in Task { await viewModel.setLocked(skill, locked: newValue) } }
+            )) {
+                Label("Locked against agent edits", systemImage: isLocked ? "lock.fill" : "lock.open")
+                    .font(.caption)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .disabled(viewModel.lockInFlight != nil)
+            .help("When locked, skill_manage, write_file, patch and terminal refuse to change this skill; you can still edit it yourself.")
+            .accessibilityIdentifier("skills.detail.lock")
+            if busy { ProgressView().controlSize(.small) }
+            if let msg = viewModel.lockMessage {
+                Text(msg)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
