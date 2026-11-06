@@ -23,3 +23,9 @@ reviewed_by: audit:claude-code (background)
 - [gotcha] Delete retries only Hermes's turn-still-running refusals ("Cannot delete active session", "queued or running turn", v0.22.5 only); "No session" on a later chain segment counts as already deleted, because v0.22.5 deletes a gateway-local conversation whole from any segment #hermes
 - [fact] An approval raised while the budget sheet is up takes the window from it, and the budget question returns once the approval is answered; neither is lost (covered by testApprovalRaisedBehindTheBudgetSheetAppearsWhenItCloses) #swiftui
 - [gotcha] On gateway-backed Hermes a turn outlives its hermes acp viewer unless Scarf sends session/cancel: process count 0 doesn't prove a turn stopped, so wait out the turn and check state.db #hermes #testing
+
+## Relations
+- builds_on [[scarf/operations/scarf-ui-gate-runs-in-the-scarf-ui-tart-vm]]
+- relates_to [[scarf/decisions/ui-release-gate-xcuitest-is-the-gate-harness-is-exploratory]]
+- relates_to [[scarf/architecture/chat-transcript-activitybubble-segmentation]]
+- relates_to [[scarf/decisions/hermes-v0-22-compatibility-decisions]]

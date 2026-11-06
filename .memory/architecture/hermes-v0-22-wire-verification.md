@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-v0-22-wire-verification
 tags: [hermes, acp, state-db, verification, v022]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/SessionResume.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ViewModels/RichChatViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift]
 source_paths_inferred: false
-source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
+source_sha: daa40485a10bcf22688d5e4b8f16e43de182a70c
 created: 2026-10-25
 updated: 2026-10-25
-reviewed: 2026-10-29
+reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
 

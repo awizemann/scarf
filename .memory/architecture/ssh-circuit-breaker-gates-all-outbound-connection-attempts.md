@@ -18,7 +18,7 @@ Mechanics: 3 consecutive connection-level failures (ssh exit 255, or dial timeou
 Rules when touching SSH paths:
 - Any NEW code path that spawns ssh/scp toward a server must check `SSHConnectionGate.shared.admit` and record outcomes (or route through `SSHTransport.runLocal`, which does it).
 - scp is admit-only: its exit codes don't distinguish connection failure (exits 1, not 255) — never feed scp exits into the gate.
-- Local-only ControlMaster ops (`-O check` / `-O exit`) are exempt (GatePolicy.none): they never dial and their non-zero "no master" exits would poison the gate.
+- Local-only ControlMaster ops (`-O check` / `-O exit`) and the `checkControlMaster` probe are exempt (GatePolicy.none): they never dial and their non-zero exits would poison the gate (or say nothing about the remote session).
 - Explicit user actions (Test Connection probe, chat Reconnect button, server removal) call `reset` — user intent overrides the backoff.
 - ACP `makeProcess` sessions are ungated; ChatViewModel's reconnect loop is already capped at 5 attempts with its own backoff.
 
@@ -26,7 +26,7 @@ Rules when touching SSH paths:
 ## Observations
 - [fact] All macOS ssh/scp spawns toward a server must pass SSHConnectionGate.shared.admit; 3 consecutive exit-255/timeout failures open the gate (30s→300s backoff, single probe) #ssh #gh138
 - [fact] scp exit codes cannot distinguish connection failure (exits 1, not 255) — scp is admit-only, never feeds the gate #ssh
-- [fact] ssh -O check / -O exit are local socket ops — exempt from the gate or they poison it with "no master" non-zero exits #ssh
+- [fact] ssh -O check / -O exit and the checkControlMaster probe are local socket ops — exempt from the gate or they poison it with non-zero exits #ssh
 - [fact] Test Connection, chat Reconnect, and server removal reset the gate — explicit user intent overrides backoff #ux
 
 ## Relations

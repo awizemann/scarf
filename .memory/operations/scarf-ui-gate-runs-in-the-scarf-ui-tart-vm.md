@@ -5,11 +5,11 @@ permalink: scarf/operations/scarf-ui-gate-runs-in-the-scarf-ui-tart-vm
 tags: [testing, ui-tests, tart, vm, release-gate]
 source_paths: [scripts/ui-gate-vm.sh, scripts/release.sh, scripts/ui-gate.sh]
 source_paths_inferred: false
-source_sha: 7841304189e4c501dc42732b3af7299beae11ab4
+source_sha: daa40485a10bcf22688d5e4b8f16e43de182a70c
 created: 2026-10-26
 updated: 2026-10-26
-reviewed: 2026-10-26
-reviewed_by: claude-opus-5-5
+reviewed: 2026-11-01
+reviewed_by: audit:claude-code (background)
 ---
 
 Since 2026-10-26 Scarf's XCUITest plans run in a dedicated Tart VM via scripts/ui-gate-vm.sh instead of on Alan's screen (on-host UI tests take over the Mac). First full green: Hermes v0.22.5 and v0.21.5, Smoke/Full/Live all PASS at commit 85d51c42.

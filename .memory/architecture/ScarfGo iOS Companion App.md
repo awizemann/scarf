@@ -3,12 +3,12 @@ title: ScarfGo iOS Companion App
 type: note
 permalink: scarf/architecture/scarf-go-i-os-companion-app
 tags: [ios, scarfgo, ssh]
-source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectEnvironmentHint.swift]
+source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Scarf iOS/App/ScarfIOSApp.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectEnvironmentHint.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/SSHConnectPolicy.swift, scarf/Packages/ScarfIOS/Sources/ScarfIOS/CitadelServerTransport.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: daa40485a10bcf22688d5e4b8f16e43de182a70c
 created: 2026-05-29
 updated: 2026-09-29
-reviewed: 2026-09-29
+reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
 
