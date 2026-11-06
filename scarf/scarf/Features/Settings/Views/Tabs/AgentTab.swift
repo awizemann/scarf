@@ -204,7 +204,7 @@ struct AgentTab: View {
         // `auto`/`cold`, the toggle would render it as "off" and overwrite it
         // with `normal` on the first tap. Pass the stored value so that one
         // state falls through to the picker instead.
-        let storedTier = HermesServiceTier.normalize(viewModel.config.serviceTier)
+        let storedTier = HermesServiceTier.normalize(viewModel.config.serviceTier, capabilities: capabilities)
         if HermesServiceTier.editorStyle(capabilities: capabilities, current: storedTier) == .picker {
             boundedFastModeRows
         } else {
@@ -221,7 +221,7 @@ struct AgentTab: View {
     /// v0.21.1+: the four-way picker, plus the window the bounded modes use.
     @ViewBuilder
     private var boundedFastModeRows: some View {
-        let tier = HermesServiceTier.normalize(viewModel.config.serviceTier)
+        let tier = HermesServiceTier.normalize(viewModel.config.serviceTier, capabilities: capabilities)
         let options = HermesServiceTier.options(capabilities: capabilities, current: tier)
         PickerRow(
             label: "Fast Mode",
@@ -256,6 +256,7 @@ struct AgentTab: View {
         case .always: String(localized: "Always")
         case .auto:   String(localized: "Auto (bounded window)")
         case .cold:   String(localized: "Cold (first turn only)")
+        case .ultrafast: String(localized: "Ultrafast (OpenAI, supported models)")
         }
     }
 }

@@ -53,6 +53,14 @@ struct ChatTranscriptPane: View {
 
     private var voiceCapabilities: HermesCapabilities { capabilitiesStore?.capabilities ?? .empty }
 
+    /// "Reset to default model" (`/model reset`): Hermes v0.22.6+ on
+    /// gateway-backed ACP only; nil keeps the badge popover unchanged.
+    private var modelResetAction: (() -> Void)? {
+        let caps = voiceCapabilities
+        guard caps.hasModelReset, caps.hasGatewayBackedACP else { return nil }
+        return { chatViewModel.resetModelToDefault(capabilities: caps) }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             SessionInfoBar(
@@ -72,6 +80,11 @@ struct ChatTranscriptPane: View {
                 modelPreset: chatViewModel.currentModelPreset,
                 onSwitchModel: { preset in
                     chatViewModel.switchModelPreset(preset)
+                },
+                onResetModel: modelResetAction,
+                configPickers: richChat.configPickers,
+                onSetConfigOption: { configId, value in
+                    chatViewModel.setConfigOption(configId: configId, value: value)
                 },
                 approvalSessionMode: richChat.activeApprovalMode,
                 onSwitchApprovalMode: { mode in

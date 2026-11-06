@@ -56,8 +56,9 @@ struct HermesV0211ConfigTests {
         #expect(HermesServiceTier.auto.configValue == "auto")
         #expect(HermesServiceTier.cold.configValue == "cold")
         // Round-trip: what Scarf writes must read back as what it wrote.
+        let v0230 = HermesCapabilities.parseLine("Hermes Agent v0.23.0 (2026.9.24)")
         for tier in HermesServiceTier.allCases {
-            #expect(HermesServiceTier.normalize(tier.configValue) == tier)
+            #expect(HermesServiceTier.normalize(tier.configValue, capabilities: v0230) == tier)
         }
     }
 

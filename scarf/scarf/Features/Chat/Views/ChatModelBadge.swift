@@ -14,6 +14,9 @@ import ScarfDesign
 struct ChatModelBadge: View {
     let preset: ModelPreset?
     let onSwitch: ((ModelPreset?) -> Void)?
+    /// `/model reset` (Hermes v0.22.6+ on gateway-backed ACP). Nil hides
+    /// the row, so older hosts render the popover unchanged.
+    var onResetToDefault: (() -> Void)? = nil
 
     @State private var presets: [ModelPreset] = []
     @State private var isLoading = false
@@ -81,6 +84,11 @@ struct ChatModelBadge: View {
             .padding(ScarfSpace.s2)
             Divider()
 
+            if let onResetToDefault {
+                resetRow(onResetToDefault)
+                Divider()
+            }
+
             if presets.isEmpty && !isLoading {
                 VStack(spacing: ScarfSpace.s2) {
                     Text("No saved presets")
@@ -109,6 +117,33 @@ struct ChatModelBadge: View {
             }
         }
         .background(ScarfColor.backgroundSecondary)
+    }
+
+    /// Hermes's `/model reset`: the session goes back to the profile's
+    /// configured model (read fresh by Hermes, unlike "Use global default",
+    /// which Scarf resolves from config.yaml itself).
+    private func resetRow(_ action: @escaping () -> Void) -> some View {
+        Button {
+            action()
+            showPopover = false
+        } label: {
+            HStack {
+                Image(systemName: "arrow.uturn.backward")
+                    .frame(width: 16)
+                    .foregroundStyle(ScarfColor.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Reset to default model")
+                        .scarfStyle(.body)
+                    Text("Hermes /model reset — the profile's configured model")
+                        .scarfStyle(.footnote)
+                        .foregroundStyle(ScarfColor.foregroundMuted)
+                }
+                Spacer()
+            }
+            .padding(ScarfSpace.s2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private var defaultRow: some View {

@@ -35,6 +35,11 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
     case auto
     /// Bounded window on a session's first turn only (v0.21.1+).
     case cold
+    /// OpenAI Ultrafast static tier — `ultrafast` / `ultra` (v0.22.7+,
+    /// `SERVICE_TIER_WORDS`, agent/fast_mode.py:31-34; gated per model by
+    /// Hermes at request time). Offered only when
+    /// `HermesCapabilities.hasServiceTierUltrafast`.
+    case ultrafast
 
     /// Values Hermes maps onto `None` (normal tier).
     static let offAliases: Set<String> = ["", "normal", "default", "standard", "off", "none"]
@@ -54,6 +59,15 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
         return .off
     }
 
+    /// ``normalize(_:)`` for a host whose parser knows `ultrafast`
+    /// (`hasServiceTierUltrafast`, v0.22.7+). Older hosts warn and ignore
+    /// it, so for them it stays ``off`` exactly as before (C1).
+    public static func normalize(_ raw: String, capabilities: HermesCapabilities) -> HermesServiceTier {
+        let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if capabilities.hasServiceTierUltrafast, value == "ultrafast" || value == "ultra" { return .ultrafast }
+        return normalize(raw)
+    }
+
     /// The scalar Scarf writes for this selection. See the type's note on
     /// why `off`/`always` write the aliases rather than the canonical forms.
     public var configValue: String {
@@ -62,6 +76,7 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
         case .always: "fast"
         case .auto:   "auto"
         case .cold:   "cold"
+        case .ultrafast: "ultrafast"
         }
     }
 
@@ -115,9 +130,10 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
         capabilities: HermesCapabilities,
         current: HermesServiceTier
     ) -> [HermesServiceTier] {
-        let base: [HermesServiceTier] = capabilities.hasServiceTierBoundedModes
-            ? allCases
+        var base: [HermesServiceTier] = capabilities.hasServiceTierBoundedModes
+            ? [.off, .always, .auto, .cold]
             : [.off, .always]
+        if capabilities.hasServiceTierUltrafast { base.append(.ultrafast) }
         return base.contains(current) ? base : base + [current]
     }
 }

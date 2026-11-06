@@ -2977,6 +2977,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// between them). At v0.22.5 an EOF on the prompt is a silent "no".
     public var hasSessionsNonZeroExit: Bool { isV0226OrLater }
 
+    /// `agent.service_tier` accepts `ultrafast` (alias `ultra`):
+    /// `STATIC_TIERS` / `SERVICE_TIER_WORDS`, `agent/fast_mode.py:25,33`
+    /// @ v0.21.6 through v0.23.0, which `_parse_service_tier_config`
+    /// (`hermes_cli/cli_config_load.py:72-78`, unchanged across those tags)
+    /// delegates to. Absent at v2026.9.24 (v0.21.5), where the loader warns
+    /// "Unknown service_tier" and ignores it.
+    public var hasServiceTierUltrafast: Bool { isV0216OrLater }
+
     // MARK: v0.23.0 flags
     //
     // Absent at v0.22.7, the tag before v0.23.0.

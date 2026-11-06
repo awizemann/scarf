@@ -77,6 +77,16 @@ struct SessionInfoBar: View {
     /// wire it.
     var onSwitchModel: ((ModelPreset?) -> Void)? = nil
 
+    /// "Reset to default model" in the model badge (`/model reset`,
+    /// `hasModelReset` on gateway-backed ACP). Nil hides the row.
+    var onResetModel: (() -> Void)? = nil
+
+    /// Gateway-backed ACP config-option pickers to draw beside the model
+    /// badge (`ACPConfigOption.visiblePickers` — empty on every pre-v0.22.6
+    /// or in-process host, so they render nothing there).
+    var configPickers: [ACPConfigOption] = []
+    var onSetConfigOption: ((String, String) -> Void)? = nil
+
     /// Live ACP session edit auto-approval mode (Hermes v0.15+
     /// `session/set_mode`). Drives the per-session approval chip. This
     /// is distinct from the global `approvals.mode` / YOLO surface
@@ -228,8 +238,19 @@ struct SessionInfoBar: View {
                 if modelPreset != nil || onSwitchModel != nil {
                     ChatModelBadge(
                         preset: modelPreset,
-                        onSwitch: onSwitchModel
+                        onSwitch: onSwitchModel,
+                        onResetToDefault: onResetModel
                     )
+                }
+
+                // Reasoning effort (v0.22.6) / service tier (v0.23.0):
+                // driven entirely by the options Hermes advertised.
+                if let onSetConfigOption {
+                    ForEach(configPickers) { option in
+                        ChatConfigOptionBadge(option: option) { value in
+                            onSetConfigOption(option.id, value)
+                        }
+                    }
                 }
 
                 // Per-session edit auto-approval chip (v0.15 / Hermes ACP

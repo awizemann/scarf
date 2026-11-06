@@ -2644,6 +2644,20 @@ extension ChatViewModel {
         )
     }
     func switchModelPreset(_ preset: ModelPreset?) { focusedChat.switchModelPreset(preset) }
+    func setConfigOption(configId: String, value: String) {
+        focusedChat.setConfigOption(configId: configId, value: value)
+    }
+
+    /// `/model reset` (v0.22.6+: `is_model_reset`,
+    /// gateway/session_mutation_model.py:156 @ v0.22.6/v0.23.0; absent at
+    /// v0.22.5, where "reset" would be taken as a model name) through the
+    /// ordinary `/model` slash route. The badge follows the
+    /// `config_option_update` Hermes sends after it (`followConfigOptions`)
+    /// and the typed-switch reply path.
+    func resetModelToDefault(capabilities: HermesCapabilities) {
+        guard capabilities.hasModelReset, capabilities.hasGatewayBackedACP else { return }
+        sendText("/model reset")
+    }
     func switchApprovalMode(_ mode: ACPApprovalMode) { focusedChat.switchApprovalMode(mode) }
     func respondToPermission(requestId: Int, optionId: String) {
         focusedChat.respondToPermission(requestId: requestId, optionId: optionId)

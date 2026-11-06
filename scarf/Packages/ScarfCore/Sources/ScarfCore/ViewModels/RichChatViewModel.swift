@@ -1299,6 +1299,24 @@ public final class RichChatViewModel {
     /// `modes`/current-mode out of `ACPClient.newSession` (deferred).
     public var activeApprovalMode: ACPApprovalMode = .default
 
+    /// The session's latest gateway-backed ACP `configOptions` (v0.22.6+):
+    /// from the new/load reply, every `config_option_update`, and each
+    /// `session/set_config_option` reply. Always the full list Hermes last
+    /// sent; empty on hosts without it.
+    public private(set) var acpConfigOptions: [ACPConfigOption] = []
+
+    /// Adopt a full `configOptions` list. Ignored off gateway-backed ACP
+    /// (the in-process server's `set_config_option` answers `[]`).
+    public func applyConfigOptions(_ options: [ACPConfigOption]) {
+        guard capabilitiesGate.hasGatewayBackedACP, capabilitiesGate.hasACPConfigOptions else { return }
+        if acpConfigOptions != options { acpConfigOptions = options }
+    }
+
+    /// The reasoning-effort / service-tier pickers to draw (C1 gated).
+    public var configPickers: [ACPConfigOption] {
+        ACPConfigOption.visiblePickers(acpConfigOptions, capabilities: capabilitiesGate)
+    }
+
     /// Drain the next queued prompt off the local mirror, FIFO. Called
     /// from `handlePromptComplete` once a turn settles — Hermes runs
     /// the actual queued prompt server-side; popping here keeps the
@@ -2427,6 +2445,7 @@ public final class RichChatViewModel {
         // scoped; a fresh chat starts back at the default "ask before
         // edits" posture rather than carrying the previous session's mode.
         activeApprovalMode = .default
+        acpConfigOptions = []
     }
 
     public func setSessionId(_ id: String?) {
@@ -3020,7 +3039,7 @@ public final class RichChatViewModel {
                 ScarfMon.event(.chatStream, "mac.handleACPEvent.preEngagementDropped", count: 1)
                 return
             case .promptComplete, .permissionRequest, .connectionLost,
-                 .availableCommands, .sessionInfoUpdate, .currentModeUpdate, .unknown:
+                 .availableCommands, .sessionInfoUpdate, .currentModeUpdate, .configOptionUpdate, .unknown:
                 break
             }
         }
@@ -3079,6 +3098,8 @@ public final class RichChatViewModel {
             if capabilitiesGate.hasGatewayBackedACP, let mode = ACPApprovalMode(rawValue: modeId) {
                 activeApprovalMode = mode
             }
+        case .configOptionUpdate(_, let options):
+            applyConfigOptions(options)
         case .unknown:
             break
         }

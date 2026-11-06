@@ -728,6 +728,31 @@ public actor ACPClient {
         _ = try await sendRequest(method: "session/set_mode", params: params)
     }
 
+    /// Write one gateway-backed ACP config option via
+    /// `session/set_config_option {sessionId, configId, value}`
+    /// (acp_adapter/gateway_server.py:582-616 @ v0.23.0). Returns the
+    /// refreshed FULL `configOptions` list Hermes read back from the owner
+    /// — callers adopt it as truth. Reasoning-effort and edit-mode writes
+    /// are idle-only: a busy session answers JSON-RPC -32603 whose message
+    /// explains it; that throws here for the caller to show (never retry).
+    ///
+    /// Caller gates on `hasGatewayBackedACP && hasACPConfigOptions`: the
+    /// in-process server's handler is a no-op returning `[]`
+    /// (acp_adapter/server.py:1069-1088).
+    public func setConfigOption(
+        sessionId: String,
+        configId: String,
+        value: String
+    ) async throws -> [ACPConfigOption] {
+        let params: [String: AnyCodable] = [
+            "sessionId": AnyCodable(sessionId),
+            "configId": AnyCodable(configId),
+            "value": AnyCodable(value),
+        ]
+        let result = try await sendRequest(method: "session/set_config_option", params: params)
+        return ACPConfigOption.parseList(result?.dictValue?["configOptions"]) ?? []
+    }
+
     /// Switch the model on a live ACP session via the `session/set_model`
     /// JSON-RPC method. The `modelID` wire value follows Hermes's ACP
     /// model-choice encoding: `"<provider>:<model>"` when the caller

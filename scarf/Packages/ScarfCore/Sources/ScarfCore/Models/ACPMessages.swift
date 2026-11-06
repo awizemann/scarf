@@ -258,6 +258,10 @@ public enum ACPEvent: @unchecked Sendable {
     /// v0.22.5); no in-process adapter tag does (absent from
     /// `acp_adapter/` @ v2026.9.24 and v0.22.0).
     case currentModeUpdate(sessionId: String, modeId: String)
+    /// `config_option_update`: gateway-backed ACP resent the session's FULL
+    /// `configOptions` list after a mode, model, effort or tier change
+    /// (`_project_config`, acp_adapter/gateway_server.py:1099-1122 @ v0.23.0).
+    case configOptionUpdate(sessionId: String, options: [ACPConfigOption])
     case connectionLost(reason: String)
     case unknown(sessionId: String, type: String)
 
@@ -276,6 +280,7 @@ public enum ACPEvent: @unchecked Sendable {
              let .availableCommands(sid, _),
              let .sessionInfoUpdate(sid, _, _, _),
              let .currentModeUpdate(sid, _),
+             let .configOptionUpdate(sid, _),
              let .unknown(sid, _):
             return sid
         case let .permissionRequest(sid, _, _):
@@ -535,10 +540,19 @@ public struct ACPSessionState: Sendable, Equatable {
     /// Hermes's picker id: `provider:model` (`encode_model_choice`,
     /// acp_adapter/model_catalog.py:146-152 @ v2026.9.24).
     public let currentModelId: String?
+    /// Gateway-backed ACP's `configOptions` (v0.22.6+,
+    /// acp_adapter/gateway_server.py:299-322 @ v0.23.0); nil when the reply
+    /// has none.
+    public let configOptions: [ACPConfigOption]?
 
-    public init(currentModeId: String? = nil, currentModelId: String? = nil) {
+    public init(
+        currentModeId: String? = nil,
+        currentModelId: String? = nil,
+        configOptions: [ACPConfigOption]? = nil
+    ) {
         self.currentModeId = currentModeId
         self.currentModelId = currentModelId
+        self.configOptions = configOptions
     }
 
     nonisolated init(response: [String: Any]) {
@@ -548,7 +562,8 @@ public struct ACPSessionState: Sendable, Equatable {
         let model = (models?["currentModelId"] as? String)?.trimmingCharacters(in: .whitespaces)
         self.init(
             currentModeId: (mode?.isEmpty ?? true) ? nil : mode,
-            currentModelId: (model?.isEmpty ?? true) ? nil : model
+            currentModelId: (model?.isEmpty ?? true) ? nil : model,
+            configOptions: ACPConfigOption.parseList(response["configOptions"])
         )
     }
 
@@ -652,6 +667,12 @@ public enum ACPEventParser {
                 return .unknown(sessionId: sessionId, type: updateType)
             }
             return .currentModeUpdate(sessionId: sessionId, modeId: modeId)
+
+        case "config_option_update":
+            guard let options = ACPConfigOption.parseList(update["configOptions"]) else {
+                return .unknown(sessionId: sessionId, type: updateType)
+            }
+            return .configOptionUpdate(sessionId: sessionId, options: options)
 
         default:
             return .unknown(sessionId: sessionId, type: updateType)

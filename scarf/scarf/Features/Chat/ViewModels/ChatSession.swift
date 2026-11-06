@@ -2096,6 +2096,10 @@ final class ChatSession {
     ) async {
         let state = await client.lastSessionState
         guard acpClient === client else { return }
+        if let options = state.configOptions {
+            richChatViewModel.applyConfigOptions(options)
+            lastConfigModelValue = options.first { $0.id == ACPConfigOption.modelId }?.currentValue
+        }
         if let modeId = state.currentModeId {
             richChatViewModel.activeApprovalMode = ACPApprovalMode(rawValue: modeId) ?? .default
         }
@@ -2112,6 +2116,57 @@ final class ChatSession {
         }
         guard acpClient === client else { return }
         currentModelPreset = ChatViewModel.badgePreset(pickerId: pickerId, presets: presets, configModel: defaultModel)
+    }
+
+    /// The `model` option's value last seen in `configOptions`, so a
+    /// `config_option_update` that only moved another picker leaves the
+    /// badge alone.
+    private var lastConfigModelValue: String?
+
+    /// A `config_option_update` (or a set_config_option reply) can carry a
+    /// new model — another surface's pick, a `/model reset`, a deferred pick
+    /// landing at the turn boundary. The badge follows it, as it follows a
+    /// `session/load` reply's `models.currentModelId`.
+    func followConfigOptions(_ options: [ACPConfigOption], client: ACPClient) async {
+        richChatViewModel.applyConfigOptions(options)
+        guard richChatViewModel.capabilitiesGate.hasGatewayBackedACP,
+              richChatViewModel.capabilitiesGate.hasACPConfigOptions,
+              let pickerId = options.first(where: { $0.id == ACPConfigOption.modelId })?.currentValue,
+              !pickerId.isEmpty, pickerId != lastConfigModelValue else { return }
+        lastConfigModelValue = pickerId
+        let presets = (try? await ModelPresetService.shared(for: context).list()) ?? []
+        var defaultModel: String?
+        if ChatViewModel.presetMatching(pickerId: pickerId, in: presets) == nil {
+            let svc = fileService
+            defaultModel = await OffPool.run { svc.loadConfig().model }
+        }
+        guard acpClient === client else { return }
+        currentModelPreset = ChatViewModel.badgePreset(pickerId: pickerId, presets: presets, configModel: defaultModel)
+    }
+
+    /// Write a gateway-backed ACP config option (reasoning effort, service
+    /// tier) and adopt the full list Hermes replies with. A refusal (an
+    /// idle-only option while a turn runs) shows Hermes's own text; no retry.
+    func setConfigOption(configId: String, value: String) {
+        guard let client = acpClient,
+              let sessionId = richChatViewModel.sessionId,
+              richChatViewModel.capabilitiesGate.hasGatewayBackedACP,
+              richChatViewModel.capabilitiesGate.hasACPConfigOptions
+        else { return }
+        Task { @MainActor [weak self] in
+            do {
+                let options = try await client.setConfigOption(
+                    sessionId: sessionId, configId: configId, value: value)
+                guard let self, self.acpClient === client,
+                      self.richChatViewModel.sessionId == sessionId else { return }
+                await self.followConfigOptions(options, client: client)
+                self.logger.info("config option \(configId) set to \(value)")
+            } catch {
+                self?.logger.warning("session/set_config_option \(configId) refused: \(error.localizedDescription)")
+                guard let self, self.acpClient === client else { return }
+                self.showHint(ACPConfigOption.refusalText(for: error))
+            }
+        }
     }
 
     /// A typed `/model <name>` switched the session: Hermes answers with
@@ -2889,6 +2944,10 @@ final class ChatSession {
                 }
                 ScarfMon.measure(.chatStream, "mac.handleACPEvent") {
                     self?.richChatViewModel.handleACPEvent(event)
+                }
+                if case let .configOptionUpdate(sid, options) = event,
+                   let self, self.richChatViewModel.sessionId == sid {
+                    await self.followConfigOptions(options, client: client)
                 }
                 if rotated, let self {
                     // Attribution is keyed by the root; let id lookups on
