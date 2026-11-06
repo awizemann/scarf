@@ -632,13 +632,13 @@ public struct ProjectMCPTools: Sendable {
             report = doctor.diagnose()
         }
 
-        let findings = entry.map { findings(of: report, concerning: $0) } ?? report.findings
+        let scopedFindings = entry.map { findings(of: report, concerning: $0) } ?? report.findings
 
         var fields: [String: JSONValue] = [
             "summary": .string(report.summary),
             "projectCount": .int(report.projectCount),
-            "healthy": .bool(findings.filter { $0.severity > .info }.isEmpty),
-            "findings": .array(findings.map(encode)),
+            "healthy": .bool(scopedFindings.filter { $0.severity > .info }.isEmpty),
+            "findings": .array(scopedFindings.map(encode)),
         ]
         if let entry { fields["project"] = .string(entry.name) }
         if let block = report.repairBlock {
