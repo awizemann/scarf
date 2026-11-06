@@ -72,17 +72,27 @@ public struct HermesPluginListEntry: Sendable, Equatable, Identifiable, Decodabl
     public let version: String
     public let description: String
     public let source: String
+    /// The catalog kill-list reason when this installed plugin was removed
+    /// from the plugin catalog, else nil. `removed` is the sixth key of
+    /// `cmd_list`'s JSON row (`hermes_cli/plugins_cmd_listing.py:69` @ v0.21.6
+    /// through v0.23.0), `null` when not removed (`plugins_cmd_catalog.py:
+    /// 257-269` @ v0.23.0). Absent on older hosts. Decoded only — not yet
+    /// rendered (C1: it predates v0.23.0, so showing it would change the
+    /// row on every v0.21.6+ host).
+    public let removed: String?
 
-    public init(name: String, status: HermesPluginActivation, version: String, description: String, source: String) {
+    public init(name: String, status: HermesPluginActivation, version: String, description: String, source: String, removed: String? = nil) {
         self.name = name
         self.status = status
         self.version = version
         self.description = description
         self.source = source
+        self.removed = removed
     }
 
+    /// Unknown keys are ignored: a keyed container only reads these.
     private enum CodingKeys: String, CodingKey {
-        case name, status, version, description, source
+        case name, status, version, description, source, removed
     }
 
     public init(from decoder: Decoder) throws {
@@ -92,6 +102,7 @@ public struct HermesPluginListEntry: Sendable, Equatable, Identifiable, Decodabl
         version = (try? c.decodeIfPresent(String.self, forKey: .version)) .flatMap { $0 } ?? ""
         description = (try? c.decodeIfPresent(String.self, forKey: .description)).flatMap { $0 } ?? ""
         source = (try? c.decodeIfPresent(String.self, forKey: .source)).flatMap { $0 } ?? ""
+        removed = (try? c.decodeIfPresent(String.self, forKey: .removed)).flatMap { $0 }
     }
 }
 

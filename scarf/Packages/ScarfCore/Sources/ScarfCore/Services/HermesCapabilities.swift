@@ -2891,6 +2891,16 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// v0.22.2 (no gateway ACP). A plain v0.22.3 floor.
     public var hasGatewayRewindCommands: Bool { isV0223OrLater }
 
+    /// `hermes plugins update` with NO name updates every plugin that has an
+    /// update, `--yes` skipping its one confirmation (required without a
+    /// terminal), and `plugins update <name> --force` accepts a caution scan
+    /// verdict (never a dangerous one) — `hermes_cli/subcommands/plugins.py:
+    /// 68-78`, `_action_update` (`plugins_cmd.py:1066-1075` @ v0.22.3,
+    /// `:1085-1094` @ v0.23.0), `cmd_update_all` (`plugins_cmd_update_all.py`,
+    /// new at v0.22.3). At v0.22.1 / v0.22.2 the parser has no `--yes` and
+    /// `plugins_cmd_update_all.py` does not exist. A plain v0.22.3 floor.
+    public var hasPluginsUpdateAll: Bool { isV0223OrLater }
+
     // MARK: v0.22.5 flags
     //
     // Opened at v0.22.5 and at v0.22.4, the tag before it.

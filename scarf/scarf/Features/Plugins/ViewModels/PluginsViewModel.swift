@@ -226,7 +226,15 @@ final class PluginsViewModel: OutcomeMessageHosting {
             // `get_managed_system` never opens the file and ANY marker means
             // managed (`hermes_cli/config.py:327-330` @ `v2026.6.19`).
             let managed = HermesManagedInstallCache.shared.managedInstall(for: ctx, capabilities: caps)
+            // v0.23.0+: the no-arg form only READS `plugins.auto_apply`.
+            let autoUpdate: Bool? = caps.hasPluginsAutoUpdateVerb
+                ? { () -> Bool? in
+                    let r = svc.runHermesCLI(args: HermesPluginsAutoUpdateVerdict.showArgv, timeout: 30)
+                    return HermesPluginsAutoUpdateVerdict.parseState(output: r.output, exitCode: r.exitCode)
+                }()
+                : nil
             await MainActor.run { [weak self] in
+                self?.autoUpdateOn = autoUpdate
                 self?.plugins = result
                 self?.compatReport = compat
                 self?.managedInstall = managed
@@ -454,13 +462,20 @@ final class PluginsViewModel: OutcomeMessageHosting {
     func update(_ plugin: HermesPlugin) {
         let run = cliRunner
         let name = plugin.name
+        let canForce = supportsUpdateAll
         Task.detached { [weak self] in
             let result = run(HermesPluginsUpdateVerdict.argv(name: name), 60)
             let outcome = HermesPluginsUpdateVerdict.judge(
                 output: result.output, exitCode: result.exitCode
             )
+            // v0.22.3+: a caution verdict refuses at exit 1 and is the one
+            // refusal the user may override — offered, never taken.
+            let hold = !outcome.succeeded && canForce
+                ? HermesPluginsUpdateAllVerdict.cautionHold(name: name, output: result.output)
+                : nil
             await MainActor.run { [weak self] in
                 guard let self else { return }
+                self.pendingCautionHold = hold
                 self.applySaveOutcome(
                     outcome.succeeded
                         ? .success(outcome.warning ?? String(localized: "Updated"))
@@ -468,6 +483,146 @@ final class PluginsViewModel: OutcomeMessageHosting {
                             ?? String(localized: "Failed"))
                 )
                 self.load(force: true)
+            }
+        }
+    }
+
+    // MARK: Update all / force / auto-update (v0.22.3+ / v0.23.0+)
+
+    /// Hermes's own dry-run listing, awaiting the user's confirmation.
+    struct UpdateAllPreview: Identifiable, Sendable, Equatable {
+        let id = UUID()
+        let count: Int?
+        let listing: String
+    }
+
+    var updateAllPreview: UpdateAllPreview?
+    /// Hermes's per-plugin Summary from the last confirmed run.
+    var updateAllResults: [HermesPluginsUpdateAllVerdict.PluginResult]?
+    /// A caution-verdict hold whose findings the user is reviewing. Only the
+    /// user's explicit choice in that sheet sends `--force`.
+    var pendingCautionHold: HermesPluginCautionHold?
+    /// `plugins.auto_apply` as Hermes printed it; nil = unknown / older host.
+    var autoUpdateOn: Bool?
+
+    var supportsUpdateAll: Bool {
+        HermesVersionCache.shared.cached(for: context)?.hasPluginsUpdateAll ?? false
+    }
+
+    var supportsAutoUpdate: Bool {
+        HermesVersionCache.shared.cached(for: context)?.hasPluginsAutoUpdateVerb ?? false
+    }
+
+    /// Step 1: bare `plugins update` — without a terminal and without
+    /// `--yes`, Hermes lists the plan and refuses before anything moves.
+    func previewUpdateAll() {
+        guard supportsUpdateAll else { return }
+        let run = cliRunner
+        isLoading = true
+        message = String(localized: "Checking for plugin updates…")
+        messageIsFailure = false
+        messageIsUnconfirmed = false
+        Task.detached { [weak self] in
+            let result = run(HermesPluginsUpdateAllVerdict.previewArgv, 180)
+            let preview = HermesPluginsUpdateAllVerdict.judgePreview(
+                output: result.output, exitCode: result.exitCode)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isLoading = false
+                switch preview {
+                case .nothingToUpdate:
+                    self.applySaveOutcome(.success(String(localized: "No plugin updates to apply")))
+                case .pending(let count, let listing):
+                    self.message = nil
+                    self.updateAllPreview = UpdateAllPreview(count: count, listing: listing)
+                case .failed(let detail):
+                    self.applySaveOutcome(.failure(Self.friendlyPluginFailure(detail)
+                        ?? String(localized: "Could not check for plugin updates")))
+                }
+            }
+        }
+    }
+
+    /// Step 2: ONLY from the confirm sheet showing the preview listing.
+    func confirmUpdateAll() {
+        guard supportsUpdateAll, updateAllPreview != nil else { return }
+        updateAllPreview = nil
+        let run = cliRunner
+        isLoading = true
+        message = String(localized: "Updating plugins…")
+        messageIsFailure = false
+        messageIsUnconfirmed = false
+        Task.detached { [weak self] in
+            let result = run(HermesPluginsUpdateAllVerdict.applyArgv, 600)
+            let applied = HermesPluginsUpdateAllVerdict.judgeApply(
+                output: result.output, exitCode: result.exitCode)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isLoading = false
+                switch applied {
+                case .nothingToUpdate:
+                    self.applySaveOutcome(.success(String(localized: "No plugin updates to apply")))
+                case .ran(let rows):
+                    let failed = rows.filter { $0.status == .failed }.count
+                    self.applySaveOutcome(failed == 0
+                        ? .success(String(localized: "Plugins updated"))
+                        : .failure(String(localized: "\(failed) plugin update(s) not applied")))
+                    self.updateAllResults = rows
+                case .failed(let detail):
+                    self.applySaveOutcome(.failure(Self.friendlyPluginFailure(detail)
+                        ?? String(localized: "Update failed")))
+                }
+                self.load(force: true)
+            }
+        }
+    }
+
+    /// `plugins update --force -- <name>` for the ONE plugin whose caution
+    /// findings the user just read and chose to accept. A dangerous verdict
+    /// never produces a hold, so it never reaches here.
+    func forceUpdate(_ hold: HermesPluginCautionHold) {
+        guard supportsUpdateAll, pendingCautionHold == hold else { return }
+        pendingCautionHold = nil
+        let run = cliRunner
+        let name = hold.name
+        Task.detached { [weak self] in
+            let result = run(HermesPluginsUpdateAllVerdict.forceArgv(name: name), 120)
+            let outcome = HermesPluginsUpdateVerdict.judge(
+                output: result.output, exitCode: result.exitCode)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.applySaveOutcome(
+                    outcome.succeeded
+                        ? .success(outcome.warning ?? String(localized: "Updated"))
+                        : .failure(Self.friendlyPluginFailure(outcome.detail)
+                            ?? String(localized: "Failed")))
+                self.load(force: true)
+            }
+        }
+    }
+
+    /// `plugins auto-update on|off` (v0.23.0+). The switch shows what
+    /// Hermes printed back, never the value requested.
+    func setAutoUpdate(_ on: Bool) {
+        guard supportsAutoUpdate else { return }
+        let run = cliRunner
+        Task.detached { [weak self] in
+            let result = run(HermesPluginsAutoUpdateVerdict.setArgv(on), 30)
+            let state = HermesPluginsAutoUpdateVerdict.parseState(
+                output: result.output, exitCode: result.exitCode)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                if let state, state == on {
+                    self.autoUpdateOn = state
+                    self.applySaveOutcome(.success(on
+                        ? String(localized: "Plugin auto-update on")
+                        : String(localized: "Plugin auto-update off")))
+                } else {
+                    if let state { self.autoUpdateOn = state }
+                    self.applySaveOutcome(.failure(
+                        Self.friendlyPluginFailure(Self.failLine(result.output))
+                            ?? String(localized: "Could not change plugin auto-update")))
+                }
             }
         }
     }

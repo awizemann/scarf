@@ -100,6 +100,145 @@ struct PluginsView: View {
         )) { report in
             installReportSheet(report)
         }
+        .sheet(item: Binding(
+            get: { viewModel.updateAllPreview },
+            set: { if $0 == nil { viewModel.updateAllPreview = nil } }
+        )) { preview in
+            updateAllConfirmSheet(preview)
+        }
+        .sheet(isPresented: Binding(
+            get: { viewModel.updateAllResults != nil },
+            set: { if !$0 { viewModel.updateAllResults = nil } }
+        )) {
+            // A sheet can't open over another sheet from the same parent, so
+            // findings reviewed from the results sheet are presented from it.
+            updateAllResultsSheet(viewModel.updateAllResults ?? [])
+                .sheet(item: cautionHoldBinding(whileResultsOpen: true)) { hold in
+                    cautionHoldSheet(hold)
+                }
+        }
+        .sheet(item: cautionHoldBinding(whileResultsOpen: false)) { hold in
+            cautionHoldSheet(hold)
+        }
+    }
+
+    /// Routes the caution sheet to whichever presenter is on screen: the
+    /// results sheet while it is open, otherwise the plugins view itself.
+    private func cautionHoldBinding(whileResultsOpen: Bool) -> Binding<HermesPluginCautionHold?> {
+        Binding(
+            get: {
+                (viewModel.updateAllResults != nil) == whileResultsOpen ? viewModel.pendingCautionHold : nil
+            },
+            set: { if $0 == nil { viewModel.pendingCautionHold = nil } }
+        )
+    }
+
+    /// Hermes's own dry-run listing. Confirming is what sends `--yes`.
+    private func updateAllConfirmSheet(_ preview: PluginsViewModel.UpdateAllPreview) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(preview.count.map { "Update \($0) plugin(s)?" } ?? "Update these plugins?")
+                .font(.headline)
+            Text("Hermes will update the plugins listed below. Each update is security-scanned; one held for a caution finding is not applied, and you can review it afterwards.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ScrollView {
+                Text(preview.listing)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 160)
+            HStack {
+                Spacer()
+                Button("Cancel") { viewModel.updateAllPreview = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Update All") { viewModel.confirmUpdateAll() }
+                    .buttonStyle(ScarfPrimaryButton())
+            }
+        }
+        .padding()
+        .frame(minWidth: 560, minHeight: 360)
+    }
+
+    private func updateAllResultsSheet(_ rows: [HermesPluginsUpdateAllVerdict.PluginResult]) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Plugin updates").font(.headline)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(rows) { row in
+                        updateResultRow(row)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 160)
+            HStack {
+                Spacer()
+                Button("Done") { viewModel.updateAllResults = nil }
+                    .buttonStyle(ScarfPrimaryButton())
+            }
+        }
+        .padding()
+        .frame(minWidth: 520, minHeight: 320)
+    }
+
+    @ViewBuilder
+    private func updateResultRow(_ row: HermesPluginsUpdateAllVerdict.PluginResult) -> some View {
+        let symbol: String = switch row.status {
+        case .updated: "checkmark.circle.fill"
+        case .current: "equal.circle"
+        case .failed: "xmark.octagon.fill"
+        }
+        let tint: Color = switch row.status {
+        case .updated: ScarfColor.success
+        case .current: .secondary
+        case .failed: ScarfColor.danger
+        }
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: symbol).foregroundStyle(tint)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.name).font(.body.bold())
+                if !row.detail.isEmpty {
+                    Text(row.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+            }
+            Spacer()
+            if let hold = row.cautionHold {
+                Button("Review Findings…") { viewModel.pendingCautionHold = hold }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    /// A caution-verdict hold: Hermes's findings verbatim, and the one
+    /// explicit choice that sends `--force` for this plugin alone.
+    private func cautionHoldSheet(_ hold: HermesPluginCautionHold) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label("The security scan held the update of \(hold.name)", systemImage: "exclamationmark.triangle.fill")
+                .font(.headline)
+                .foregroundStyle(ScarfColor.warning)
+            Text("The scan returned a caution verdict. Read the findings before deciding; only continue if you trust the source.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ScrollView {
+                Text(hold.findings)
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .frame(minHeight: 180)
+            HStack {
+                Spacer()
+                Button("Don't Update") { viewModel.pendingCautionHold = nil }
+                    .keyboardShortcut(.cancelAction)
+                Button("Update \(hold.name) Anyway", role: .destructive) { viewModel.forceUpdate(hold) }
+            }
+        }
+        .padding()
+        .frame(minWidth: 560, minHeight: 380)
     }
 
     /// Shows what `plugins install` actually said. Previously discarded:
@@ -159,8 +298,25 @@ struct PluginsView: View {
                     kind: viewModel.messageKind,
                     onDismiss: { viewModel.dismissMessage() }
                 )
+                // v0.23.0+: `plugins auto-update`; hidden until Hermes
+                // printed a state (an older host renders as before).
+                if viewModel.supportsAutoUpdate, let on = viewModel.autoUpdateOn {
+                    Toggle("Auto-update", isOn: Binding(
+                        get: { on },
+                        set: { viewModel.setAutoUpdate($0) }
+                    ))
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("Let the gateway apply plugin updates unattended (plugins.auto_apply). Widened permissions are never accepted unattended.")
+                }
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())
+                // v0.22.3+: `plugins update` with no name.
+                if viewModel.supportsUpdateAll {
+                    Button("Update All…") { viewModel.previewUpdateAll() }
+                        .buttonStyle(ScarfGhostButton())
+                        .disabled(viewModel.isLoading)
+                }
                 Button {
                     installIdentifier = ""
                     showInstall = true

@@ -2422,6 +2422,203 @@ public enum HermesPluginsUpdateVerdict {
     }
 }
 
+// MARK: - plugins update (no name) / --force / auto-update — v0.22.3+ / v0.23.0+
+
+/// A plugin update the security scan held for a CAUTION verdict — the one
+/// refusal `--force` may override. Carries Hermes's own printed findings so
+/// the user decides on exactly what Hermes saw, never on a summary.
+public struct HermesPluginCautionHold: Sendable, Equatable, Identifiable {
+    public var id: String { name }
+    public let name: String
+    /// The scan report text Hermes printed for this plugin (bounded).
+    public let findings: String
+
+    public init(name: String, findings: String) {
+        self.name = name
+        self.findings = findings
+    }
+}
+
+/// `hermes plugins update [--yes]` with no name, and `update <name> --force`.
+///
+/// Verified at v0.22.3 and v0.23.0: `_action_update` (`hermes_cli/
+/// plugins_cmd.py:1066-1075` @ v0.22.3, `:1085-1094` @ v0.23.0) routes a bare
+/// `update` to `cmd_update_all(yes=…)` (`plugins_cmd_update_all.py:111-160` @
+/// v0.23.0), refuses `--yes` with a name and `--force` without one.
+///
+/// **Scarf never passes `--yes` blind.** Without a terminal and without
+/// `--yes`, `cmd_update_all` prints the plan table and `_fail`s with
+/// `Not updating: no terminal to confirm. Re-run with --yes to update these N
+/// plugin(s).` (`:136-139`) BEFORE anything moves — so the bare form is
+/// Hermes's own dry run. Scarf shows that listing, and only the user's
+/// confirmation of it sends `--yes`.
+///
+/// **`--force` is per plugin and never automatic.** Under `--yes` with no
+/// terminal each plugin runs `update_one(interactive=False)` (`:151`), so a
+/// caution verdict has no callback and raises `PluginScanBlocked` whose text
+/// is `Security scan blocked plugin install: Requires confirmation (caution
+/// verdict, N findings)` plus the scan report (`plugins_cmd.py:213-224`,
+/// reason from `tools/plugin_guard.py:415` @ v0.23.0, `:385` @ v0.22.3/v0.22.5).
+/// A dangerous verdict says `--force does not override a dangerous verdict.`
+/// (`plugin_guard.py:416-418`) and is never offered a force.
+public enum HermesPluginsUpdateAllVerdict {
+    /// The dry run: no `--yes`, so nothing moves without a terminal.
+    public static let previewArgv = ["plugins", "update"]
+    /// Only after the user confirmed the preview listing.
+    public static let applyArgv = ["plugins", "update", "--yes"]
+    /// Only after the user read the caution findings for exactly this plugin.
+    /// Flag before `--`: argparse reads everything after `--` as positional.
+    public static func forceArgv(name: String) -> [String] {
+        ["plugins", "update", "--force", "--", name]
+    }
+
+    static let nothingLine = "No plugin updates to apply."             // :131
+    static let noTerminalLine = "Not updating: no terminal to confirm." // :138
+    static let cautionMarker = "Requires confirmation (caution verdict"  // plugin_guard.py:415
+    static let dangerousMarker = "dangerous verdict"                     // plugin_guard.py:417
+
+    public enum Preview: Sendable, Equatable {
+        /// `✓ No plugin updates to apply.` — exit 0.
+        case nothingToUpdate
+        /// The plan Hermes would apply. `count` from its own sentence (nil if
+        /// the wrap hid it); `listing` is the table + skipped lines verbatim.
+        case pending(count: Int?, listing: String)
+        /// Anything else — never read as "nothing to do".
+        case failed(String?)
+    }
+
+    public static func judgePreview(output: String, exitCode: Int32) -> Preview {
+        let clean = HermesCLIVerdict.stripANSI(output)
+        let lines = HermesCLIVerdict.significantLines(clean)
+        if exitCode == 0, lines.contains(where: { HermesCLIVerdict.unglyphed($0) == nothingLine }) {
+            return .nothingToUpdate
+        }
+        // Rich wraps at 80 columns without a terminal; the sentence is longer,
+        // so match its first clause and read the count off the joined text.
+        guard exitCode != 0,
+              let stop = lines.firstIndex(where: { $0.hasPrefix(noTerminalLine) }) else {
+            return .failed(PluginsViewModelDetail.lastErrorLine(lines))
+        }
+        let joined = normalized(clean)
+        var count: Int?
+        if let r = joined.range(of: #"update these (\d+) plugin"#, options: .regularExpression) {
+            count = Int(joined[r].filter(\.isNumber))
+        }
+        let listing = lines[..<stop]
+            .filter { !$0.hasPrefix("Checking installed plugins for updates") }
+            .joined(separator: "\n")
+        return .pending(count: count, listing: listing)
+    }
+
+    public enum PluginStatus: String, Sendable, Equatable {
+        case updated, current, failed
+    }
+
+    public struct PluginResult: Sendable, Equatable, Identifiable {
+        public var id: String { name }
+        public let name: String
+        public let status: PluginStatus
+        public let detail: String
+        /// Set only for a caution hold — the one refusal `--force` overrides.
+        public let cautionHold: HermesPluginCautionHold?
+    }
+
+    public enum Applied: Sendable, Equatable {
+        /// The plan emptied between preview and apply.
+        case nothingToUpdate
+        /// Hermes's own Summary, one row per plugin it tried. Exit 1 when
+        /// any failed is part of this shape, not a run failure.
+        case ran([PluginResult])
+        /// No Summary: the run did not get as far as updating anything we
+        /// can name. Never read as success.
+        case failed(String?)
+    }
+
+    public static func judgeApply(output: String, exitCode: Int32) -> Applied {
+        let clean = HermesCLIVerdict.stripANSI(output)
+        let lines = HermesCLIVerdict.significantLines(clean)
+        if exitCode == 0, lines.contains(where: { HermesCLIVerdict.unglyphed($0) == nothingLine }) {
+            return .nothingToUpdate
+        }
+        guard let summary = lines.lastIndex(of: "Summary") else {
+            return .failed(PluginsViewModelDetail.lastErrorLine(lines))
+        }
+        // Per-plugin sections: `── <name>` (`:150`) up to the next header.
+        var sections: [String: [String]] = [:]
+        var current: String?
+        for line in lines[..<summary] {
+            if line.hasPrefix("── ") {
+                current = String(line.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+                sections[current!] = []
+            } else if let current {
+                sections[current, default: []].append(line)
+            }
+        }
+        let marks: [(String, PluginStatus)] = [
+            ("✓ updated", .updated), ("= already current", .current), ("✗ failed", .failed),
+        ]
+        var results: [PluginResult] = []
+        for line in lines[(summary + 1)...] {
+            guard let (mark, status) = marks.first(where: { line.hasPrefix($0.0) }) else { continue }
+            let rest = line.dropFirst(mark.count).split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+            guard let name = rest.first.map(String.init) else { continue }
+            let detail = rest.count > 1 ? rest[1].trimmingCharacters(in: .whitespaces) : ""
+            var hold: HermesPluginCautionHold?
+            if status == .failed {
+                let section = (sections[name] ?? []).joined(separator: "\n")
+                hold = cautionHold(name: name, output: section)
+            }
+            results.append(PluginResult(name: name, status: status, detail: detail, cautionHold: hold))
+        }
+        // A Summary with no row we understand proves nothing.
+        return results.isEmpty ? .failed(PluginsViewModelDetail.lastErrorLine(lines)) : .ran(results)
+    }
+
+    /// A caution hold in one plugin's update output, or nil — including for
+    /// any dangerous verdict, which `--force` cannot override.
+    public static func cautionHold(name: String, output: String) -> HermesPluginCautionHold? {
+        let joined = normalized(HermesCLIVerdict.stripANSI(output))
+        guard joined.contains(cautionMarker), !joined.contains(dangerousMarker) else { return nil }
+        let text = HermesCLIVerdict.significantLines(output).joined(separator: "\n")
+        return HermesPluginCautionHold(name: name, findings: String(text.prefix(4000)))
+    }
+
+    /// Whitespace collapsed, so a marker Rich wrapped across lines matches.
+    static func normalized(_ text: String) -> String {
+        text.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
+}
+
+/// `hermes plugins auto-update [on|off]` (alias `autoupdate`), v0.23.0+
+/// (`hermes_cli/subcommands/plugins.py:80-88`). `_action_auto_update`
+/// (`plugins_cmd.py:1096-1107` @ v0.23.0) reads (no arg) or writes
+/// `plugins.auto_apply` and prints, either way,
+/// `Plugin auto-update: on|off (…)`; a managed host `_fail`s with `Error: …`.
+public enum HermesPluginsAutoUpdateVerdict {
+    public static let showArgv = ["plugins", "auto-update"]
+    public static func setArgv(_ on: Bool) -> [String] { ["plugins", "auto-update", on ? "on" : "off"] }
+
+    /// The state Hermes printed, or nil when it printed no state line —
+    /// unknown output never becomes "off".
+    public static func parseState(output: String, exitCode: Int32) -> Bool? {
+        guard exitCode == 0 else { return nil }
+        for line in HermesCLIVerdict.significantLines(output) {
+            guard line.hasPrefix("Plugin auto-update: ") else { continue }
+            let word = line.dropFirst("Plugin auto-update: ".count).prefix { !$0.isWhitespace }
+            if word == "on" { return true }
+            if word == "off" { return false }
+        }
+        return nil
+    }
+}
+
+enum PluginsViewModelDetail {
+    /// The `Error:` line if any, else the last line — never invented text.
+    static func lastErrorLine(_ lines: [String]) -> String? {
+        lines.first { $0.contains("Error:") } ?? lines.last
+    }
+}
+
 // MARK: - cron create/edit/pause/resume/remove — hermes_cli/cron.py
 
 /// The refusal lines `hermes cron` prints for a job mutation that did not
