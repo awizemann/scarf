@@ -247,9 +247,19 @@ verify_all_verbs() {
 
     verify_verb gateway stop
 
+    # Optional: only gateway-backed Hermes has it (see warm_fixture_gateway).
+    # Probed here, against the real home, because in a fresh fixture home even
+    # `--help` fails until the gateway's first start has prepared the runtime.
+    local ensure_help
+    ensure_help="$("$HERMES_BIN" gateway ensure --help 2>&1 || true)"
+    case "$ensure_help" in
+        *"usage: hermes gateway ensure"*"--timeout"*) HAS_GATEWAY_ENSURE=1 ;;
+    esac
+
     note "all verbs and flags verified"
 }
 
+HAS_GATEWAY_ENSURE=0
 verify_all_verbs
 
 if [ "$MODE" = "dry-run" ]; then
@@ -289,6 +299,64 @@ stop_fixture_gateway() {
     note "hermes ${argv[*]} (exit $rc): $(printf '%s' "$out" | tail -1)"
 }
 
+# Belt and braces after `gateway stop`: kill every process whose environment has
+# HERMES_HOME set to exactly this fixture home (a gateway launched via osascript,
+# a lingering -z client). A gateway left running recreates the home after it is
+# deleted. Matches the exact env token, so the real ~/.hermes is never touched.
+kill_fixture_processes() {
+    local home="$1" pids
+    [ -n "$home" ] || return 0
+    pids="$(ps eww -x -o pid= -o command= 2>/dev/null \
+        | awk -v tok="HERMES_HOME=$home" '{ for (i = 2; i <= NF; i++) if ($i == tok) { print $1; break } }' \
+        | grep -vx "$$" || true)"
+    [ -n "$pids" ] || return 0
+    note "killing fixture-home processes: $(printf '%s' "$pids" | tr '\n' ' ')"
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    for _ in 1 2 3 4 5 6 7 8 9 10; do
+        kill -0 $pids 2>/dev/null || return 0
+        sleep 0.5
+    done
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+}
+
+cleanup_fixture_home() {
+    stop_fixture_gateway "$1"
+    kill_fixture_processes "$1"
+}
+
+# From v0.22.x a cold gateway start in a fresh home runs "Preparing the isolated
+# Hermes runtime… Installing Python dependencies", which outlasts the -z client's
+# own ensure deadline (`ensure_gateway_runtime`, DEFAULT_ENSURE_TIMEOUT = 60.0,
+# hermes_cli/gateway_runtime.py:20; the client calls it with no timeout at
+# hermes_cli/gateway_client.py:350 and raises "Gateway starting: deadline" at :357).
+# `hermes gateway ensure --timeout N` (hermes_cli/subcommands/gateway.py:122-131,
+# exit 0 = ready, 5 = deadline) is the supported pre-start-and-wait. Probed from
+# help in verify_all_verbs, so a Hermes without the verb skips the warm-up.
+warm_fixture_gateway() {
+    local out rc
+    if [ "$HAS_GATEWAY_ENSURE" -ne 1 ]; then
+        note "no 'hermes gateway ensure' on this Hermes — skipping gateway warm-up"
+        return 0
+    fi
+    step "Warming the fixture gateway (hermes gateway ensure --timeout 180)"
+    set +e
+    out="$("$HERMES_BIN" gateway ensure --timeout 180 2>&1)"
+    rc=$?
+    set -e
+    if [ $rc -ne 0 ]; then
+        printf '%s\n' "$out" >&2
+        for log in gateway-stdio.log gateway.log; do
+            [ -f "$HERMES_HOME/logs/$log" ] || continue
+            printf -- '--- tail of %s\n' "$HERMES_HOME/logs/$log" >&2
+            tail -40 "$HERMES_HOME/logs/$log" >&2
+        done
+        die "fixture gateway did not become ready (hermes gateway ensure exit $rc)"
+    fi
+    note "fixture gateway ready"
+}
+
 step "Preparing fixture home: $DEST_ABS"
 
 if [ -e "$DEST_ABS" ]; then
@@ -301,7 +369,7 @@ if [ -e "$DEST_ABS" ]; then
     fi
     note "reusing existing fixture dir (clearing it)"
     # A previous run may have left its gateway running on this home.
-    [ -f "$DEST_ABS/$MARKER_FILENAME" ] && stop_fixture_gateway "$DEST_ABS"
+    [ -f "$DEST_ABS/$MARKER_FILENAME" ] && cleanup_fixture_home "$DEST_ABS"
     # Contents only; never the directory itself (it may be a caller-made mktemp -d).
     find "$DEST_ABS" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 else
@@ -328,6 +396,8 @@ for f in config.yaml auth.json .env; do
 done
 
 export HERMES_HOME="$DEST_ABS"
+# Every exit path (success, die, signal) leaves no fixture gateway behind.
+trap 'cleanup_fixture_home "$DEST_ABS"' EXIT
 
 # Read-back helper. NOTE: `hermes … | grep -q …` is a trap under `set -o pipefail`
 # — grep exits on the first match, hermes takes SIGPIPE, and the pipeline reports
@@ -367,8 +437,21 @@ run_verb() {
 # ---------------------------------------------------------------- seed: sessions
 
 step "Seeding sessions (real one-shot chats — these spend tokens)"
+warm_fixture_gateway
 for n in 1 2 3; do
-    out="$(run_verb "session $n" -z "Reply with exactly: FIXTURE-$n")"
+    # Retry once, and only on the gateway cold-start deadline.
+    set +e
+    out="$("$HERMES_BIN" -z "Reply with exactly: FIXTURE-$n" 2>&1)"
+    rc=$?
+    set -e
+    case "$rc:$out" in
+        0:*) : ;;
+        *"Gateway starting:"*)
+            note "session $n: gateway still starting — retrying once"
+            out="$(run_verb "session $n" -z "Reply with exactly: FIXTURE-$n")" ;;
+        *) printf '%s\n' "$out" >&2
+           die "verb failed (exit $rc): hermes -z Reply with exactly: FIXTURE-$n   [session $n]" ;;
+    esac
     note "session $n: $(printf '%s' "$out" | tail -1)"
 done
 
@@ -757,7 +840,7 @@ note "memories/MEMORY.md, memories/USER.md"
 # ---------------------------------------------------------------- stop the fixture gateway
 
 step "Stopping any gateway running in the fixture home"
-stop_fixture_gateway "$DEST_ABS"
+cleanup_fixture_home "$DEST_ABS"
 
 # ---------------------------------------------------------------- self-check
 
