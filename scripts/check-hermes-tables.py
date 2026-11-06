@@ -1009,9 +1009,31 @@ def swift_block(path, header, close_pattern=r"^\s*\]\s*$"):
     sys.exit(f"error: unterminated block for '{header}' in {path}")
 
 
+# GitHub Copilot LEFT CORE at v0.22.6 for the `github-copilot` catalog plugin:
+# `_COPILOT_API` / `_COPILOT_ACP` (hermes_cli/left_core_migration.py:339-340 @
+# v0.23.0) and the tokens only it read (:353-358). Scarf keeps these rows for
+# older hosts and offers them on a left-core host only when
+# $HERMES_HOME/plugins/github-copilot exists (HermesCopilotPlugin.swift), so at
+# a left-core tag they are plugin-gated, not stale: `check` drops them from the
+# "Scarf has extra" side and records a GATED line instead of a FAIL. The marker
+# is the catalog entry itself, absent at v0.22.5 and present from v0.22.6.
+COPILOT_PLUGIN_CATALOG = "plugin-catalog/github-copilot.yaml"
+COPILOT_LEFT_CORE_IDS = {
+    "copilot", "github-copilot", "github-models", "github-model", "github",
+    "copilot-acp", "github-copilot-acp", "copilot-acp-agent",
+    "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN",
+}
+plugin_gated = set()  # filled by main() when the tag is left-core for Copilot
+gated = []
+
+
 def check(lane, scarf, hermes, missing_msg, extra_msg):
     missing = sorted(set(hermes) - set(scarf))
     extra = sorted(set(scarf) - set(hermes))
+    left = sorted(set(extra) & plugin_gated)
+    if left:
+        gated.append(f"[{lane}] plugin-gated (left core, `github-copilot` plugin): {', '.join(left)}")
+        extra = [e for e in extra if e not in plugin_gated]
     if missing:
         failures.append(f"[{lane}] {missing_msg}: {', '.join(missing)}")
     if extra:
@@ -1043,9 +1065,12 @@ def main(argv=None):
     args = build_parser().parse_args(argv)
     # The verdict accumulators are module-level (every lane appends to them);
     # clear them so a second call in one process can't inherit the first's.
-    del failures[:], warnings[:], skipped[:]
+    del failures[:], warnings[:], skipped[:], gated[:]
+    plugin_gated.clear()
     src = HermesSource(args.checkout, None if args.worktree else args.tag)
     src.validate()
+    if src.read(COPILOT_PLUGIN_CATALOG) is not None:
+        plugin_gated.update(COPILOT_LEFT_CORE_IDS)
     print(f"reading hermes from {src.mode}")
     if src.tag is None:
         # In tag mode the tag IS the provenance; in worktree mode this line is
@@ -1117,6 +1142,9 @@ def main(argv=None):
                     f"see the entry's comment in ModelCatalogService.swift)")
             elif pid in plugin_provider_ids:
                 pass  # A lane-4 entry: a bundled plugin provider, mirrored on purpose.
+            elif pid in plugin_gated:
+                gated.append(f"[overlay-only] '{pid}' plugin-gated (left core, "
+                             f"`github-copilot` plugin)")
             else:
                 failures.append(
                     f"[overlay-only] '{pid}' is not a Hermes overlay at all — stale entry")
@@ -1278,6 +1306,8 @@ def main(argv=None):
                     failures.append(f"[mcp-catalog] '{name}' {field}: Scarf {got[field]!r} "
                                     f"but the manifest says {want[field]!r}")
 
+    for g in gated:
+        print(f"GATED {g}")
     for w in warnings:
         print(f"WARN  {w}")
     for s_ in skipped:

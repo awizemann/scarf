@@ -760,7 +760,9 @@ public final class RichChatViewModel {
         }
         let msg = error.localizedDescription
         let stderrTail = await client?.recentStderr ?? ""
-        let cls = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+        let cls = ACPErrorHint.classify(
+            errorMessage: msg, stderrTail: stderrTail,
+            copilotOffered: HermesCopilotPlugin.knownOffered(context: context))
         acpError = msg
         acpErrorHint = cls?.hint
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
@@ -780,7 +782,9 @@ public final class RichChatViewModel {
     public func recordPromptStopFailure(stopReason: String, client: ACPClient?) async {
         let msg = "Prompt ended without a response (stopReason: \(stopReason))."
         let stderrTail = await client?.recentStderr ?? ""
-        let cls = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+        let cls = ACPErrorHint.classify(
+            errorMessage: msg, stderrTail: stderrTail,
+            copilotOffered: HermesCopilotPlugin.knownOffered(context: context))
         acpError = msg
         acpErrorHint = cls?.hint ?? Self.fallbackHint(for: stopReason)
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
@@ -794,7 +798,9 @@ public final class RichChatViewModel {
     private func recordPromptStopFailureUsingProvider(stopReason: String) async {
         let msg = "Prompt ended without a response (stopReason: \(stopReason))."
         let stderrTail = await acpStderrProvider?() ?? ""
-        let cls = ACPErrorHint.classify(errorMessage: msg, stderrTail: stderrTail)
+        let cls = ACPErrorHint.classify(
+            errorMessage: msg, stderrTail: stderrTail,
+            copilotOffered: HermesCopilotPlugin.knownOffered(context: context))
         acpError = msg
         acpErrorHint = cls?.hint ?? Self.fallbackHint(for: stopReason)
         acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail

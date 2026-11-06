@@ -313,6 +313,17 @@ struct ChatView: View {
                     .frame(height: 1),
                 alignment: .bottom
             )
+        } else if let provider = viewModel.unroutableProvider, viewModel.unroutableProviderNeedsCopilotPlugin,
+                  !viewModel.hasActiveProcessInWindow {
+            // From Hermes v0.22.6 GitHub Copilot is the `github-copilot`
+            // plugin; config.yaml still names it but the plugin isn't
+            // installed (`HermesCopilotPlugin`). Offer the install instead of
+            // the generic "unknown provider" warning.
+            PluginRequiredNote(
+                pluginID: HermesCopilotPlugin.pluginID,
+                feature: "GitHub Copilot (`model.provider: \(provider)`)"
+            )
+            .background(ScarfColor.warningTint.opacity(0.44))
         } else if let provider = viewModel.unroutableProvider, !viewModel.hasActiveProcessInWindow {
             // S06-F1: config.yaml names a provider this Hermes can't route
             // (older Scarf pickers offered every models.dev provider).

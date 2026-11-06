@@ -82,11 +82,13 @@ public enum ModelPreflight: Sendable {
     /// through them). A warning, not a block: a user plugin on the
     /// host can register names Scarf can't see.
     public static func unroutableProvider(
-        _ config: HermesConfig, capabilities: HermesCapabilities
+        _ config: HermesConfig, capabilities: HermesCapabilities,
+        copilotPluginInstalled: Bool = false
     ) -> String? {
         let provider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
         guard isUnroutable(provider, customProviders: CustomProviders(config),
-                           capabilities: capabilities)
+                           capabilities: capabilities,
+                           copilotPluginInstalled: copilotPluginInstalled)
         else { return nil }
         return provider
     }
@@ -118,14 +120,17 @@ public enum ModelPreflight: Sendable {
     /// rule behind both the preflight warning and the model picker (S06-F1).
     public static func isUnroutable(
         _ provider: String, customProviders: CustomProviders,
-        capabilities: HermesCapabilities
+        capabilities: HermesCapabilities,
+        copilotPluginInstalled: Bool = false
     ) -> Bool {
         let provider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !isUnset(provider), !customProviders.hasUnread,
               !customProviders.names.contains(
                   provider.lowercased().replacingOccurrences(of: " ", with: "-"))
         else { return false }
-        return HermesRoutableProviders.isRoutable(provider, capabilities: capabilities) == false
+        return HermesRoutableProviders.isRoutable(
+            provider, capabilities: capabilities,
+            copilotPluginInstalled: copilotPluginInstalled) == false
     }
 
     /// Result of a `model.default` ↔ `model.provider` mismatch check.
@@ -296,7 +301,8 @@ public enum ModelPreflight: Sendable {
     public static func detectMismatch(
         _ config: HermesConfig,
         knownProviders: Set<String>? = nil,
-        capabilities: HermesCapabilities = .empty
+        capabilities: HermesCapabilities = .empty,
+        copilotPluginInstalled: Bool = false
     ) -> Mismatch? {
         let modelDefault = config.model.trimmingCharacters(in: .whitespacesAndNewlines)
         let activeProvider = config.provider.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -318,7 +324,10 @@ public enum ModelPreflight: Sendable {
         // Providers Hermes strips a vendor prefix for before sending — the
         // prefix is harmless there, not a stale provider (see
         // `hasVendorPrefixStrippingForCopilot` / `hasOpenAIPrefixStrippingForCodex`).
+        // From v0.22.6 that stripping lives in the `github-copilot` plugin,
+        // so it only applies while the plugin is installed.
         if capabilities.hasVendorPrefixStrippingForCopilot,
+           HermesCopilotPlugin.isOffered(capabilities: capabilities, pluginInstalled: copilotPluginInstalled),
            vendorStrippingProviders.contains(canonicalActive) { return nil }
         if capabilities.hasOpenAIPrefixStrippingForCodex,
            canonicalActive == "openai-codex", prefix.lowercased() == "openai" { return nil }

@@ -395,6 +395,10 @@ final class ChatViewModel {
     /// provider routes, is unset, or Scarf has no table for the host
     /// (older than v0.6, or undetected).
     var unroutableProvider: String?
+    /// ``unroutableProvider`` is a GitHub Copilot id on a v0.22.6+ host
+    /// without the `github-copilot` plugin (``HermesCopilotPlugin``): the
+    /// chat shows ``PluginRequiredNote`` for it instead of "unknown provider".
+    var unroutableProviderNeedsCopilotPlugin = false
 
     /// The `approvals.mode` stored in config.yaml, read the way Hermes
     /// reads it (`HermesConfig.storedApprovalMode`: bare `false`/`no`/`off`
@@ -583,7 +587,13 @@ final class ChatViewModel {
         // own; the decisions and the publish on the main actor (C10).
         Task { [weak self] in
             let config = await OffPool.run { svc.loadConfig() }
-            var mismatch = ModelPreflight.detectMismatch(config, capabilities: capabilities)
+            // `plugins/github-copilot` under this window's home — a transport
+            // stat, off the main actor, and only on v0.22.6+ hosts.
+            let copilotInstalled = capabilities.hasCopilotLeftCore
+                ? await OffPool.run { HermesCopilotPlugin.isInstalled(context: ctx, capabilities: capabilities) }
+                : false
+            var mismatch = ModelPreflight.detectMismatch(
+                config, capabilities: capabilities, copilotPluginInstalled: copilotInstalled)
             if mismatch != nil {
                 var known = self?.knownProviderIDs
                 if known == nil {
@@ -605,7 +615,8 @@ final class ChatViewModel {
                 }
                 if let known, !known.isEmpty {
                     mismatch = ModelPreflight.detectMismatch(
-                        config, knownProviders: known, capabilities: capabilities)
+                        config, knownProviders: known, capabilities: capabilities,
+                        copilotPluginInstalled: copilotInstalled)
                 }
             }
             let mode = config.storedApprovalMode
@@ -615,11 +626,15 @@ final class ChatViewModel {
             let ttsProvider = config.voice.ttsProvider
             let resolvedMismatch = mismatch
             let llamaIgnored = ModelPreflight.llamaCppBaseURLIgnored(config, capabilities: capabilities)
-            let unroutable = ModelPreflight.unroutableProvider(config, capabilities: capabilities)
+            let unroutable = ModelPreflight.unroutableProvider(
+                config, capabilities: capabilities, copilotPluginInstalled: copilotInstalled)
+            let needsCopilot = HermesCopilotPlugin.needsPlugin(
+                unroutable, capabilities: capabilities, pluginInstalled: copilotInstalled)
             self?.customProviders = ModelPreflight.CustomProviders(config)
             self?.modelProviderMismatch = resolvedMismatch
             self?.llamaCppBaseURLIgnored = llamaIgnored
             self?.unroutableProvider = unroutable
+            self?.unroutableProviderNeedsCopilotPlugin = needsCopilot
             self?.approvalMode = mode
             self?.voiceChatModeRaw = voiceChatMode
             self?.voiceTTSProviderRaw = ttsProvider
@@ -1715,6 +1730,7 @@ final class ChatViewModel {
                     // truth (t-79569a15).
                     self.modelProviderMismatch = nil
                     self.unroutableProvider = nil
+                    self.unroutableProviderNeedsCopilotPlugin = false
                     self.refreshConfigDiagnostics()
                     // Replay only while the chat is still waiting on this
                     // pick: a cancel, a delete or a newer preflight cleared it.

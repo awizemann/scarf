@@ -1335,7 +1335,12 @@ public enum ACPErrorHint {
         "nous", "claude", "anthropic", "qwen", "gemini", "google", "copilot", "github",
     ]
 
-    public static func classify(errorMessage: String, stderrTail: String) -> Classification? {
+    /// `copilotOffered: false` (a v0.22.6+ host without the `github-copilot`
+    /// plugin, see ``HermesCopilotPlugin``) stops naming Copilot as the OAuth
+    /// provider to re-authenticate: core no longer has a Copilot login.
+    public static func classify(
+        errorMessage: String, stderrTail: String, copilotOffered: Bool = true
+    ) -> Classification? {
         let haystack = errorMessage + "\n" + stderrTail
 
         // Gateway-backed ACP (0.22.1, 0.22.3+) refusing to attach to the
@@ -1430,9 +1435,9 @@ public enum ACPErrorHint {
             || haystack.range(of: #"refresh.*revoked"#, options: [.regularExpression, .caseInsensitive]) != nil
             || haystack.localizedCaseInsensitiveContains("re-authenticate")
             || haystack.localizedCaseInsensitiveContains("reauthenticate")
-            || (haystack.contains("401") && oauthProvider(in: haystack) != nil)
-            || (haystack.localizedCaseInsensitiveContains("unauthorized") && oauthProvider(in: haystack) != nil) {
-            let provider = oauthProvider(in: haystack)
+            || (haystack.contains("401") && oauthProvider(in: haystack, copilotOffered: copilotOffered) != nil)
+            || (haystack.localizedCaseInsensitiveContains("unauthorized") && oauthProvider(in: haystack, copilotOffered: copilotOffered) != nil) {
+            let provider = oauthProvider(in: haystack, copilotOffered: copilotOffered)
             let suffix = provider.map { " (affected provider: \($0))." } ?? "."
             return Classification(
                 hint: "Your OAuth session has expired or been revoked\(suffix) Click Re-authenticate below to sign in again.",
@@ -1540,9 +1545,10 @@ public enum ACPErrorHint {
     /// etc.) when one of the known OAuth providers appears as a whole
     /// word. The first match wins — Hermes typically logs the active
     /// provider name once, near the failure.
-    private static func oauthProvider(in haystack: String) -> String? {
+    private static func oauthProvider(in haystack: String, copilotOffered: Bool = true) -> String? {
         let lowered = haystack.lowercased()
-        for provider in oauthProviders {
+        for provider in oauthProviders
+        where copilotOffered || !HermesCopilotPlugin.isCopilotProvider(provider) {
             // Whole-word match so substrings like "anthropicapi" don't
             // false-trigger on "anthropic".
             let pattern = "\\b" + NSRegularExpression.escapedPattern(for: provider) + "\\b"

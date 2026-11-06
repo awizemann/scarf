@@ -112,16 +112,21 @@ public struct ModelCatalogService: Sendable {
     #endif
     public let path: String
     public let transport: any ServerTransport
+    /// `$HERMES_HOME/plugins` — the cache's sibling, where
+    /// ``HermesCopilotPlugin`` looks for the `github-copilot` plugin.
+    let pluginsDir: String
 
     public nonisolated init(context: ServerContext = .local) {
         self.path = context.paths.home + "/models_dev_cache.json"
         self.transport = context.makeTransport()
+        self.pluginsDir = context.paths.pluginsDir
     }
 
-    /// Escape hatch for tests.
+    /// Escape hatch for tests. The plugins dir is the cache file's sibling.
     public init(path: String) {
         self.path = path
         self.transport = LocalTransport()
+        self.pluginsDir = (path as NSString).deletingLastPathComponent + "/plugins"
     }
 
     /// All providers, sorted with subscription-gated providers first (Nous
@@ -137,11 +142,19 @@ public struct ModelCatalogService: Sendable {
     /// provider", so offering them only produces a config that can't chat
     /// (S06-F1). The set is banded by Hermes version back to v0.6; hosts older
     /// than that and undetected hosts get the full list, as before.
+    ///
+    /// GitHub Copilot rows (`github-copilot`, `copilot-acp`) are offered on a
+    /// ``HermesCapabilities/hasCopilotLeftCore`` host only when the plugin
+    /// directory exists under this home (``HermesCopilotPlugin``) — one
+    /// transport stat, made only on those hosts.
     public func loadProviders(capabilities: HermesCapabilities = .empty) -> [HermesProviderInfo] {
         let catalog = loadCatalog() ?? [:]
+        let copilotInstalled = capabilities.hasCopilotLeftCore
+            && HermesCopilotPlugin.isInstalled(pluginsDir: pluginsDir, transport: transport)
         var byID: [String: HermesProviderInfo] = [:]
         for (id, p) in catalog {
-            if HermesRoutableProviders.isRoutable(id, capabilities: capabilities) == false { continue }
+            if HermesRoutableProviders.isRoutable(
+                id, capabilities: capabilities, copilotPluginInstalled: copilotInstalled) == false { continue }
             let resolvedName = Self.providerDisplayNameOverrides[id] ?? p.name ?? id
             byID[id] = HermesProviderInfo(
                 providerID: id,
@@ -160,7 +173,8 @@ public struct ModelCatalogService: Sendable {
             overlays.merge(Self.legacyOverlayOnlyProviders) { current, _ in current }
         }
         for (id, overlay) in overlays where byID[id] == nil
-            && HermesRoutableProviders.isRoutable(id, capabilities: capabilities) != false {
+            && HermesRoutableProviders.isRoutable(
+                id, capabilities: capabilities, copilotPluginInstalled: copilotInstalled) != false {
             let resolvedName = Self.providerDisplayNameOverrides[id] ?? overlay.displayName
             byID[id] = HermesProviderInfo(
                 providerID: id,

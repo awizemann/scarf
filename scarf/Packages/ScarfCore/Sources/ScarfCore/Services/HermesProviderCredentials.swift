@@ -98,16 +98,25 @@ public enum HermesProviderCredentials {
 
     /// Whether `key` counts as a configured provider for a main model whose
     /// provider is `provider` (see ``providerScopedVars``).
-    static func counts(_ key: String, provider: String?) -> Bool {
+    ///
+    /// `copilotOffered: false` (a v0.22.6+ host without the `github-copilot`
+    /// plugin, see ``HermesCopilotPlugin``) drops the vars only Copilot read:
+    /// nothing on that host reads them for inference any more.
+    static func counts(_ key: String, provider: String?, copilotOffered: Bool = true) -> Bool {
         guard providerEnvVarSet.contains(key) else { return false }
+        if !copilotOffered, HermesCopilotPlugin.envVars.contains(key) { return false }
         guard let owner = providerScopedVars[key] else { return true }
         return canonicalProvider(provider) == owner
     }
 
     /// True when `env` holds a non-empty value for any provider var.
     /// `provider` is the main model's `model.provider`, if known.
-    public static func environmentHasProviderKey(_ env: [String: String], provider: String? = nil) -> Bool {
-        providerEnvVars.contains { counts($0, provider: provider) && !(env[$0] ?? "").isEmpty }
+    public static func environmentHasProviderKey(
+        _ env: [String: String], provider: String? = nil, copilotOffered: Bool = true
+    ) -> Bool {
+        providerEnvVars.contains {
+            counts($0, provider: provider, copilotOffered: copilotOffered) && !(env[$0] ?? "").isEmpty
+        }
     }
 
     /// True when a `.env` file assigns a non-empty value to any provider var.
@@ -115,7 +124,9 @@ public enum HermesProviderCredentials {
     /// (`hermes_cli/main.py:1012-1030` @ v2026.9.24): skip comments, drop an
     /// `export ` prefix, split on the first `=`, and strip whitespace and
     /// quotes from the value. The one difference is ``providerScopedVars``.
-    public static func dotEnvHasProviderKey(_ text: String, provider: String? = nil) -> Bool {
+    public static func dotEnvHasProviderKey(
+        _ text: String, provider: String? = nil, copilotOffered: Bool = true
+    ) -> Bool {
         for rawLine in text.split(whereSeparator: \.isNewline) {
             var line = rawLine.trimmingCharacters(in: .whitespaces)
             if line.hasPrefix("#") || !line.contains("=") { continue }
@@ -125,7 +136,7 @@ public enum HermesProviderCredentials {
             let value = line[line.index(after: eq)...]
                 .trimmingCharacters(in: .whitespaces)
                 .trimmingCharacters(in: CharacterSet(charactersIn: "'\""))
-            if counts(key, provider: provider) && !value.isEmpty { return true }
+            if counts(key, provider: provider, copilotOffered: copilotOffered) && !value.isEmpty { return true }
         }
         return false
     }
@@ -143,9 +154,15 @@ public enum HermesProviderCredentials {
     /// for nearly every provider (`hermes_cli/model_setup_flows.py:75,581`
     /// @ v2026.9.24), so treating it as keyless would hide the hint for an
     /// OpenRouter or DeepSeek user whose key is actually missing.
-    public static func modelUsesKeylessEndpoint(provider: String, baseURL: String) -> Bool {
+    ///
+    /// `copilotOffered: false` stops `copilot-acp` counting as keyless: with
+    /// the plugin missing nothing on the host can run it.
+    public static func modelUsesKeylessEndpoint(
+        provider: String, baseURL: String, copilotOffered: Bool = true
+    ) -> Bool {
         let id = canonicalProvider(provider) ?? ""
         let url = baseURL.trimmingCharacters(in: .whitespaces)
+        if !copilotOffered, HermesCopilotPlugin.acpProviderIDs.contains(id) { return isLocalOrPrivate(url) }
         if keylessProviders.contains(id) || id.hasPrefix("custom:") { return true }
         if id == "custom" && !url.isEmpty { return true }
         return isLocalOrPrivate(url)

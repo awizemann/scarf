@@ -1246,11 +1246,20 @@ struct ModelPickerSheet: View {
         // saved config restored — must not be saved back.
         if ModelPreflight.isUnroutable(
             selectedProviderID, customProviders: customProviders,
-            capabilities: capabilitiesStore?.capabilities ?? .empty
+            capabilities: capabilitiesStore?.capabilities ?? .empty,
+            copilotPluginInstalled: Self.rosterOffersCopilot(providers)
         ) {
             return false
         }
         return !selectedModelID.isEmpty
+    }
+
+    /// The roster (``ModelCatalogService/loadProviders(capabilities:)``)
+    /// already probed `plugins/github-copilot` off-main and only carries a
+    /// Copilot row when it is offered, so its presence stands in for the
+    /// plugin check here without any I/O in the view (``HermesCopilotPlugin``).
+    static func rosterOffersCopilot(_ providers: [HermesProviderInfo]) -> Bool {
+        providers.contains { HermesCopilotPlugin.isCopilotProvider($0.providerID) }
     }
 
     private var selectedPreview: String? {
@@ -1376,7 +1385,8 @@ struct ModelPickerSheet: View {
         // A saved provider this Hermes can't route (S06-F1) has no row by
         // design — select nothing, so Save can't write it straight back.
         if ModelPreflight.isUnroutable(
-            initialProvider, customProviders: customProviders, capabilities: capabilities
+            initialProvider, customProviders: customProviders, capabilities: capabilities,
+            copilotPluginInstalled: rosterOffersCopilot(providers)
         ) {
             return ""
         }

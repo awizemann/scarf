@@ -92,7 +92,10 @@ final class CronViewModel {
     /// detail pane falls back to rendering `lastError` raw.
     var selectedErrorClassification: ACPErrorHint.Classification? {
         guard let job = selectedJob, let lastError = job.lastError, !lastError.isEmpty else { return nil }
-        return ACPErrorHint.classify(errorMessage: lastError, stderrTail: "")
+        // No I/O: the window's last `plugins/github-copilot` probe.
+        return ACPErrorHint.classify(
+            errorMessage: lastError, stderrTail: "",
+            copilotOffered: HermesCopilotPlugin.knownOffered(context: context))
     }
 
     /// Re-entry guard (t-aud24): the VM is cached in `AppCoordinator`, so a

@@ -276,11 +276,21 @@ public enum HermesRoutableProviders {
     /// Whether Hermes can route `providerID`, or nil when Scarf has no table
     /// for this host (undetected, or older than v0.6) — callers then behave
     /// exactly as before.
+    ///
+    /// On ``HermesCapabilities/hasCopilotLeftCore`` hosts the Copilot ids
+    /// (``HermesCopilotPlugin/providerIDs``) route only through the
+    /// `github-copilot` plugin, so they count as routable only when
+    /// `copilotPluginInstalled` (``HermesCopilotPlugin/isInstalled(context:capabilities:)``).
+    /// The flag is ignored on older hosts.
     public static func isRoutable(
-        _ providerID: String, capabilities: HermesCapabilities
+        _ providerID: String, capabilities: HermesCapabilities,
+        copilotPluginInstalled: Bool = false
     ) -> Bool? {
         guard capabilities.hasRoutableProviderTable, let version = capabilities.semver,
-              let ids = providerIDs(for: version) else { return nil }
+              var ids = providerIDs(for: version) else { return nil }
+        if !HermesCopilotPlugin.isOffered(capabilities: capabilities, pluginInstalled: copilotPluginInstalled) {
+            ids.subtract(HermesCopilotPlugin.providerIDs)
+        }
         return isRoutable(providerID, in: ids)
     }
 

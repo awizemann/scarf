@@ -3594,14 +3594,23 @@ struct HermesFileService: Sendable {
         let configText = readFile(context.paths.configYAML)
         let config = configText.map { HermesConfig(yaml: $0) }
         let provider = config?.provider
+        // From v0.22.6 only the `github-copilot` plugin reads Copilot's
+        // credentials (``HermesCopilotPlugin``); without it they count for
+        // nothing. One stat, made only on those hosts.
+        let caps = HermesVersionCache.shared.capabilitiesSync(for: context)
+        let copilotOffered = HermesCopilotPlugin.isOffered(
+            capabilities: caps,
+            pluginInstalled: HermesCopilotPlugin.isInstalled(context: context, capabilities: caps))
         if let environment,
-           HermesProviderCredentials.environmentHasProviderKey(environment, provider: provider) {
+           HermesProviderCredentials.environmentHasProviderKey(
+               environment, provider: provider, copilotOffered: copilotOffered) {
             return true
         }
         // `.env` via the transport (local file or scp), parsed with Hermes'
         // own `_dotenv_has_provider_key` rule.
         if let envText = readFile(context.paths.envFile),
-           HermesProviderCredentials.dotEnvHasProviderKey(envText, provider: provider) {
+           HermesProviderCredentials.dotEnvHasProviderKey(
+               envText, provider: provider, copilotOffered: copilotOffered) {
             return true
         }
         // Scan auth.json. Two shapes need to count as "credential present":
@@ -3627,7 +3636,7 @@ struct HermesFileService: Sendable {
             ? HermesAuthFallback.load(
                 authJSONPath: context.paths.authJSON,
                 home: context.paths.home,
-                capabilities: HermesVersionCache.shared.capabilitiesSync(for: context),
+                capabilities: caps,
                 transport: context.makeTransport()
             ).data
             : readFileData(context.paths.authJSON)
@@ -3668,7 +3677,8 @@ struct HermesFileService: Sendable {
             // LM Studio, vLLM): Hermes counts it as configured, so the hint
             // must not tell that user to go add ANTHROPIC_API_KEY.
             if HermesProviderCredentials.modelUsesKeylessEndpoint(
-                provider: config.provider, baseURL: config.modelBaseURL) {
+                provider: config.provider, baseURL: config.modelBaseURL,
+                copilotOffered: copilotOffered) {
                 return true
             }
             for line in text.split(separator: "\n") {
