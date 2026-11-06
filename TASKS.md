@@ -114,10 +114,11 @@
 - [ ] Parallel chats: chat list scrollbar loop hang (fix in bf9e7f2b, watch after release) (id: t-9fa47b95) (added: 2026-10-31)
 - [ ] Stop Scarf tests bloating com.scarf.app settings, and read chat density once per list (id: t-3aa25481) (added: 2026-10-31)
 - [ ] v3.8.0 audit: remaining P2s (performance, accessibility, test coverage) (id: t-6421a043) (added: 2026-11-01)
+- [ ] ScarfGo: a blank username logs in as root (id: t-09c522ff) (added: 2026-11-01)
+- [ ] ScarfGo: a failed config read shows "Pick a model" and can overwrite a working model (id: t-41c0092c) (added: 2026-11-01)
 
 ## Doing
 
-- [ ] Run several chats at once (switching chats cancels the running reply) (id: t-0583409d) (added: 2026-10-29) (priority: high)
 - [ ] Voice: post review reply to @danmarauda on PR #143 (id: t-d39996c7) (added: 2026-09-18)
 - [ ] GW-E3: GuardedSidecarStore conformance protocol + adoption docs (id: t-ecaccef5) (added: 2026-09-04)
 - [ ] Chat activity-bubble UX (P1–P4) (id: t-43c8f3de) (added: 2026-09-02)
@@ -126,6 +127,7 @@
 
 ## Done
 
+- [x] Run several chats at once (switching chats cancels the running reply) (id: t-0583409d) (added: 2026-10-29) (priority: high)
 - [x] Parallel chats P3: live UI tests in the scarf-ui VM (v0.22.5 + v0.21.5) (id: t-c254a28b) (added: 2026-10-29)
 - [x] Parallel chats P2: handoffs, voice, close confirm, banners, analytics (id: t-9aec8776) (added: 2026-10-29)
 - [x] Parallel chats P1: live registry, background chats, budget, approvals and notifications (id: t-f759fabb) (added: 2026-10-29)
