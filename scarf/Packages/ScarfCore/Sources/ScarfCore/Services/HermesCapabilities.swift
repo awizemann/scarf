@@ -2905,6 +2905,88 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// the backend).
     public var hasCatalogSingularity: Bool { isV0225OrLater }
 
+    // MARK: v0.22.6 flags
+    //
+    // Opened at v0.22.5, v0.22.6, v0.22.7 and v0.23.0. Several surfaces the
+    // v0.23.0 release notes list already ship at v0.22.6; each is floored
+    // where the tagged source first carries it (absent at v0.22.5).
+
+    /// Gateway-backed ACP sends `configOptions` (edit mode, model and
+    /// reasoning-effort pickers): `config_options`,
+    /// `acp_adapter/gateway_session_meta.py:81` @ v0.22.6 (`:83` @ v0.23.0).
+    /// Absent at v0.22.5.
+    public var hasACPConfigOptions: Bool { isV0226OrLater }
+
+    /// `/model reset` routes as the `model` mutation `{'model': 'reset'}`
+    /// (`is_model_reset`, `gateway/session_mutation_model.py:156` @ v0.22.6
+    /// and v0.23.0; the module is absent at v0.22.5, where "reset" would be
+    /// taken as a model name).
+    public var hasModelReset: Bool { isV0226OrLater }
+
+    /// GitHub Copilot (API and ACP) LEFT CORE for a catalog plugin:
+    /// `_COPILOT_API` / `_COPILOT_ACP`, `hermes_cli/left_core_migration.py:339-340`
+    /// @ v0.22.6 and v0.23.0. At v0.22.5 core still ships
+    /// `hermes_cli/copilot_auth.py` and `plugins/model-providers/copilot-acp`.
+    public var hasCopilotLeftCore: Bool { isV0226OrLater }
+
+    /// The Camofox browser backend LEFT CORE: `tools/browser_camofox.py`
+    /// exists at v0.22.5 and is gone at v0.22.6, where `camofox_in_use`
+    /// (`hermes_cli/left_core_migration.py:219` @ v0.22.6/v0.23.0) moves a
+    /// home onto the `camofox` plugin.
+    public var hasCamofoxLeftCore: Bool { isV0226OrLater }
+
+    /// `browser.record_sessions` was removed with the built-in browser tools
+    /// (REMOVAL NOTE, `hermes_cli/config_defaults.py:411-415` @ v0.23.0;
+    /// `_config_version` 51 → 52 at v0.22.6). At v0.22.5 the key is a
+    /// default (`config_defaults.py:432`) read by `tools/browser_tool.py:1161`.
+    public var hasBrowserRecordSessionsRemoved: Bool { isV0226OrLater }
+
+    /// `hermes cron cancel <job_id> [--reason]` stops a job's live run
+    /// (`hermes_cli/subcommands/cron.py:200-204` @ v0.23.0, `:199-200` @
+    /// v0.22.6). Absent at v0.22.5.
+    public var hasCronCancel: Bool { isV0226OrLater }
+
+    /// Cron jobs carry `timezone`, `grace_minutes` and `catch_up`
+    /// (`JOB_DEFINITION_FIELDS`, `cron/job_definition.py:13-18`) and a
+    /// `cancelled` last_status that is not a failure (`cron/jobs.py:2404-2407`),
+    /// both @ v0.22.6 and v0.23.0. Neither is in v0.22.5's sources.
+    public var hasCronCatchUpGrace: Bool { isV0226OrLater }
+
+    /// `hermes sessions refresh-prompts [--session ID] [--json]`
+    /// (`_add_refresh_prompts`, `hermes_cli/subcommands/sessions.py:33-43`
+    /// @ v0.22.6 and v0.23.0). Absent at v0.22.5.
+    public var hasSessionsRefreshPrompts: Bool { isV0226OrLater }
+
+    /// `hermes curator lock|unlock <skill>` (`hermes_cli/curator.py:682-684`,
+    /// `_cmd_lock` output `:249-265`, @ v0.22.6 and v0.23.0). Absent at v0.22.5.
+    public var hasCuratorLock: Bool { isV0226OrLater }
+
+    /// `hermes sessions` failures exit non-zero: `_confirm_or_exit_code`
+    /// (unanswerable prompt → 1) and `_not_found` → 1
+    /// (`hermes_cli/sessions_cmd.py:54-75` @ v0.22.6/v0.23.0, file unchanged
+    /// between them). At v0.22.5 an EOF on the prompt is a silent "no".
+    public var hasSessionsNonZeroExit: Bool { isV0226OrLater }
+
+    // MARK: v0.23.0 flags
+    //
+    // Absent at v0.22.7, the tag before v0.23.0.
+
+    /// Gateway-backed ACP adds a `service_tier` config option
+    /// (`SERVICE_TIER_CONFIG_ID`, `acp_adapter/gateway_session_meta.py:73-74`
+    /// @ v0.23.0, read via `config.get` at `:111`). Absent at v0.22.7.
+    public var hasACPServiceTierOption: Bool { isV0230OrLater }
+
+    /// `auxiliary.skills_hub` has no aux LLM any more and a leftover block is
+    /// ignored (`hermes_cli/config_defaults.py:747` @ v0.23.0). At v0.22.7 it
+    /// is still a default, `"skills_hub": _aux(30)` (`:753`).
+    public var hasSkillsHubAuxRemoved: Bool { isV0230OrLater }
+
+    /// `hermes plugins auto-update [on|off]` (alias `autoupdate`) shows or
+    /// sets `plugins.auto_apply` (`hermes_cli/subcommands/plugins.py:80-88`
+    /// @ v0.23.0). Absent at v0.22.7. NB `plugins update [name] [--yes]
+    /// [--force]` is older (present at v0.22.5) and is not gated here.
+    public var hasPluginsAutoUpdateVerb: Bool { isV0230OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -3114,6 +3196,14 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Whether the connected host is on v0.22.5 or newer. Patch-level floor
     /// for the v0.22.5 group, same rationale as `isV0216OrLater`.
     public var isV0225OrLater: Bool { atLeastSemver(0, 22, 5) }
+
+    /// Whether the connected host is on v0.22.6 or newer. Patch-level floor
+    /// for the v0.22.6 group, same rationale as `isV0216OrLater`.
+    public var isV0226OrLater: Bool { atLeastSemver(0, 22, 6) }
+
+    /// Whether the connected host is on v0.23.0 or newer. Floor for the
+    /// v0.23.0 group, same rationale as `isV0216OrLater`.
+    public var isV0230OrLater: Bool { atLeastSemver(0, 23, 0) }
 
     /// Exactly v0.22.1 — the release whose additions v0.22.2 reverted.
     private var isExactlyV0221: Bool { semver == SemVer(major: 0, minor: 22, patch: 1) }
