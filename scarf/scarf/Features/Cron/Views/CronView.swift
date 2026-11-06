@@ -16,6 +16,8 @@ struct CronView: View {
     // owned, not view-owned.
     @Bindable var viewModel: CronViewModel
     @State private var pendingDelete: HermesCronJob?
+    /// The job whose live run the user asked to stop, awaiting confirmation.
+    @State private var pendingStop: HermesCronJob?
     @State private var showOutputPanel: Bool = false
     @State private var showRunHistory: Bool = false
     /// Job ids whose INCIDENTS disclosure is open. Per-job, not a single
@@ -110,12 +112,27 @@ struct CronView: View {
     private var hasCronModelPin: Bool {
         capabilitiesStore?.capabilities.hasCronModelPin ?? false
     }
+    /// v0.22.6 `hermes cron cancel`. Hides Stop entirely on older hosts (C1).
+    private var hasCronCancel: Bool {
+        capabilitiesStore?.capabilities.hasCronCancel ?? false
+    }
+    /// v0.22.6 `--catch-up {on,off}` on create/edit. Hide-AND-strip.
+    private var hasCronCatchUp: Bool {
+        capabilitiesStore?.capabilities.hasCronCatchUpGrace ?? false
+    }
+    /// Stop is offered while a run is visibly in flight: one Scarf started,
+    /// or a live lease on the record. A stale lease just yields Hermes's
+    /// "Nothing to cancel", shown as info.
+    private func offersStop(_ job: HermesCronJob) -> Bool {
+        hasCronCancel && (viewModel.isRunningNow(job) || job.hasLiveRunClaim)
+    }
     /// The editor's save-time strip, handed to the view model with the form.
     private var editorSupport: CronViewModel.EditorSupport {
         CronViewModel.EditorSupport(
             workdir: hasCronWorkdir, noAgent: hasCronNoAgent,
             failureDeliver: hasCronFailureDeliver, modelPin: hasCronModelPin,
-            interpreter: capabilitiesStore?.capabilities.hasCronInterpreter ?? false
+            interpreter: capabilitiesStore?.capabilities.hasCronInterpreter ?? false,
+            catchUp: hasCronCatchUp
         )
     }
     /// v0.21.1 — `last_dispatch` / `last_delivery_unverified` read-only
@@ -201,7 +218,7 @@ struct CronView: View {
         .onChange(of: hasCronIncidents) { _, newValue in if newValue { viewModel.loadIncidents() } }
         .onChange(of: hasCronDoctor) { _, newValue in if newValue { viewModel.loadDoctor() } }
         .sheet(isPresented: $viewModel.showCreateSheet) {
-            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
+            CronJobEditor(mode: .create, availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin, supportsCatchUp: hasCronCatchUp) { form in
                 // Capability stripping (workdir, --no-agent, --failure-deliver,
                 // --pin) happens in the view model — see `createJob(from:support:)`.
                 viewModel.createJob(from: form, support: editorSupport)
@@ -211,7 +228,7 @@ struct CronView: View {
             }
         }
         .sheet(item: $viewModel.editingJob) { job in
-            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
+            CronJobEditor(mode: .edit(job), availableSkills: viewModel.availableSkills, supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin, supportsCatchUp: hasCronCatchUp) { form in
                 // Diffing against the seeded job and capability stripping
                 // happen in the view model — see `updateJob(_:from:support:)`.
                 viewModel.updateJob(job, from: form, support: editorSupport)
@@ -228,7 +245,7 @@ struct CronView: View {
         // `rearm_oneshot` refuses anything but `once` (`:2065-2066`), but
         // nothing guards a create.
         .sheet(item: $viewModel.duplicatingJob) { job in
-            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, existingNames: viewModel.jobs.map(\.name), supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin) { form in
+            CronJobEditor(mode: .duplicate(job), availableSkills: viewModel.availableSkills, existingNames: viewModel.jobs.map(\.name), supportsWorkdir: hasCronWorkdir, supportsNoAgent: hasCronNoAgent, supportsDeliverAll: hasCronDeliverAll, supportsBotChatDelivery: hasCronBotChatDelivery, supportsFailureDeliver: hasCronFailureDeliver, supportsModelPin: hasCronModelPin, supportsCatchUp: hasCronCatchUp) { form in
                 viewModel.createJob(from: form, support: editorSupport)
                 viewModel.duplicatingJob = nil
             } onCancel: {
@@ -246,6 +263,18 @@ struct CronView: View {
             Button("Cancel", role: .cancel) { pendingDelete = nil }
         } message: {
             Text("This removes the scheduled job permanently.")
+        }
+        .confirmationDialog(
+            pendingStop.map { "Stop \($0.name)?" } ?? "",
+            isPresented: Binding(get: { pendingStop != nil }, set: { if !$0 { pendingStop = nil } })
+        ) {
+            Button("Stop Run", role: .destructive) {
+                if let job = pendingStop { viewModel.cancelRun(job) }
+                pendingStop = nil
+            }
+            Button("Cancel", role: .cancel) { pendingStop = nil }
+        } message: {
+            Text("This stops the run in progress. The job's schedule is unchanged — its next run still happens.")
         }
     }
 
@@ -469,6 +498,10 @@ struct CronView: View {
                 // recoverable-error exemption, so a terminal job can never be
                 // run — disabled exactly as `BotRoutinesView` disables it.
                 .disabled(viewModel.refusesTerminalJobLocally(job) || viewModel.isRunningNow(job))
+            if offersStop(job) {
+                Button("Stop Run…") { pendingStop = job }
+                    .accessibilityIdentifier("cron.contextMenu.stopRun")
+            }
             Button("Edit") { viewModel.editingJob = job }
             // Round-4 decision 5: the row menu offers the same remedy the
             // detail pane's hint names, unconditionally — a `cron create`
@@ -656,6 +689,17 @@ struct CronView: View {
             // disabled it; this pane's PRIMARY button was the one left live,
             // which is the loudest place to offer a refusal.
             .disabled(viewModel.refusesTerminalJobLocally(job) || viewModel.isRunningNow(job))
+
+            if offersStop(job) {
+                Button {
+                    pendingStop = job
+                } label: {
+                    Image(systemName: "stop.fill")
+                }
+                .buttonStyle(ScarfSecondaryButton())
+                .help("Stop the run in progress")
+                .accessibilityIdentifier("cron.detail.stopRun")
+            }
 
             // The offer is computed once, from the two Hermes predicates —
             // `_is_recoverable_error_job` and `rearm_oneshot`'s
@@ -1425,6 +1469,9 @@ struct CronJobEditor: View {
         /// (from `HermesCronJob.interpreter`) so a copied `.py` script job
         /// keeps the source's Python; empty on create and edit.
         var interpreter: String = ""
+        /// v0.22.6 `--catch-up {on,off}`. `nil` = unset (follows
+        /// `cron.catch_up_missed`). Seeded from `HermesCronJob.catchUp`.
+        var catchUp: Bool? = nil
     }
 
     let mode: Mode
@@ -1460,6 +1507,9 @@ struct CronJobEditor: View {
     /// and before v0.21.4 an unpinned job was already frozen on its
     /// create-time snapshot, so there was nothing to pin.
     var supportsModelPin: Bool = false
+    /// Pass `true` on v0.22.6+ hosts (`hasCronCatchUpGrace`). Hides the
+    /// missed-run picker otherwise; the parent also strips the value.
+    var supportsCatchUp: Bool = false
     let onSave: (FormState) -> Void
     let onCancel: () -> Void
 
@@ -1565,6 +1615,23 @@ struct CronJobEditor: View {
                     .scarfStyle(.body)
                     .accessibilityIdentifier("cron.editor.pinModel")
                 Text(modelPinCaption)
+                    .scarfStyle(.caption)
+                    .foregroundStyle(ScarfColor.foregroundMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if supportsCatchUp {
+                Picker("Missed runs", selection: $form.catchUp) {
+                    // "Default" only while the field is unset: `cron edit`
+                    // has no gesture to unset a stored value.
+                    if form.catchUp == nil || mode.seed?.catchUp == nil {
+                        Text("Default (config)").tag(Bool?.none)
+                    }
+                    Text("Run once on return").tag(Bool?.some(true))
+                    Text("Skip").tag(Bool?.some(false))
+                }
+                .scarfStyle(.body)
+                .accessibilityIdentifier("cron.editor.catchUp")
+                Text("What happens to runs missed while the machine was off. Default follows cron.catch_up_missed; one-shots always skip.")
                     .scarfStyle(.caption)
                     .foregroundStyle(ScarfColor.foregroundMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -1709,6 +1776,7 @@ struct CronJobEditor: View {
                 // (its gaps line already names the model it can't carry).
                 if case .edit = mode { form.pinModel = job.isModelPinned }
                 if case .duplicate = mode { form.interpreter = job.interpreter ?? "" }
+                form.catchUp = job.catchUp
             }
         }
     }

@@ -502,6 +502,47 @@ final class CronViewModel {
         runAndReload(["cron", "pause", job.id], success: "Paused", job: job, analytics: .paused)
     }
 
+    /// v0.22.6 `hermes cron cancel` — stop the job's live run; its schedule
+    /// is untouched (`hermes_cli/subcommands/cron.py:200-204` @ v0.23.0).
+    /// Only offered on a `hasCronCancel` host (C1). Judged by
+    /// ``HermesCronCancelVerdict`` — "nothing to cancel" is info, and an
+    /// unrecognised exit-0 reply is not a success (C5).
+    func cancelRun(_ job: HermesCronJob) {
+        let args = HermesCronCancelVerdict.argv(jobID: job.id)
+        let jobName = job.name
+        Task.detached { [mutationRunner, weak self] in
+            let result = await OffPool.run { mutationRunner(args, 60) }
+            let verdict = HermesCronCancelVerdict.judge(output: result.output, exitCode: result.exitCode)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                let message = Self.cancelMessage(verdict, jobName: jobName)
+                self.post(message.text, outcome: message.outcome)
+                if case .failed = verdict {
+                    self.logger.warning("cron cancel failed: \(result.output, privacy: .private)")
+                } else if verdict == .unrecognized {
+                    self.logger.warning("cron cancel: unrecognised output: \(result.output, privacy: .private)")
+                }
+                self.load(force: true)
+                self.refreshDiagnosticsAfterMutation()
+            }
+        }
+    }
+
+    static func cancelMessage(
+        _ verdict: HermesCronCancelVerdict, jobName: String
+    ) -> (text: String, outcome: MessageOutcome) {
+        switch verdict {
+        case .cancelRequested:
+            return (String(localized: "Stop requested for \"\(jobName)\""), .success)
+        case .nothingToCancel:
+            return (String(localized: "\"\(jobName)\" isn't running — nothing to stop"), .unconfirmed)
+        case .failed(let line):
+            return (String(localized: "Couldn't stop \"\(jobName)\": \(line)"), .failure)
+        case .unrecognized:
+            return (String(localized: "Stop sent, but Hermes didn't confirm it — check the job's runs"), .unconfirmed)
+        }
+    }
+
     /// Set by `CronView` from the capability store (`hasCronResumeRunNow`
     /// / `hasCronIncidents` / … all resolve to `isV0206OrLater`). It gates
     /// the terminal-job pre-check as well as the `--run-now` affordance —
@@ -1015,6 +1056,8 @@ final class CronViewModel {
         var failureDeliver = false
         var modelPin = false
         var interpreter = false
+        /// v0.22.6 `--catch-up {on,off}` (`hasCronCatchUpGrace`).
+        var catchUp = false
     }
 
     /// The editor's Create and Duplicate save. The capability stripping lives
@@ -1039,7 +1082,8 @@ final class CronViewModel {
             // v0.21.4 `--pin`; never on an older host or a no-agent job.
             pinModel: support.modelPin && !form.noAgent && form.pinModel,
             // v0.21.6 `--interpreter`, carried by a duplicate only.
-            interpreter: support.interpreter ? form.interpreter : ""
+            interpreter: support.interpreter ? form.interpreter : "",
+            catchUp: support.catchUp ? form.catchUp : nil
         )
     }
 
@@ -1079,11 +1123,15 @@ final class CronViewModel {
             // `modelPinEditArguments`); `nil` on an older host or a
             // no-agent job, where the toggle is hidden.
             wasModelPinned: job.isModelPinned,
-            pinModel: support.modelPin && !form.noAgent ? form.pinModel : nil
+            pinModel: support.modelPin && !form.noAgent ? form.pinModel : nil,
+            // v0.22.6 `--catch-up`, sent only on a change from the job's own
+            // value (see `catchUpEditArguments`); `nil` on an older host.
+            existingCatchUp: job.catchUp,
+            catchUp: support.catchUp ? form.catchUp : nil
         )
     }
 
-    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", catchUp: Bool? = nil, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         // A8 (v0.21.1): Hermes rejects a one-shot whose `run_at` is past the
         // grace window with a non-zero exit. Say so before the round-trip —
         // and only on a host that would actually refuse (see `isV0211OrLater`).
@@ -1100,7 +1148,7 @@ final class CronViewModel {
                 schedule: schedule, prompt: prompt, name: name, deliver: deliver,
                 skills: skills, script: script, repeatCount: repeatCount,
                 workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver,
-                pinModel: pinModel, interpreter: interpreter
+                pinModel: pinModel, interpreter: interpreter, catchUp: catchUp
             ),
             success: "Job created",
             analytics: .created,
@@ -1122,7 +1170,7 @@ final class CronViewModel {
     /// that compose a create — and the tests that pin their composition —
     /// assert the PRODUCTION command line rather than a parallel builder that
     /// can drift from it.
-    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "") -> [String] {
+    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", catchUp: Bool? = nil) -> [String] {
         var args = ["cron", "create"]
         if !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
         if !deliver.isEmpty { args.append(HermesCLIOption.joined("--deliver", deliver)) }
@@ -1152,6 +1200,10 @@ final class CronViewModel {
         // Only a duplicate fills it, and the caller passes "" on a host
         // without `hasCronInterpreter`, so an older argparse never sees it.
         if !interpreter.isEmpty { args.append(HermesCLIOption.joined("--interpreter", interpreter)) }
+        // v0.22.6 `--catch-up {on,off}` (`hermes_cli/subcommands/cron.py:21-26,
+        // :55` @ v0.23.0). `nil` = follow `cron.catch_up_missed`; the caller
+        // passes `nil` on a host without `hasCronCatchUpGrace`.
+        if let catchUp { args.append(HermesCLIOption.joined("--catch-up", catchUp ? "on" : "off")) }
         // End-of-options before the positionals (`schedule`, optional
         // `prompt`). A prompt that legitimately opens with a dash —
         // "--deliver isn't working, investigate" — is otherwise claimed by
@@ -1286,12 +1338,21 @@ final class CronViewModel {
     /// or the toggle hidden) sends nothing.
     ///
     /// "Pinned" is Hermes's own test: a non-empty stored `model`.
+    /// v0.22.6 `cron edit --catch-up {on,off}` (`hermes_cli/subcommands/cron.py:130`
+    /// @ v0.23.0). Sent only when the choice differs from the job's stored
+    /// value; `nil` (unset / older host) never emits it. There is no CLI
+    /// gesture to UNSET the field, so a stored value can only flip.
+    nonisolated static func catchUpEditArguments(existing: Bool?, newValue: Bool?) -> [String] {
+        guard let newValue, newValue != existing else { return [] }
+        return [HermesCLIOption.joined("--catch-up", newValue ? "on" : "off")]
+    }
+
     nonisolated static func modelPinEditArguments(wasPinned: Bool, pinned: Bool?) -> [String] {
         guard let pinned, pinned != wasPinned else { return [] }
         return [pinned ? "--pin" : "--unpin"]
     }
 
-    func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil, wasModelPinned: Bool = false, pinModel: Bool? = nil) {
+    func updateJob(id: String, schedule: String?, prompt: String?, existingPrompt: String, name: String?, deliver: String?, repeatCount: String?, existingRepeatCount: String, existingSkills: [String], newSkills: [String]?, clearSkills: Bool, script: String?, workdir: String? = nil, noAgent: Bool? = nil, failureDeliver: String? = nil, wasModelPinned: Bool = false, pinModel: Bool? = nil, existingCatchUp: Bool? = nil, catchUp: Bool? = nil) {
         // `job_id` is `cron edit`'s only positional, so it moves to the very
         // end behind `--` — every flag has to precede the marker, since
         // argparse treats each token after it as a positional.
@@ -1318,6 +1379,7 @@ final class CronViewModel {
             else { args.append("--agent") }
         }
         args += Self.modelPinEditArguments(wasPinned: wasModelPinned, pinned: pinModel)
+        args += Self.catchUpEditArguments(existing: existingCatchUp, newValue: catchUp)
         args.append(contentsOf: ["--", id])
         // The record `cron edit` addresses, when it is still on screen —
         // so a refusal on a RECURRING job does not name a re-arm

@@ -3329,3 +3329,45 @@ public enum HermesCuratorRunNote {
         }
     }
 }
+
+/// `hermes cron cancel <job_id> [--reason TEXT]` (v0.22.6, `hasCronCancel`).
+///
+/// Parser: `hermes_cli/subcommands/cron.py:200-204` @ v0.23.0 — `job_id` is
+/// the only positional, `--reason` the only flag. Handler `cron_cancel`
+/// (`hermes_cli/cron.py:999-1012`) has three arms, each printed at column 0:
+/// - `Failed to cancel run: <error>` → exit 1;
+/// - `Nothing to cancel for <name> (<id>)` → exit 0, the job had no live run;
+/// - `Cancel requested for <name> (<id>)` → exit 0, the stop was sent.
+///
+/// Anything else (an exit-0 line Scarf does not recognise, e.g. an unknown
+/// verb routed to the agent) is `.unrecognized`, never success (C5).
+public enum HermesCronCancelVerdict: Equatable, Sendable {
+    case cancelRequested
+    case nothingToCancel
+    case failed(String)
+    case unrecognized
+
+    public static func argv(jobID: String, reason: String? = nil) -> [String] {
+        var args = ["cron", "cancel"]
+        if let reason = reason?.trimmingCharacters(in: .whitespacesAndNewlines), !reason.isEmpty {
+            args.append(HermesCLIOption.joined("--reason", reason))
+        }
+        args += ["--", jobID]
+        return args
+    }
+
+    public static func judge(output: String, exitCode: Int32) -> HermesCronCancelVerdict {
+        let lines = HermesCLIVerdict.stripANSI(output)
+            .split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        if let failure = lines.first(where: { $0.hasPrefix("Failed to cancel run:") }) {
+            return .failed(failure)
+        }
+        guard exitCode == 0 else {
+            return .failed(lines.last ?? "exit \(exitCode)")
+        }
+        if lines.contains(where: { $0.hasPrefix("Cancel requested for ") }) { return .cancelRequested }
+        if lines.contains(where: { $0.hasPrefix("Nothing to cancel for ") }) { return .nothingToCancel }
+        return .unrecognized
+    }
+}

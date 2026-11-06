@@ -132,6 +132,8 @@ struct CronStatusWidgetView: View {
         case "paused":            return ("PAUSED", .warning)
         case "completed":         return ("COMPLETED", .done)
         case "error", "failed":   return (state.uppercased(), .danger)
+        // v0.22.6 operator stop — never a failure (`cron/jobs.py:2406-2407`).
+        case "cancelled":         return ("CANCELLED", .warning)
         default:                  return (state.uppercased(), .success)
         }
     }

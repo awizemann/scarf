@@ -570,9 +570,16 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             // from `JOB_DEFINITION_FIELDS`, so it is allowed by name — a
             // duplicated `.py` script job would otherwise run under Hermes's
             // own Python instead of the user's venv.
-            let authored = capabilities.hasCronInterpreter
+            var authored = capabilities.hasCronInterpreter
                 ? Self.authoredExtraKeys.union(["interpreter"])
                 : Self.authoredExtraKeys
+            // v0.22.6 added `timezone`, `grace_minutes`, `catch_up` to
+            // `JOB_DEFINITION_FIELDS` (`cron/job_definition.py:13-18` @
+            // v0.23.0). Gated so an older host's duplicate is unchanged (C1);
+            // no older host writes these keys anyway.
+            if capabilities.hasCronCatchUpGrace {
+                authored.formUnion(Self.catchUpGraceAuthoredKeys)
+            }
             carried = carried.filter { authored.contains($0.key) }
         }
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
@@ -669,6 +676,43 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         "workdir", "attach_to_session", "reasoning_effort", "failure_deliver",
         "repeat",
     ]
+
+    /// The v0.22.6 authored fields (`cron/job_definition.py:13-18` @ v0.23.0),
+    /// carried by a duplicate only on a `hasCronCatchUpGrace` host.
+    nonisolated static let catchUpGraceAuthoredKeys: Set<String> = [
+        "timezone", "grace_minutes", "catch_up",
+    ]
+
+    /// v0.22.6 per-job missed-run policy (`cron create|edit --catch-up
+    /// {on,off}`, `hermes_cli/subcommands/cron.py:15-26` @ v0.23.0). `nil`
+    /// = unset, i.e. the job follows `cron.catch_up_missed`.
+    public nonisolated var catchUp: Bool? {
+        if case .bool(let b)? = extra["catch_up"] { return b }
+        return nil
+    }
+
+    /// The last run's recorded status (`mark_job_run`, `cron/jobs.py:2404-2405`
+    /// @ v0.23.0) — `ok`, `error`, `delivery_failed`, or v0.22.6's
+    /// `cancelled`. Unmodeled, so read from `extra`.
+    public nonisolated var lastStatus: String? {
+        Self.nonEmptyString(extra["last_status"])
+    }
+
+    /// The last run was stopped by an operator (`hermes cron cancel`). Not a
+    /// failure: Hermes clears `last_error` for it (`cron/jobs.py:2406-2407`).
+    public nonisolated var lastRunWasCancelled: Bool { lastStatus == "cancelled" }
+
+    /// A live dispatch/run lease is stamped on the record — the scheduler
+    /// writes `fire_claim = {at, by}` while it runs the job
+    /// (`cron/jobs.py:2780` @ v0.23.0) and clears it after (`:2426`). A
+    /// stale lease is possible, which is fine for its one use (offering
+    /// Stop): `cron cancel` then answers "Nothing to cancel".
+    public nonisolated var hasLiveRunClaim: Bool {
+        for key in ["fire_claim", "run_claim"] {
+            if case .object(let o)? = extra[key], !o.isEmpty { return true }
+        }
+        return false
+    }
 
     /// Copy of this job with `next_run_at` cleared, for the JSON-write
     /// fallback path when the `hermes cron resume` CLI is unreachable.
@@ -934,6 +978,10 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
         // is Scarf-era legacy kept for older jobs.json files.
         case "error", "failed": return "xmark.circle"
         case "paused": return "pause.circle"
+        // v0.22.6 operator stop (`cron/jobs.py:2404-2407` @ v0.23.0). Hermes
+        // records it in `last_status`, not `state`, so this arm is for any
+        // record that does carry it as a state; it is never a failure.
+        case "cancelled": return "stop.circle"
         default: return "questionmark.circle"
         }
     }
