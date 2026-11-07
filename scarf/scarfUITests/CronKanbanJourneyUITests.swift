@@ -236,10 +236,11 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         // over the whole listing would pass on some OTHER job's badge —
         // the fixture home seeds two paused cron jobs of its own, so that
         // weaker form asserts almost nothing here.
-        let listedAll = runHermes(["cron", "list", "--all"]).stdout
+        let listedAllRun = runHermes(["cron", "list", "--all"])
+        let listedAll = listedAllRun.stdout
         XCTAssertTrue(
             pausedBadgeLine(for: job.id, in: listedAll) != nil,
-            "`hermes cron list --all` does not show \(job.id) as paused:\n\(listedAll)"
+            "`hermes cron list --all` does not show \(job.id) as paused (exit \(listedAllRun.code)):\n\(listedAll)\nstderr: \(listedAllRun.stderr)"
         )
         let listedBare = runHermes(["cron", "list"]).stdout
         XCTAssertTrue(

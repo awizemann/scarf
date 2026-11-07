@@ -474,8 +474,42 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
     private func askForEveryApproval(inHome home: String) throws {
         let path = (home as NSString).appendingPathComponent("config.yaml")
         let config = try String(contentsOfFile: path, encoding: .utf8)
-        XCTAssertFalse(config.contains("approvals:"), "The fixture's config.yaml already has an approvals block; merge instead of appending.")
-        try (config + "\napprovals:\n  mode: manual\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try Self.settingApprovalsModeManual(in: config).write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// The fixture copies the developer's real config.yaml
+    /// (make-ui-fixture.sh, `for f in config.yaml …`), which on v0.23 usually
+    /// carries a top-level `approvals:` map (defaults in
+    /// hermes_cli/config_defaults.py:1650-1666 at v0.23.0: mode, timeout,
+    /// cron_mode, …). Set `approvals.mode: manual` in place — replacing an
+    /// existing `mode:` child or inserting one — and keep every sibling key.
+    /// Appends a fresh block only when there is none.
+    static func settingApprovalsModeManual(in config: String) -> String {
+        var lines = config.components(separatedBy: "\n")
+        guard let start = lines.firstIndex(where: { $0.hasPrefix("approvals:") }) else {
+            return config + (config.hasSuffix("\n") ? "" : "\n") + "approvals:\n  mode: manual\n"
+        }
+        // An inline value (`approvals: {…}` / `approvals: null`) is replaced wholesale.
+        let inline = lines[start].dropFirst("approvals:".count).trimmingCharacters(in: .whitespaces)
+        if !inline.isEmpty && !inline.hasPrefix("#") {
+            lines[start] = "approvals:"
+            lines.insert("  mode: manual", at: start + 1)
+            return lines.joined(separator: "\n")
+        }
+        var end = start + 1
+        while end < lines.count,
+              lines[end].isEmpty || lines[end].hasPrefix(" ") || lines[end].hasPrefix("\t") || lines[end].hasPrefix("#") {
+            end += 1
+        }
+        let childIndent = lines[(start + 1)..<end]
+            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty && !$0.trimmingCharacters(in: .whitespaces).hasPrefix("#") }
+            .map { String($0.prefix { $0 == " " }) } ?? "  "
+        if let mode = lines[(start + 1)..<end].firstIndex(where: { $0.hasPrefix(childIndent + "mode:") }) {
+            lines[mode] = childIndent + "mode: manual"
+        } else {
+            lines.insert(childIndent + "mode: manual", at: start + 1)
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func launchLocal() -> XCUIApplication {
