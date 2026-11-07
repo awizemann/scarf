@@ -116,6 +116,9 @@
 - [ ] v3.8.0 audit: remaining P2s (performance, accessibility, test coverage) (id: t-6421a043) (added: 2026-11-01)
 - [ ] ScarfGo: a blank username logs in as root (id: t-09c522ff) (added: 2026-11-01)
 - [ ] ScarfGo: a failed config read shows "Pick a model" and can overwrite a working model (id: t-41c0092c) (added: 2026-11-01)
+- [ ] v0.23 T: real-host testing + fresh-eyes audit (id: t-cfebb471) (added: 2026-11-06)
+- [ ] Fix env-dependent ScarfCore test failures (ProjectDoctor, RealPyYAML) (id: t-3eed315b) (added: 2026-11-06)
+- [ ] Fix two pre-existing Bot scarfTests failures (id: t-0922ddb6) (added: 2026-11-06)
 
 ## Doing
 
@@ -127,6 +130,17 @@
 
 ## Done
 
+- [x] UI-gate failures on on-screen runs (resolved: run in Tart VM) (id: t-ea88fc8c) (added: 2026-11-07) (priority: high)
+- [x] v0.23 S4: ACP reasoning/tier pickers + /model reset (id: t-b253e9c5) (added: 2026-11-06)
+- [x] v0.23 S7: sessions refresh-prompts + skill lock (id: t-fddb538a) (added: 2026-11-06)
+- [x] v0.23 S6: plugins update-all, auto-update, verified tier (id: t-64d0af7b) (added: 2026-11-06)
+- [x] v0.23 S5: cron cancel + catch-up policy (id: t-3fbd92eb) (added: 2026-11-06)
+- [x] v0.23 S2: Copilot moved to plugin — gate provider tables (id: t-1ae423ce) (added: 2026-11-06) (priority: high)
+- [x] v0.23 S3: Camofox browser provider needs plugin (id: t-78996849) (added: 2026-11-06) (priority: high)
+- [x] v0.23 S1: capability flag cluster + tests (id: t-5dbd8940) (added: 2026-11-06) (priority: high)
+- [x] v0.23 P0a: argv + CLI output-parser audit (id: t-57c4ef7a) (added: 2026-11-06) (priority: high)
+- [x] v0.23 P0c: providers, catalogs, config keys, schema (id: t-10e43f66) (added: 2026-11-06) (priority: high)
+- [x] v0.23 P0b: ACP wire + gateway audit (id: t-e3e7ea71) (added: 2026-11-06) (priority: high)
 - [x] Run several chats at once (switching chats cancels the running reply) (id: t-0583409d) (added: 2026-10-29) (priority: high)
 - [x] Parallel chats P3: live UI tests in the scarf-ui VM (v0.22.5 + v0.21.5) (id: t-c254a28b) (added: 2026-10-29)
 - [x] Parallel chats P2: handoffs, voice, close confirm, banners, analytics (id: t-9aec8776) (added: 2026-10-29)
