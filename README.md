@@ -71,14 +71,14 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted and followed over time without knowing who you are. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context and Hermes's replies so the voice can speak them, and both apps ask before the first session.
 
-## What's New in 3.8.0
+## What's New in 3.9.0
 
-- **Chats keep running when you click away** — a window now keeps several chats live at once, each with its own connection, transcript and half-typed message.
-- **See every chat at a glance** — sidebar rows show needs an answer, error, replying, or finished and unread. A background approval shows in its row and can notify you.
-- **A limit that looks after your hosts** — up to 4 live chats per SSH server and 8 on your Mac. Scarf releases the oldest idle chat when it needs room, and asks if all of them are busy.
-- **Asks before stopping your work** — closing a window, quitting or switching profile confirms first when a chat is working.
-- **Prompts are harder to lose** — they reach Hermes in the order you sent them, a failed start hands back what you typed, and a gateway failure shows Hermes's own message and never resends.
-- Full notes: [releases/v3.8.0/RELEASE_NOTES.md](releases/v3.8.0/RELEASE_NOTES.md).
+- **Ready for Hermes v0.23.0** — every new surface is checked against the release itself, and older hosts keep their current UI.
+- **Reasoning and speed pickers in Chat** — set reasoning effort (Hermes v0.22.6+) and the fast service tier (v0.23.0) from the chat header, and reset a chat to your default model.
+- **Stop a running cron job** — plus a per-job "Missed runs" choice (skip or run once on return) on Hermes v0.22.6+.
+- **Update All plugins** — preview what would change, then apply in one go (v0.22.3+); turn on plugin auto-update (v0.23.0).
+- **GitHub Copilot and Camofox moved to plugins in Hermes** — Scarf offers them once their plugin is installed and enabled, and tells you when it isn't.
+- Full notes: [releases/v3.9.0/RELEASE_NOTES.md](releases/v3.9.0/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
@@ -132,7 +132,7 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 ## Requirements & compatibility
 
 - **macOS 15+** (Scarf) · **iOS 18.6+** (ScarfGo) · Xcode 16+ to build from source.
-- **[Hermes](https://github.com/NousResearch/hermes-agent) v0.6.0+** on each host. Current target: **v0.22.5** (2026-10-22) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
+- **[Hermes](https://github.com/NousResearch/hermes-agent) v0.6.0+** on each host. Current target: **v0.23.0** (2026-11-05) — every newer surface is capability-gated or schema-detected, so older hosts keep working with newer-only UI hidden.
 
 | Hermes | Status |
 |--------|--------|
@@ -151,7 +151,9 @@ Scarf is a multi-window app — each window binds to one Hermes server. Your loc
 | v0.21.5 (2026-09-24) | Verified — parked profiles, the standalone status box, retired `multiplex_profiles: false` rewritten, MCP numeric on/off; verified at the tag and on a live host |
 | v0.21.6 – v0.21.7 (2026-10-08 → 10-11) | Verified — strict `config.yaml` loading (duplicate keys flagged), memory providers / Home Assistant / Spotify moved to plugins, `status` summary default, Tirith removed, partial-import exit code, cron `interpreter` |
 | v0.22.0 – v0.22.4 (2026-10-13 → 10-21) | Verified — gateway-backed chat (v0.22.1, reverted in v0.22.2, restored in v0.22.3), live-session stop/restart refusal, chats stored as `local` with their real origin, plugin enable/disable output, `krea-3`, `rentahuman` MCP |
-| v0.22.5 (2026-10-22) | **Verified — current target** — Singularity terminal moved to a plugin; source-audited at every tag v0.21.6–v0.22.5 and live-tested on a v0.22.5 host |
+| v0.22.5 (2026-10-22) | Verified — Singularity terminal moved to a plugin; source-audited at every tag v0.21.6–v0.22.5 and live-tested on a v0.22.5 host |
+| v0.22.6 – v0.22.7 (2026-11-02 → 11-03) | Supported — floors set during the v0.23.0 audit, not audited tag by tag: GitHub Copilot and Camofox leave core for plugins, reasoning-effort ACP option, `cron cancel` and per-job `--catch-up`, `sessions refresh-prompts`, `curator lock`; the gateway starts as a launchd job on macOS |
+| v0.23.0 (2026-11-05) | **Verified — current target** — service-tier ACP option, `/model reset`, plugin auto-update; source-audited at the tag and UI-tested in a VM with Hermes installed by its own installer |
 
 Scarf reads Hermes's SQLite database and CLI output with automatic schema detection. If a Hermes update changes either, the Health view shows compatibility warnings.
 
