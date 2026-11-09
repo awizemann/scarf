@@ -406,4 +406,40 @@ import Foundation
         #expect(!store.isLoading)
         #expect(spy.calls == 1)
     }
+
+    // MARK: - Bounded persistence
+
+    @Test func manyHomesStayInOneCappedEntry() async {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let cache = HermesVersionCache(defaults: defaults, probe: ProbeSpy(line: "Hermes Agent v0.23.0 (2026.9.24)").probe, retryDelays: [])
+        let total = HermesVersionCache.maxRemembered + 10
+        for i in 0..<total {
+            _ = await cache.capabilities(for: localContext(home: "/tmp/scarf-cap-\(i)"))
+        }
+        let keys = defaults.dictionaryRepresentation().keys
+        #expect(!keys.contains { $0.hasPrefix(HermesVersionCache.legacyKeyPrefix) }, "no per-home keys any more")
+        let store = defaults.dictionary(forKey: HermesVersionCache.storeKey) ?? [:]
+        #expect(store.count == HermesVersionCache.maxRemembered)
+        // The newest home survives the cap; the first is gone.
+        let relaunched = HermesVersionCache(defaults: defaults, probe: { _ in .empty })
+        #expect(relaunched.lastKnown(for: localContext(home: "/tmp/scarf-cap-\(total - 1)")).detected)
+        #expect(!relaunched.lastKnown(for: localContext(home: "/tmp/scarf-cap-0")).detected)
+    }
+
+    @Test func legacyKeysMigrateKeepingRealHostsOnly() {
+        let (defaults, name) = makeDefaults()
+        defer { defaults.removePersistentDomain(forName: name) }
+        let real = localContext(home: "/Users/someone/.hermes")
+        let ssh = sshContext(host: "box.example", user: "me", home: "/home/me/.hermes")
+        let temp = localContext(home: "/private/var/folders/xy/T/scarf-plugins-1234")
+        for ctx in [real, ssh, temp] {
+            defaults.set("Hermes Agent v0.22.5 (2026.9.24)", forKey: HermesVersionCache.legacyKeyPrefix + HermesVersionCache.key(for: ctx))
+        }
+        let cache = HermesVersionCache(defaults: defaults, probe: { _ in .empty })
+        #expect(cache.lastKnown(for: real).semver?.minor == 22)
+        #expect(cache.lastKnown(for: ssh).semver?.minor == 22)
+        #expect(!cache.lastKnown(for: temp).detected, "a throwaway test home is dropped")
+        #expect(!defaults.dictionaryRepresentation().keys.contains { $0.hasPrefix(HermesVersionCache.legacyKeyPrefix) })
+    }
 }

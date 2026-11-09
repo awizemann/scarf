@@ -18,7 +18,8 @@ import os
 /// - **Dedup.** Concurrent async callers for the same server join a single
 ///   in-flight `Task`; later callers hit the in-memory result.
 /// - **Persistence.** A successful probe writes its raw version line to
-///   `UserDefaults`, keyed by a *connection fingerprint* (see `key(for:)`).
+///   `UserDefaults` (one capped entry, see `storeKey`), keyed by a
+///   *connection fingerprint* (see `key(for:)`).
 ///   The next launch can seed capability UI optimistically from that
 ///   last-known value while the fresh probe runs, then reconcile.
 /// - **Graceful failure.** A failed probe is never cached and never
@@ -59,6 +60,9 @@ public final class HermesVersionCache: @unchecked Sendable {
     /// `[]` or tiny values.
     private let retryDelays: [TimeInterval]
     private let lock = NSLock()
+    /// Serializes the store's read-modify-write (two probes landing at once
+    /// must not drop each other's entry). Never held across a probe.
+    private let storeLock = NSLock()
 
     /// Successful probes completed in this process, keyed by `key(for:)`,
     /// with the instant they landed (see `ttl`).
@@ -87,7 +91,20 @@ public final class HermesVersionCache: @unchecked Sendable {
 
     // MARK: - Keying
 
-    private static let defaultsKeyPrefix = "scarf.hermesVersionLine."
+    /// Every remembered version line lives in ONE defaults entry:
+    /// `[key(for:): ["line": String, "at": Double]]`, capped at
+    /// `maxRemembered`, oldest-used dropped first.
+    ///
+    /// It used to be one defaults key per connection
+    /// (`scarf.hermesVersionLine.<key>`). Every Hermes home gets its own key,
+    /// and tests mint a fresh throwaway home each run, so the app's real
+    /// defaults grew past 6,000 keys and the 4 MB CFPreferences limit, after
+    /// which macOS refuses to store any of the app's settings.
+    static let storeKey = "scarf.hermesVersionLines"
+    static let maxRemembered = 32
+    /// The old per-connection prefix, migrated away from on first use.
+    static let legacyKeyPrefix = "scarf.hermesVersionLine."
+    private static let migratedKey = "scarf.hermesVersionLines.migrated"
 
     /// Stable identity for a *connection*, not for a registry row.
     ///
@@ -109,8 +126,56 @@ public final class HermesVersionCache: @unchecked Sendable {
         }
     }
 
-    private func defaultsKey(for context: ServerContext) -> String {
-        Self.defaultsKeyPrefix + Self.key(for: context)
+    // MARK: - Persistence
+
+    private func remembered() -> [String: [String: Any]] {
+        (defaults.dictionary(forKey: Self.storeKey) as? [String: [String: Any]]) ?? [:]
+    }
+
+    private func rememberedLine(forKey key: String) -> String? {
+        storeLock.lock(); defer { storeLock.unlock() }
+        migrateLegacyKeysIfNeeded()
+        return remembered()[key]?["line"] as? String
+    }
+
+    private func remember(_ line: String, forKey key: String) {
+        storeLock.lock(); defer { storeLock.unlock() }
+        migrateLegacyKeysIfNeeded()
+        var store = remembered()
+        store[key] = ["line": line, "at": Date().timeIntervalSince1970]
+        defaults.set(Self.capped(store), forKey: Self.storeKey)
+    }
+
+    /// The `maxRemembered` most recently used entries.
+    static func capped(_ store: [String: [String: Any]]) -> [String: [String: Any]] {
+        guard store.count > maxRemembered else { return store }
+        let keep = store
+            .sorted { (($0.value["at"] as? Double) ?? 0) > (($1.value["at"] as? Double) ?? 0) }
+            .prefix(maxRemembered)
+        return Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+    }
+
+    /// True for a Hermes home in a temporary folder: a test's throwaway home,
+    /// never one a person connects to again.
+    static func isThrowawayHome(_ key: String) -> Bool {
+        ["/T/", "/tmp/", "/private/var/folders/", "/Library/Containers/"].contains { key.contains($0) }
+    }
+
+    /// One time: move the old per-connection keys into the single store,
+    /// keeping real connections and dropping temp-folder homes, then delete
+    /// every old key. Caller holds `storeLock`.
+    private func migrateLegacyKeysIfNeeded() {
+        guard !defaults.bool(forKey: Self.migratedKey) else { return }
+        var store = remembered()
+        for (name, value) in defaults.dictionaryRepresentation() where name.hasPrefix(Self.legacyKeyPrefix) {
+            let key = String(name.dropFirst(Self.legacyKeyPrefix.count))
+            if let line = value as? String, !Self.isThrowawayHome(key), store[key] == nil {
+                store[key] = ["line": line, "at": 0.0]
+            }
+            defaults.removeObject(forKey: name)
+        }
+        defaults.set(Self.capped(store), forKey: Self.storeKey)
+        defaults.set(true, forKey: Self.migratedKey)
     }
 
     // MARK: - Reads
@@ -141,7 +206,7 @@ public final class HermesVersionCache: @unchecked Sendable {
     /// downgraded since. Use it to avoid a cold-start flash of empty UI, and
     /// reconcile with the fresh probe when it lands.
     public func lastKnown(for context: ServerContext) -> HermesCapabilities {
-        guard let line = defaults.string(forKey: defaultsKey(for: context)) else { return .empty }
+        guard let line = rememberedLine(forKey: Self.key(for: context)) else { return .empty }
         return HermesCapabilities.parse(line)
     }
 
@@ -273,7 +338,7 @@ public final class HermesVersionCache: @unchecked Sendable {
         lock.unlock()
 
         if caps.detected {
-            defaults.set(caps.versionLine, forKey: defaultsKey(for: context))
+            remember(caps.versionLine, forKey: key)
         }
     }
 
