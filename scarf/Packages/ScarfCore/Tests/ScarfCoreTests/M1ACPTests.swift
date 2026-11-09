@@ -354,6 +354,25 @@ import Foundation
         #expect(lead.hasSuffix("…"))
     }
 
+    /// A gateway start failure's reason lives AFTER the lead line
+    /// (hermes_cli/gateway_runtime_start.py:131-157 @ v0.23.0); the banner
+    /// shows the lead, Details must keep all of it.
+    @Test func fullServerDetailsKeepsWhatTheLeadDrops() {
+        let details = """
+        Gateway could not start: the gateway exited with status 1 before it could serve:
+          ModuleNotFoundError: No module named 'aiohttp'
+        Full log: tail -n 200 '/h/logs/gateway-stdio.log'
+        """
+        let error = ACPClientError.rpcError(code: -32603, message: "Internal error", details: details)
+        #expect(error.errorDescription?.hasPrefix("Gateway could not start:") == true)
+        #expect(error.errorDescription?.contains("aiohttp") == false)
+        #expect(ACPClientError.fullServerDetails(error)?.contains("No module named 'aiohttp'") == true)
+        // A one-line reason the lead already shows adds nothing.
+        #expect(ACPClientError.fullServerDetails(
+            ACPClientError.rpcError(code: -32603, message: "Internal error", details: "session_busy")) == nil)
+        #expect(ACPClientError.fullServerDetails(ACPClientError.requestTimeout(method: "x")) == nil)
+    }
+
     @Test func detailsLeadUsesFirstNonEmptyLine() {
         let details = "\n\nTraceback headline here\n  File \"x.py\", line 1\nValueError: nope"
         #expect(ACPClientError.detailsLead(fromDetails: details) == "Traceback headline here")

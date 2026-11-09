@@ -133,7 +133,11 @@ import Foundation
     @Test func ultrafastServiceTierGated() {
         #expect(HermesServiceTier.normalize("ultrafast") == .off)
         #expect(HermesServiceTier.normalize("ultrafast", capabilities: Self.v0215) == .off)
-        #expect(HermesServiceTier.normalize("ultra", capabilities: Self.v0216) == .ultrafast)
+        #expect(HermesServiceTier.normalize("ultrafast", capabilities: Self.v0216) == .ultrafast)
+        // `ultra` is a v0.22.0 spelling (agent/fast_mode.py:33 @ v0.22.0;
+        // absent at v0.21.6/v0.21.7, where Hermes ignores it).
+        #expect(HermesServiceTier.normalize("ultra", capabilities: Self.v0216) == .off)
+        #expect(HermesServiceTier.normalize("ultra", capabilities: Self.v0225) == .ultrafast)
         #expect(HermesServiceTier.normalize("ultrafast", capabilities: Self.v0226) == .ultrafast)
         #expect(HermesServiceTier.ultrafast.configValue == "ultrafast")
         #expect(!HermesServiceTier.options(capabilities: Self.v0215, current: .off).contains(.ultrafast))

@@ -48,6 +48,7 @@ struct ChatModelBadge: View {
         .buttonStyle(.plain)
         .disabled(onSwitch == nil)
         .help(helpText)
+        .accessibilityIdentifier("chat.model.badge")
         .popover(isPresented: $showPopover, arrowEdge: .bottom) {
             popoverContent
                 .frame(minWidth: 280, maxWidth: 340)
@@ -144,6 +145,7 @@ struct ChatModelBadge: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("chat.model.reset")
     }
 
     private var defaultRow: some View {

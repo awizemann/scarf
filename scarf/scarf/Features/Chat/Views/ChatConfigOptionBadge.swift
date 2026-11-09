@@ -49,6 +49,8 @@ struct ChatConfigOptionBadge: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("\(option.name): \(label)")
+        .accessibilityIdentifier("chat.config.\(option.id)")
+        .accessibilityValue(label)
     }
 
     private var label: String {

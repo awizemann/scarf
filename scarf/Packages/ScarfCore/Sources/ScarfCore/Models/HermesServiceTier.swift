@@ -35,9 +35,9 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
     case auto
     /// Bounded window on a session's first turn only (v0.21.1+).
     case cold
-    /// OpenAI Ultrafast static tier — `ultrafast` / `ultra` (v0.22.7+,
-    /// `SERVICE_TIER_WORDS`, agent/fast_mode.py:31-34; gated per model by
-    /// Hermes at request time). Offered only when
+    /// OpenAI Ultrafast static tier — `ultrafast` (v0.21.6+) / `ultra`
+    /// (v0.22.0+) in `SERVICE_TIER_WORDS` (agent/fast_mode.py:31-34; gated
+    /// per model by Hermes at request time). Offered only when
     /// `HermesCapabilities.hasServiceTierUltrafast`.
     case ultrafast
 
@@ -60,11 +60,13 @@ public enum HermesServiceTier: String, CaseIterable, Sendable {
     }
 
     /// ``normalize(_:)`` for a host whose parser knows `ultrafast`
-    /// (`hasServiceTierUltrafast`, v0.22.7+). Older hosts warn and ignore
-    /// it, so for them it stays ``off`` exactly as before (C1).
+    /// (`hasServiceTierUltrafast`, v0.21.6+) and, from v0.22.0, its `ultra`
+    /// alias (`hasServiceTierUltraAlias`). A host that doesn't know a
+    /// spelling warns and ignores it, so it stays ``off`` there (C1).
     public static func normalize(_ raw: String, capabilities: HermesCapabilities) -> HermesServiceTier {
         let value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        if capabilities.hasServiceTierUltrafast, value == "ultrafast" || value == "ultra" { return .ultrafast }
+        if capabilities.hasServiceTierUltrafast, value == "ultrafast" { return .ultrafast }
+        if capabilities.hasServiceTierUltraAlias, value == "ultra" { return .ultrafast }
         return normalize(raw)
     }
 

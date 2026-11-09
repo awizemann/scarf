@@ -118,12 +118,13 @@ import Foundation
       ✗ failed  evil  Security scan blocked plugin install: Blocked (dangerous verdict, 1 critical). --force does not override a dangerous verdict.
     """
 
-    @Test func applyClassifiesEveryRow() {
+    @Test func applyClassifiesEveryRow() throws {
         guard case let .ran(rows) = HermesPluginsUpdateAllVerdict.judgeApply(
             output: Self.applyOut, exitCode: 1) else {
             Issue.record("expected ran"); return
         }
         #expect(rows.map(\.name) == ["weather", "notes", "risky", "evil"])
+        try #require(rows.count == 4)
         #expect(rows.map(\.status) == [.updated, .current, .failed, .failed])
         #expect(rows[0].detail == "abc12345..def67890")
         #expect(rows[0].cautionHold == nil)

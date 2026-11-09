@@ -765,7 +765,12 @@ public final class RichChatViewModel {
             copilotOffered: HermesCopilotPlugin.knownOffered(context: context))
         acpError = msg
         acpErrorHint = cls?.hint
-        acpErrorDetails = stderrTail.isEmpty ? nil : stderrTail
+        // Hermes's full text first (the banner shows only its lead), then
+        // the ACP process's stderr tail.
+        let details = [ACPClientError.fullServerDetails(error), stderrTail.isEmpty ? nil : stderrTail]
+            .compactMap { $0 }
+            .joined(separator: "\n\n")
+        acpErrorDetails = details.isEmpty ? nil : details
         acpErrorOAuthProvider = cls?.oauthProvider
         acpFailureHasNoServerText = !ACPClientError.carriesServerText(error)
         if let lost = ACPClientError.lostTurnRefusal(error) {

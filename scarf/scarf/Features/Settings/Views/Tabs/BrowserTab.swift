@@ -39,12 +39,14 @@ struct BrowserTab: View {
         coordinator.featureViewModel(for: .plugins) { PluginsViewModel(context: serverContext) }
     }
 
-    /// Whether the `camofox` plugin is installed. `nil` until the roster has
-    /// loaded; only consulted on `hasCamofoxLeftCore` hosts.
+    /// Whether the `camofox` plugin is installed AND enabled — Hermes's
+    /// loader is opt-in, so an installed but not-enabled plugin provides no
+    /// tools (`hermes_cli/plugins.py:1337-1349` @ v0.23.0). `nil` until the
+    /// roster has loaded; only consulted on `hasCamofoxLeftCore` hosts.
     private var camofoxInstalled: Bool? {
         let vm = pluginsViewModel
         guard vm.rosterLoaded else { return nil }
-        return vm.pluginActivation("camofox") != nil
+        return vm.isPluginReady("camofox")
     }
 
     /// v0.22.6+: Camofox left core for the `camofox` plugin
@@ -91,15 +93,19 @@ struct BrowserTab: View {
             ) { viewModel.setBrowserCloudProvider($0, capabilities: capabilities) }
             if Self.showsCamofoxMissingNote(capabilities: capabilities, current: viewModel.config.browserCloudProvider, camofoxInstalled: camofoxInstalled) {
                 PluginRequiredNote(pluginID: "camofox", feature: "The Camofox browser provider")
-                HStack(spacing: 6) {
-                    Text("Or in Terminal:")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Text(verbatim: "hermes plugins install camofox")
-                        .font(.system(.caption, design: .monospaced))
+                // The Terminal hint is for a missing plugin only; an installed
+                // but not-enabled one gets the note's own Enable path.
+                if pluginsViewModel.pluginActivation("camofox") == nil {
+                    HStack(spacing: 6) {
+                        Text("Or in Terminal:")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text(verbatim: "hermes plugins install camofox")
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 8)
                 }
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
             }
         }
         .task(id: capabilities.hasCamofoxLeftCore) {

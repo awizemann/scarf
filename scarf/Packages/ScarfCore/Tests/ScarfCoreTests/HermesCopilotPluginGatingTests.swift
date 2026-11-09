@@ -4,7 +4,8 @@ import Foundation
 
 /// GitHub Copilot left Hermes core at v0.22.6 (`hasCopilotLeftCore`) for the
 /// `github-copilot` plugin. v0.22.5 must behave exactly as before; v0.22.6+
-/// offers Copilot only when `$HERMES_HOME/plugins/github-copilot` exists.
+/// offers Copilot only when `$HERMES_HOME/plugins/github-copilot` exists AND
+/// config.yaml enables it (Hermes's loader is opt-in).
 @Suite struct HermesCopilotPluginGatingTests {
 
     static let v0225 = HermesCapabilities.parse("Hermes Agent v0.22.5 (2026.9.24)")
@@ -73,6 +74,8 @@ import Foundation
         if pluginPresent {
             try FileManager.default.createDirectory(
                 at: home.appendingPathComponent("plugins/github-copilot"), withIntermediateDirectories: true)
+            try "plugins:\n  enabled:\n  - github-copilot\n"
+                .write(to: home.appendingPathComponent("config.yaml"), atomically: true, encoding: .utf8)
         }
         let caps = tag == "v0.22.5" ? Self.v0225 : Self.v0230
         let ids = Set(ModelCatalogService(path: cache.path).loadProviders(capabilities: caps).map(\.providerID))
@@ -96,6 +99,15 @@ import Foundation
         #expect(!HermesCopilotPlugin.knownOffered(context: ctx, capabilities: Self.v0230))
         try FileManager.default.createDirectory(
             at: home.appendingPathComponent("plugins/github-copilot"), withIntermediateDirectories: true)
+        // Installed but not enabled: Hermes's opt-in loader skips it
+        // (hermes_cli/plugins.py:1337-1349 @ v0.23.0), so nothing routes.
+        #expect(!HermesCopilotPlugin.isInstalled(context: ctx, capabilities: Self.v0230))
+        #expect(!HermesCopilotPlugin.knownOffered(context: ctx, capabilities: Self.v0230))
+        let config = home.appendingPathComponent("config.yaml")
+        try "plugins:\n  enabled:\n  - github-copilot\n  disabled:\n  - github-copilot\n"
+            .write(to: config, atomically: true, encoding: .utf8)
+        #expect(!HermesCopilotPlugin.isInstalled(context: ctx, capabilities: Self.v0230))   // disabled wins
+        try "plugins:\n  enabled:\n  - github-copilot\n".write(to: config, atomically: true, encoding: .utf8)
         #expect(HermesCopilotPlugin.isInstalled(context: ctx, capabilities: Self.v0230))
         #expect(HermesCopilotPlugin.knownOffered(context: ctx, capabilities: Self.v0230))
         let msg = "401 Unauthorized from copilot"

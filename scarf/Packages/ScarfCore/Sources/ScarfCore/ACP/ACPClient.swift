@@ -1225,6 +1225,22 @@ public enum ACPClientError: Error, LocalizedError {
         return details?.trimmingCharacters(in: .whitespacesAndNewlines) == reason
     }
 
+    /// Hermes's whole `error.data.details` when ``errorDescription``'s
+    /// one-sentence lead drops part of it — e.g. gateway-backed ACP's start
+    /// failure, "Gateway could not start: the gateway exited with status 1
+    /// before it could serve:" followed by the redacted tail of the
+    /// gateway's own output and the command that shows the full log
+    /// (`startup_failure_report`, hermes_cli/gateway_runtime_start.py:131-157,
+    /// raised at gateway_client.py:355 @ v0.23.0). Without it the reason is
+    /// lost: the stderr tail is the ACP process's, not the gateway's. Nil
+    /// when the lead already says everything.
+    public static func fullServerDetails(_ error: Error) -> String? {
+        guard case let ACPClientError.rpcError(_, _, details?) = error else { return nil }
+        let trimmed = details.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, detailsLead(fromDetails: trimmed) != trimmed else { return nil }
+        return trimmed
+    }
+
     /// Whether `error` carries Hermes's own explanation (`error.data.details`).
     public static func carriesServerText(_ error: Error) -> Bool {
         guard case let ACPClientError.rpcError(_, _, details?) = error else { return false }

@@ -102,8 +102,22 @@ public enum HermesCopilotPlugin {
         knownOffered(context: context, capabilities: HermesVersionCache.shared.cached(for: context) ?? .empty)
     }
 
-    /// The directory check itself, for callers that already hold a transport.
+    /// Installed AND loadable, for callers that already hold a transport.
+    ///
+    /// The directory alone is not enough: `plugin_present` is only Hermes's
+    /// migration-notice check ("enabled or not"). Routing needs the plugin
+    /// LOADED, and the loader is opt-in — it skips a plugin in
+    /// `plugins.disabled` or missing from `plugins.enabled`
+    /// (`hermes_cli/plugins.py:1337-1349` @ v0.23.0). `plugins install` asks
+    /// "Enable now? [y/N]" (`plugins_cmd_install.py:628`), so installed but
+    /// not enabled is an ordinary state. Same rule as
+    /// `HermesPluginDirectoryScanner` / `PluginsViewModel.isPluginReady`.
+    /// `config.yaml` is the home's, i.e. the parent of `pluginsDir`.
     public nonisolated static func isInstalled(pluginsDir: String, transport: any ServerTransport) -> Bool {
-        transport.stat(pluginsDir + "/" + pluginID)?.isDirectory == true
+        guard transport.stat(pluginsDir + "/" + pluginID)?.isDirectory == true else { return false }
+        let configPath = (pluginsDir as NSString).deletingLastPathComponent + "/config.yaml"
+        let yaml = (try? transport.readFile(configPath)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        let lists = HermesPluginList.parseConfigActivationLists(yaml)
+        return HermesPluginList.status(name: pluginID, enabled: lists.enabled, disabled: lists.disabled) == .enabled
     }
 }

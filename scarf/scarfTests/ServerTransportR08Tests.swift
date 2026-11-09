@@ -18,11 +18,15 @@ import ScarfCore
         let home = try TempHermesHome()
         defer { home.cleanup() }
         if let env { try env.write(toFile: home.context.paths.envFile, atomically: true, encoding: .utf8) }
-        if let config { try config.write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8) }
-        // Pin the Copilot plugin as installed: the version probe reads this
-        // Mac's real `hermes`, and on v0.22.6+ Copilot's credentials count
-        // only with the `github-copilot` plugin present. With it, every host
-        // answers the same (pre-v0.22.6 never looks).
+        // Pin the Copilot plugin as installed AND enabled: the version probe
+        // reads this Mac's real `hermes`, and on v0.22.6+ Copilot's
+        // credentials count only when the `github-copilot` plugin is loadable
+        // (directory + `plugins.enabled`). With it, every host answers the
+        // same (pre-v0.22.6 never looks). None of these configs has its own
+        // `plugins:` block, so appending one can't collide.
+        let enableCopilot = "\nplugins:\n  enabled:\n  - \(HermesCopilotPlugin.pluginID)\n"
+        try ((config ?? "") + enableCopilot)
+            .write(toFile: home.context.paths.configYAML, atomically: true, encoding: .utf8)
         try FileManager.default.createDirectory(
             atPath: home.context.paths.pluginsDir + "/" + HermesCopilotPlugin.pluginID,
             withIntermediateDirectories: true)

@@ -2985,6 +2985,13 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// "Unknown service_tier" and ignores it.
     public var hasServiceTierUltrafast: Bool { isV0216OrLater }
 
+    /// The `ultra` spelling of ``hasServiceTierUltrafast``. Added a release
+    /// later than `ultrafast`: `SERVICE_TIER_WORDS` at v0.21.6 / v0.21.7 has
+    /// `ultrafast` only (`agent/fast_mode.py:31-34`), and `"ultra"` first
+    /// appears at v0.22.0 (`agent/fast_mode.py:33,36`), so an older host
+    /// warns "Unknown service_tier 'ultra'" and runs the normal tier.
+    public var hasServiceTierUltraAlias: Bool { atLeastSemver(0, 22, 0) }
+
     // MARK: v0.23.0 flags
     //
     // Absent at v0.22.7, the tag before v0.23.0.

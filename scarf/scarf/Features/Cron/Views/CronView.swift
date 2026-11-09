@@ -503,6 +503,7 @@ struct CronView: View {
                     .accessibilityIdentifier("cron.contextMenu.stopRun")
             }
             Button("Edit") { viewModel.editingJob = job }
+                .accessibilityIdentifier("cron.contextMenu.edit")
             // Round-4 decision 5: the row menu offers the same remedy the
             // detail pane's hint names, unconditionally — a `cron create`
             // pre-filled from the record is accepted for ANY job, terminal

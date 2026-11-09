@@ -152,8 +152,10 @@ struct PluginsView: View {
                 Spacer()
                 Button("Cancel") { viewModel.updateAllPreview = nil }
                     .keyboardShortcut(.cancelAction)
+                    .accessibilityIdentifier("plugins.updateAll.cancel")
                 Button("Update All") { viewModel.confirmUpdateAll() }
                     .buttonStyle(ScarfPrimaryButton())
+                    .accessibilityIdentifier("plugins.updateAll.confirm")
             }
         }
         .padding()
@@ -308,6 +310,7 @@ struct PluginsView: View {
                     .toggleStyle(.switch)
                     .controlSize(.small)
                     .help("Let the gateway apply plugin updates unattended (plugins.auto_apply). Widened permissions are never accepted unattended.")
+                    .accessibilityIdentifier("plugins.autoUpdate")
                 }
                 Button("Reload") { viewModel.load(force: true) }
                     .buttonStyle(ScarfGhostButton())
@@ -316,6 +319,7 @@ struct PluginsView: View {
                     Button("Update All…") { viewModel.previewUpdateAll() }
                         .buttonStyle(ScarfGhostButton())
                         .disabled(viewModel.isLoading)
+                        .accessibilityIdentifier("plugins.updateAll")
                 }
                 Button {
                     installIdentifier = ""
