@@ -12,18 +12,18 @@ reviewed: 2026-09-21
 reviewed_by: audit:claude-code (background)
 ---
 
-Format facts VERIFIED against Hermes v0.21.0 on this machine (charter C5), not from release notes: `hermes mcp add --help` prints `hermes mcp add [-h] [--url URL] [--command MCP_COMMAND] [--args ...] [--auth {oauth,header}] [--preset PRESET] [--connect-timeout N] [--env [ENV ...]] name`, exactly matching `HermesMCPAdd.stdioPlan`. A real emitted stdio entry (`~/.hermes/profiles/scarfbox-*/config.yaml`) is `mcp_servers:` → `  <name>:` → `    command:` scalar, `    args:` list, `    timeout:`, `    connect_timeout:`.
-
 ## Observations
 - [fact] There is NO `mcpServers` JSON file. Hermes's MCP config is a top-level `mcp_servers:` YAML block (snake_case) inside `<home>/config.yaml` (`HermesPathSet.configYAML`), and `home` follows `active_profile` — so a per-profile Hermes has its own server list. `HermesFileService` reads it with a hand-rolled indent-sensitive line scanner and writes it with a line-level patcher that preserves comments, ordering and unmodelled keys; there are no Codable structs and no YAML library anywhere on that path. #hermes #config
 - [fact] Boolean fields (enabled, supports_parallel_tool_calls, tools.resources, tools.prompts) are parsed through `boolish` / `boolishOptional` methods that accept a `capabilities: HermesCapabilities` parameter. Since Hermes v0.21.5, the capability gating allows numeric truthiness interpretation (0=false, non-0=true via Python semantics) BEFORE word matching on hosts that report the capability; pre-0.21.5 hosts read numeric values as default via the fallback, unchanged. #hermes #v0-21-5
 - [decision] `ProjectsMCPRegistrar` (Mac target) registers `scarf-projects` unconditionally at every launch, off-main on a detached task — Alan's call: no settings toggle, it is a first-class part of Scarf. LOCAL contexts only; an SSH context is skipped because the bundled binary is a Mach-O for this Mac, and remote hosts keep the skill fallback. #mcp #decision
-- [decision] CREATION goes through `hermes mcp add` (the argv Scarf already ships and has verified against the real argparse), never a hand-written YAML entry — with ONE exception since R01 (2026-09-26): OAuth servers on Hermes v0.17+, where `mcp add --auth oauth` cannot work without a TTY (see the R01 section below). RE-POINTING after the app moves uses a new `HermesFileService.setMCPServerCommand`, mirroring `setMCPServerCwd` through `patchMCPServerField` — remove-and-re-add would discard the user's own tool filters, timeouts and env on that entry. The command is quoted via `yamlScalar` because a bundle path can contain a space ("Scarf Dev.app"). #hermes
-- [constraint] The launch pass is IDEMPOTENT: an entry already pointing at this binary writes nothing at all, because Hermes watches its own config and a rewrite per launch is churn a running agent sees. An entry of the same name that is NOT a stdio server (a user's own URL server squatting the name) is left untouched. #gotcha
+- [decision] Registration (and re-pointing) are PINNED TO THE PROFILE: each entry carries `--args --hermes-home <profile-home>` so it runs in that profile's context and falls back correctly when the agent switches profiles. When the app launches, it also re-asserts the pin on entries in OTHER local profiles (read-only; never adds). #hermes #profiles
+- [decision] CREATION goes through `hermes mcp add` (the argv Scarf already ships and has verified against the real argparse), never a hand-written YAML entry — with ONE exception since R01 (2026-09-26): OAuth servers on Hermes v0.17+, where `mcp add --auth oauth` cannot work without a TTY (see the R01 section below). RE-POINTING after the app moves uses a new `HermesFileService.setMCPServerCommand`, mirroring `setMCPServerCwd` through `patchMCPServerField` — remove-and-re-add would discard the user's own tool filters, timeouts and env on that entry. The command and args are quoted via `yamlScalar` because a bundle path can contain a space ("Scarf Dev.app"). #hermes
+- [constraint] The launch pass is IDEMPOTENT: an entry already pointing at this binary with the correct pin writes nothing at all, because Hermes watches its own config and a rewrite per launch is churn a running agent sees. An entry of the same name that is NOT a stdio server (a user's own URL server squatting the name) is left untouched. #gotcha
 - [gotcha] The helper is copied into `Scarf.app/Contents/Helpers` by a `PBXCopyFilesBuildPhase` (dstSubfolderSpec 1 + dstPath `Contents/Helpers`, CodeSignOnCopy) and the registrar resolves `Contents/Helpers` then `Contents/MacOS`. A build with no helper (or a non-executable path) is a documented SKIP, never an error dialog — registering a command Hermes cannot spawn would leave a broken entry the user has to find and delete. #build
 
 ## Relations
 - relates_to [[scarf-projects MCP server: bundled helper, ScarfCore services, no parallel writers]]
+- documented_in [[Hermes-Version-Compatibility]]
 
 
 ## R2: the patcher fails closed, backs up, and verifies independently
@@ -41,7 +41,6 @@ t-1a1a9ce3. The line-based patcher's failure mode was never "one value goes wron
 - [gotcha] Dev-copy detection matched only the literal `-dev.app/`, so `/Applications/scarf-dev-next.app` (which exists on the maintainer's Mac alongside `scarf-dev.app` and `scarf.app`) re-pointed `command` at itself every launch while the installed app re-pointed it back — a rewrite war on a watched file. Now matched on "dev" as a whole token in the BUNDLE NAME (`devBundleName`). Bundle id cannot tell them apart: `build-detached.sh` keeps `com.scarf.app` on purpose so iCloud keeps working.
 
 
-
 ## R3: `oauth:` is a block Scarf only PARTIALLY models (v0.21.1)
 
 v0.21.1 added `mcp_servers.<name>.oauth.flow: browser|device`. It is the first key Scarf writes inside a nested block whose siblings it does not model.
@@ -52,10 +51,31 @@ v0.21.1 added `mcp_servers.<name>.oauth.flow: browser|device`. It is the first k
 - [gotcha] `oauthFlow` is modelled as `String?`, not an enum: `mcp_config.py:639-641` rejects anything outside `{browser, device}`, but keeping the raw string means an unknown future spelling round-trips instead of collapsing to a default. The two UI surfaces clamp instead — the editor picker offers ""/browser/device and the login sheet's initial selection falls back to `browser` for anything unrecognized.
 
 
-
 ## R01 (Hermes v0.21.5 audit, 2026-09-26): tools filters, float timeouts, OAuth creation
 
 t-a3ddf2d0, findings S09-F1..F6. Hermes citations @ v2026.9.24.
 
 - [gotcha] **The `tools:` sub-block parser must close a list on ANY non-`- ` line.** The old `tools.include` state swallowed every following line, so Scarf's OWN layout (`include:` → `exclude:` → `resources:` → `prompts:`) read excludes as includes and dropped `resources/prompts: false`; the editor then saved the misread, turning a blocklist into a whitelist of the blocked tools (P0). include/exclude now accept every form `_normalize_name_filter` does (`tools/mcp_tool_schema.py:231-240`): block list, flow list, bare string, null. #mcp #dataloss
-- [invariant] **`include: []` ≠ absent.** A list/string `include` is a whitelist even when empty — Hermes registers NOTHING for `[]` and include wins over exclude (`tools/mcp_tool_registration.py:209-225`); null/absent means "exclude applies". Modelled as `HermesMCPServer.toolsIncludeIsExplicit`; the writer omits empty lists and writes `include: []` only for the explicit case. The editor writes the tools block ONLY when a filter changed (`toolFiltersChanged`), and keeps an include list the user did not touch byte-for-byte (`preserveInclude`) because its meaning is version-dependent: before v0.20.6 (v2026.8.27) `_make_tool_filter` tested `if include_set:`, so `include: []` meant ALL tools; a blank item (`- ''` → `{''}`)
+- [invariant] **`include: []` ≠ absent.** A list/string `include` is a whitelist even when empty — Hermes registers NOTHING for `[]` and include wins over exclude (`tools/mcp_tool_registration.py:209-225`); null/absent means "exclude applies". Modelled as `HermesMCPServer.toolsIncludeIsExplicit`; the writer omits empty lists and writes `include: []` only for the explicit case. The editor writes the tools block ONLY when a filter changed (`toolFiltersChanged`), and keeps an include list the user did not touch byte-for-byte (`preserveInclude`) because its meaning is version-dependent: before v0.20.6 (v2026.8.27) `_make_tool_filter` tested `if include_set:`, so `include: []` meant ALL tools; a blank item (`- ''` → `{''}`) is treated as a meaningful set item in pre-20.6, not a filter-list end.
+
+
+## R4 (v0.21.6+): Capabilities-gating architecture; strict YAML loader; direct OAuth writes
+
+t-cc326efe.. Starting with v0.21.6, Hermes version capabilities are threaded through every config read and write path; duplicate key detection in `config.yaml` and `profile.yaml` is enforced on strict-loader hosts; and a new OAuth entry creation path bypasses `hermes mcp add` for hosts where it cannot work.
+
+- [fact] **`HermesCapabilities` is now first-class throughout.** `HermesVersionCache.shared` memoizes host capabilities per ServerContext (never probing from HermesFileService per charter C10). Every `HermesConfig(yaml:capabilities:)` parse receives the cached capabilities; `boolish` parsing gates numeric truthiness on `hasMCPBoolishNumericTruthiness` (v0.21.5+); `parseMCPServersBlock` receives capabilities so its callers need not thread it. #hermes #v0-21-6
+- [fact] **v0.21.6 strict YAML loader (ruamel, not PyYAML).** A key repeated in one mapping raises DuplicateKeyError; bare y/Y/n/N are booleans (exact as `boolish` words). `HermesYAML.firstDuplicateKey(in:)` scans for violations independent of parse — the write path calls `duplicateKeyWriteRefusal(in:capabilities:)` to gate all config.yaml and profile.yaml writes on strict-loader hosts. Dashboard (local) and iOS Settings surface parse failures via `HermesConfig.yamlDuplicateKey`. #hermes #v0-21-6 #dataloss
+- [decision] **New OAuth server creation path.** Since v0.21.5, on some hosts `hermes mcp add --auth oauth` cannot build the OAuth provider without a TTY (see R01). R4 adds `HermesFileService.addMCPServerOAuth` — when `capabilities.hasMCPOAuthAddNeedsDirectWrite` (determined by version probe, not capability key), `hermes mcp install <catalogIdentifier>` (from preset pick) writes the entry with the manifest's own `oauth:` block, and Scarf then calls `setMCPServerOAuthFlow` to pin the flow. This avoids the 90-second blocking spawn of `mcp add` on a launch path. #hermes #v0-21-5+
+- [fact] **Gateway state handles multiplexed profiles.** Named profiles served by the default multiplexer (`Hermes.profiles["<name>"]`) store their platform states under the root gateway_state.json as `<profile>:<platform>` keys (not individual files). `HermesFileService.gatewayStateData` reads the profile's own file (if it exists, for pre-multiplexer states) and merges or projects the root record (via `HermesGatewayStateProjection.effectiveRecord`). `configDerivedMultiplexServes` detects multiplexing from root config (fallback for hosts with no `served_profiles` key). #hermes #gateway
+
+## R5 (2026-09+): Profile pinning with --hermes-home
+
+t-9dab376a.. The `scarf-projects` MCP server registration now pins each entry to its profile's home via `--args --hermes-home <home>`. This ensures a multi-profile setup correctly channels the server through the right Hermes profile.
+
+- [fact] **Registration carries profile home as args.** `ProjectsMCPRegistrar.registrationArgs(home:)` returns `["--hermes-home", home]` passed to `hermes mcp add --args` (nargs=REMAINDER). The entry now includes `args:` with this pin so `hermes` invokes the server in the correct profile's context. #profiles #hermes
+- [decision] **The `Outcome` enum now includes `repinned(home:)`.** When the command is correct but the `--hermes-home` pin is missing or stale (from an older Scarf or profile clone), `setMCPServerArgs` updates it in place. `repinned` signals this pin-only update separately from `repointed` (which means the command changed). #profiles
+- [fact] **Multi-profile re-pinning on launch.** `repinOtherProfiles` scans for entries named `scarf-projects` in OTHER local profiles' configs; if found and pointing to the bundled binary (by helper name), it re-asserts both the command AND the `--hermes-home` pin for that profile. Never adds a new entry (profile activation still decides which profiles register the server). #profiles
+
+## Relations
+- relates_to [[scarf-projects MCP server: bundled helper, ScarfCore services, no parallel writers]]
+- documented_in [[Hermes-Version-Compatibility]]

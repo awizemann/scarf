@@ -7,7 +7,7 @@ source_paths: [scripts/ui-gate-vm.sh, scripts/release.sh, scripts/ui-gate.sh]
 source_paths_inferred: false
 source_sha: daa40485a10bcf22688d5e4b8f16e43de182a70c
 created: 2026-10-26
-updated: 2026-10-26
+updated: 2026-11-08
 reviewed: 2026-11-01
 reviewed_by: audit:claude-code (background)
 ---
@@ -31,3 +31,9 @@ Since 2026-10-26 Scarf's XCUITest plans run in a dedicated Tart VM via scripts/u
 - [operations] From commit 78413041 (after v3.7.0), release.sh runs the gate as host unit tests (ui-gate.sh --unit-only) plus Full,Live in scarf-ui (ui-gate-vm.sh --summary), booting a stopped VM headless; --host-ui-gate is the old on-screen gate, --gate-only is a rehearsal that stops before the bump. No usable VM stops the release; it never falls back to the screen #release
 - [gotcha] Never edit scripts/release.sh or ui-gate*.sh in a checkout where a release is running: bash reads the script from its open file as it goes, so an in-place edit broke a live 3.7.0 run on 2026-10-26. Change them in a worktree #release #agents
 - [flaky] ChatJourneyUITests/testKanbanChipCountFollowsTheChatAndCountsReview failed once inside the Live plan (chip 1, expected 2) and passed alone in 47 s, so it's an in-plan ordering/timing flake #testing
+
+
+- [decision] 2026-11-08 (branch feat/hermes-v0230-parity, uncommitted at time of writing): the VM gate runs as a REAL USER. Hermes comes from the tag's own scripts/install.sh --commit <sha> --non-interactive --skip-browser --skip-computer-use into ~/.hermes; the fixture is seeded IN ~/.hermes; the app launches with no SCARF_HERMES_HOME/HERMES_HOME (runner env TEST_RUNNER_SCARF_UITEST_REAL_HOME=1). Before each test ScarfUITestCase.resetRealHome writes a token into the runner container's tmp; guest.sh reset_loop stops app + gateway + hermes and rsyncs the seeded snapshot back. The runner is re-signed on the host with home-relative read-write /.hermes/. Host runs (ui-gate.sh) unchanged. Fixed the v0.22.6+ Live failures (gateway as gui/<uid> launchd job can't use a home inside the runner container) #vm #testing
+- [fact] The installer's payload in ~/.hermes is hermes-agent/ (code), tools/ (Python) and installs/ (dependency venv): never wipe, snapshot or copy them. A copied installs/ in a second data root fails ACP with "dependency environment is missing or outside this install". ~/.local/bin/hermes* are one-line exec scripts (not symlinks). The sandboxed runner can't run the installed hermes (git-derived version), so the gate passes SCARF_UITEST_HERMES_VERSION #vm
+- [fact] scarf-ui rebuilt 2026-11-08 from its own 120 GB golden (scarf-golden-27 → scarf-uitest-27, ScarfRack rig copy with VM_DISK_GB=120): ~70 GB free on boot, no work disk. Guest needs /Applications/Xcode.app → shared Xcode + xcode-select (the /usr/bin shims reject a non-.app path) so /usr/bin/git works. First green: Full 21 pass / 0 fail, Live 17 pass / 0 fail at v0.23.0 #vm
+- [gotcha] Host ui-gate.sh on a Mac whose UI automation isn't authorized dies "Timed out while enabling automation mode" (RUNNER-FAILED, no UI test runs) unless someone approves the prompt; a host whose own Hermes writes ~/.hermes/state.db mid-run trips the fixture self-check #testing
