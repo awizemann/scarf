@@ -313,6 +313,7 @@ struct ScarfApp: App {
             }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") { updater.checkForUpdates() }
+                    .disabled(!updater.canCheckForUpdates)
             }
             // File → Open Server submenu: one entry per registered server
             // (including Local). Each opens or focuses a window bound to
@@ -1157,6 +1158,7 @@ struct MenuBarMenu: View {
                 Analytics.menuBarInteraction()
                 updater.checkForUpdates()
             }
+            .disabled(!updater.canCheckForUpdates)
             Divider()
             Button("Quit Scarf") {
                 NSApplication.shared.terminate(nil)

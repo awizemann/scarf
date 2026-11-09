@@ -24,6 +24,11 @@ final class UpdaterService: NSObject {
         set { controller.updater.automaticallyChecksForUpdates = newValue }
     }
 
+    /// False in a `--scarf-test-mode` launch, where Sparkle is never started:
+    /// a check there can only fail ("updater hasn't been started yet"), so
+    /// every Check for Updates button is disabled instead.
+    let canCheckForUpdates: Bool
+
     /// Last time Sparkle checked the appcast (nil before the first check).
     var lastUpdateCheckDate: Date? {
         controller.updater.lastUpdateCheckDate
@@ -40,6 +45,7 @@ final class UpdaterService: NSObject {
         let startUpdater = !TestModeFlags.shared.isTestMode
         let updateCheckDelegate = UpdateCheckAnalyticsDelegate()
         self.updateCheckDelegate = updateCheckDelegate
+        self.canCheckForUpdates = startUpdater
         self.controller = SPUStandardUpdaterController(
             startingUpdater: startUpdater,
             updaterDelegate: updateCheckDelegate,
@@ -50,6 +56,7 @@ final class UpdaterService: NSObject {
 
     /// Triggers a user-initiated update check. Sparkle handles the UI (alert, progress, install).
     func checkForUpdates() {
+        guard canCheckForUpdates else { return }
         controller.checkForUpdates(nil)
     }
 }

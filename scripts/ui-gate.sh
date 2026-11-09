@@ -152,12 +152,22 @@ mkdir -p "$DERIVED_DATA"
 FIXTURE_DIR=""
 cleanup() {
   local status=$?
+  # The Scarf copies this run launched (the unit-test host, a UI test's app
+  # left open by an interrupted run) run in test mode, where Sparkle is off:
+  # left behind, they look like the real app and fail Check for Updates.
+  if [[ -n "$DERIVED_DATA" ]]; then
+    pkill -f "$DERIVED_DATA/Build/Products/" 2>/dev/null || true
+    local real; real="$(cd "$DERIVED_DATA" 2>/dev/null && pwd -P)" && pkill -f "$real/Build/Products/" 2>/dev/null || true
+  fi
   if [[ $KEEP_FIXTURE -eq 0 && -n "$FIXTURE_DIR" && -d "$FIXTURE_DIR" ]]; then
     rm -rf "$FIXTURE_DIR"
   fi
   exit "$status"
 }
 trap cleanup EXIT
+# A Ctrl-C or kill runs the cleanup too (bash skips the EXIT trap on a signal).
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ---------- fixture ----------
 # The unit tests don't read it.

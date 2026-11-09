@@ -42,6 +42,7 @@ struct UpdatesSection: View {
                 .frame(width: 160, alignment: .trailing)
             Button("Check for Updates…") { updater.checkForUpdates() }
                 .controlSize(.small)
+                .disabled(!updater.canCheckForUpdates)
             Spacer()
         }
         .padding(.horizontal, 12)
