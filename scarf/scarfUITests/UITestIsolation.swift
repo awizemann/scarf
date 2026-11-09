@@ -88,14 +88,30 @@ class ScarfUITestCase: XCTestCase {
     /// Env var the Live test plan sets. See `requireLive()`.
     static let liveEnvVar = "SCARF_UITEST_LIVE"
 
+    /// Env var `ui-gate-vm.sh` sets (as `TEST_RUNNER_SCARF_UITEST_REAL_HOME=1`)
+    /// in its throwaway VM, where Hermes is installed by its own installer
+    /// and seeded in the real `~/.hermes`, as a user's Mac would have it.
+    /// Then the app runs with no home override, `isolatedHome` IS
+    /// `~/.hermes`, and the guest puts that home back to its seeded state
+    /// before every test (see `resetRealHome()`). Never set it on a Mac
+    /// whose `~/.hermes` you care about.
+    static let realHomeEnvVar = "SCARF_UITEST_REAL_HOME"
+
+    static let usesRealHome = ProcessInfo.processInfo.environment[realHomeEnvVar] == "1"
+
     override func setUpWithError() throws {
         try super.setUpWithError()
         continueAfterFailure = false
-        isolatedHome = try Self.makeIsolatedHermesHome()
+        if Self.usesRealHome {
+            try Self.resetRealHome()
+            isolatedHome = (Self.realHome as NSString).appendingPathComponent(".hermes")
+        } else {
+            isolatedHome = try Self.makeIsolatedHermesHome()
+        }
     }
 
     override func tearDownWithError() throws {
-        if let isolatedHome {
+        if let isolatedHome, !Self.usesRealHome {
             try? FileManager.default.removeItem(atPath: isolatedHome)
         }
         isolatedHome = nil
@@ -162,14 +178,40 @@ class ScarfUITestCase: XCTestCase {
         return home
     }
 
-    /// An `XCUIApplication` pinned to this test's throwaway Hermes home.
+    /// Real-home mode: asks the guest to stop the gateway and put `~/.hermes`
+    /// back to its seeded state, and waits for it. The sandboxed runner can't
+    /// stop a launchd job itself, so it writes a request into its own
+    /// container's tmp, which `ui-gate-vm.sh`'s guest loop watches.
+    static func resetRealHome(timeout: TimeInterval = 180) throws {
+        let dir = NSTemporaryDirectory() as NSString
+        let request = dir.appendingPathComponent("scarf-real-home-reset.request")
+        let done = dir.appendingPathComponent("scarf-real-home-reset.done")
+        let token = UUID().uuidString
+        try token.write(toFile: request, atomically: true, encoding: .utf8)
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let got = try? String(contentsOfFile: done, encoding: .utf8) {
+                if got == token { return }
+                if got.hasPrefix("FAIL \(token)") {
+                    throw NSError(domain: "ScarfUITestCase", code: 2, userInfo: [NSLocalizedDescriptionKey: "the guest could not reset ~/.hermes: \(got)"])
+                }
+            }
+            Thread.sleep(forTimeInterval: 0.25)
+        }
+        throw NSError(domain: "ScarfUITestCase", code: 1, userInfo: [NSLocalizedDescriptionKey: "no reset of ~/.hermes within \(Int(timeout)) s (is ui-gate-vm.sh's guest loop running?)"])
+    }
+
+    /// An `XCUIApplication` pinned to this test's throwaway Hermes home
+    /// (in real-home mode, launched as a user would: no override at all).
     /// The ONLY sanctioned way to construct one in this target.
     func makeApp(extraLaunchArguments: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         // Standard arguments first so a test's own can still override them.
         app.launchArguments = ["--scarf-test-mode"] + Self.standardLaunchArguments + extraLaunchArguments
-        app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
-        app.launchEnvironment["HERMES_HOME"] = isolatedHome
+        if !Self.usesRealHome {
+            app.launchEnvironment["SCARF_HERMES_HOME"] = isolatedHome
+            app.launchEnvironment["HERMES_HOME"] = isolatedHome
+        }
         // Lets a version-routing `hermes` shim pick a Hermes build per run.
         if let liveHermes = ProcessInfo.processInfo.environment["SCARF_LIVE_HERMES"] {
             app.launchEnvironment["SCARF_LIVE_HERMES"] = liveHermes
@@ -466,6 +508,65 @@ class ScarfUITestCase: XCTestCase {
             throw XCTSkip("Live-only test — no hermes binary at \(Self.hermesBinary).")
         }
     }
+    // MARK: - Installed Hermes version
+
+    /// `major.minor.patch` of the hermes binary the app under test will use,
+    /// parsed from `hermes --version` ("Hermes Agent v0.23.0 (…)"; a dev
+    /// build's "+209.g…" suffix is ignored, as in the app's own parser).
+    /// Nil when there is no binary or the line doesn't parse. Computed once
+    /// per runner: every test in one invocation shares the same binary.
+    static let installedHermesVersion: (Int, Int, Int)? = {
+        // Real-home mode: the sandboxed runner can't run the installed hermes
+        // (it derives its version through git), so ui-gate-vm.sh hands over
+        // the `hermes --version` line it read in the guest.
+        let text: String
+        if usesRealHome {
+            text = ProcessInfo.processInfo.environment["SCARF_UITEST_HERMES_VERSION"] ?? ""
+        } else {
+            guard let line = runHermesVersion() else { return nil }
+            text = line
+        }
+        guard let regex = try? NSRegularExpression(pattern: #"v(\d+)\.(\d+)\.(\d+)"#),
+              let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text))
+        else { return nil }
+        let parts = (1...3).compactMap { i -> Int? in
+            guard let range = Range(match.range(at: i), in: text) else { return nil }
+            return Int(text[range])
+        }
+        guard parts.count == 3 else { return nil }
+        return (parts[0], parts[1], parts[2])
+    }()
+
+    private static func runHermesVersion() -> String? {
+        guard FileManager.default.isExecutableFile(atPath: hermesBinary) else { return nil }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: hermesBinary)
+        process.arguments = ["--version"]
+        let out = Pipe()
+        process.standardOutput = out
+        process.standardError = Pipe()
+        let watchdog = DispatchWorkItem { if process.isRunning { process.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 30, execute: watchdog)
+        guard (try? process.run()) != nil else { watchdog.cancel(); return nil }
+        let text = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        watchdog.cancel()
+        return text
+    }
+
+    /// Skip (never fail) a journey for a surface the installed Hermes is too
+    /// old to offer: the app hides it there (charter C1), so its absence is
+    /// correct, and the hidden-on-old-hosts half is covered by the
+    /// HermesCapabilities unit tests.
+    func requireHermes(atLeast floor: (Int, Int, Int), for surface: String) throws {
+        guard let version = Self.installedHermesVersion else {
+            throw XCTSkip("\(surface): could not read `hermes --version` from \(Self.hermesBinary).")
+        }
+        guard version >= floor else {
+            throw XCTSkip("\(surface) needs Hermes v\(floor.0).\(floor.1).\(floor.2)+; this runner has v\(version.0).\(version.1).\(version.2).")
+        }
+    }
+
     // MARK: - Diagnostics
 
     /// Attach a screenshot of the app to the current test.

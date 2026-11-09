@@ -297,6 +297,97 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
         XCTAssertNotEqual(app.state, .notRunning, "Scarf terminated during the cron journey.")
     }
 
+    // MARK: - Journey: Cron missed-run policy (Hermes v0.22.6+)
+
+    /// The editor's "Missed runs" picker reaches `catch_up` in
+    /// `cron/jobs.json`: Skip on create → `false` (`cron create --catch-up off`),
+    /// then "Run once on return" through Edit → `true` (`cron edit
+    /// --catch-up on`). Flag at hermes_cli/subcommands/cron.py:21-26, wired
+    /// to create :55 and edit :130 @ v0.23.0; stored by
+    /// cron/jobs.py `_normalize_catch_up` (:1747).
+    @MainActor
+    func testCronMissedRunPolicyReachesJobsJSON() throws {
+        try requireHermes(atLeast: (0, 22, 6), for: "Cron missed-run policy")
+        warmHermesHome()
+        let app = makeApp(extraLaunchArguments: Self.sidebarLaunchArguments + Self.windowFrameLaunchArguments + Self.animationLaunchArguments)
+        launchAndSurface(app)
+        defer { gracefulQuit(app) }
+        requireWideWindow(app)
+
+        openSection(app, "Cron")
+
+        let idsBefore = Set(cronJobsOnDisk().map(\.id))
+        tap(app, "cron.newJob")
+        let schedule = app.textFields.matching(identifier: "cron.editor.schedule").firstMatch
+        XCTAssertTrue(schedule.waitForExistence(timeout: 25), "Cron create sheet never presented.")
+        _ = fill(app.textFields.matching(identifier: "cron.editor.name").firstMatch, "UIG-\(UUID().uuidString.prefix(4))")
+        type(into: schedule, "every 90m")
+        type(into: app.textViews.matching(identifier: "cron.editor.prompt").firstMatch, "ok")
+
+        chooseMissedRuns(app, "Skip")
+
+        let save = control(app, "cron.editor.save")
+        XCTAssertTrue(save.waitForExistence(timeout: 20) && save.isEnabled, "cron.editor.save is missing or disabled.")
+        save.click()
+
+        var created: String?
+        XCTAssertTrue(
+            waitUntil("cron create reaches jobs.json", timeout: 30) {
+                created = self.cronJobsOnDisk().first { !idsBefore.contains($0.id) }?.id
+                return created != nil
+            },
+            "Save created no job in cron/jobs.json. cron.message says: '\(cronMessage(app))'."
+        )
+        let jobID = try XCTUnwrap(created)
+        XCTAssertTrue(
+            waitUntil("catch_up=false in jobs.json", timeout: 15) { self.catchUpOnDisk(jobID: jobID) == .some(false) },
+            "Created with Missed runs = Skip, but jobs.json has catch_up=\(String(describing: catchUpOnDisk(jobID: jobID))) for \(jobID)."
+        )
+
+        // --- Edit: Skip → Run once on return --------------------------
+        let jobRow = row(app, jobID: jobID)
+        XCTAssertTrue(jobRow.waitForExistence(timeout: 20), "cron.row.\(jobID) never rendered.")
+        jobRow.rightClick()
+        let edit = app.menuItems.matching(identifier: "cron.contextMenu.edit").firstMatch
+        XCTAssertTrue(edit.waitForExistence(timeout: 15), "The cron row's context menu offered no Edit item.")
+        edit.click()
+        XCTAssertTrue(
+            app.popUpButtons.matching(identifier: "cron.editor.catchUp").firstMatch.waitForExistence(timeout: 25),
+            "The edit sheet has no cron.editor.catchUp picker on a v0.22.6+ host."
+        )
+        chooseMissedRuns(app, "Run once on return")
+        control(app, "cron.editor.save").click()
+
+        XCTAssertTrue(
+            waitUntil("catch_up=true in jobs.json", timeout: 30) { self.catchUpOnDisk(jobID: jobID) == .some(true) },
+            "Edited Missed runs to 'Run once on return', but jobs.json has catch_up=\(String(describing: catchUpOnDisk(jobID: jobID))). cron.message says: '\(cronMessage(app))'."
+        )
+        XCTAssertNotEqual(app.state, .notRunning, "Scarf terminated during the cron catch-up journey.")
+    }
+
+    /// Pick a row of the editor's "Missed runs" pop-up by its title.
+    private func chooseMissedRuns(_ app: XCUIApplication, _ title: String) {
+        let picker = app.popUpButtons.matching(identifier: "cron.editor.catchUp").firstMatch
+        XCTAssertTrue(picker.waitForExistence(timeout: 20),
+                      "No cron.editor.catchUp picker on a v0.22.6+ host. On screen: \(visibleIdentifiers(app))")
+        picker.click()
+        let item = app.menuItems.matching(NSPredicate(format: "title == %@", title)).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "Missed runs has no '\(title)' row.")
+        item.click()
+    }
+
+    /// `catch_up` of one job as Hermes stored it: nil when absent or null
+    /// (the "Default (config)" state), otherwise the stored Bool.
+    private func catchUpOnDisk(jobID: String) -> Bool? {
+        guard let isolatedHome,
+              let data = try? Data(contentsOf: URL(fileURLWithPath: isolatedHome).appendingPathComponent("cron/jobs.json")),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let jobs = root["jobs"] as? [[String: Any]],
+              let job = jobs.first(where: { $0["id"] as? String == jobID })
+        else { return nil }
+        return job["catch_up"] as? Bool
+    }
+
     // MARK: - Journey: Kanban
 
     /// Create a card → verify it lands in Up Next → move it to Blocked
@@ -1028,6 +1119,8 @@ final class CronKanbanJourneyUITests: ScarfUITestCase {
     /// xcodebuild command line), the same place `makeIsolatedHermesHome`
     /// reads it, so the two can never disagree about which mode this is.
     private var isFixtureRun: Bool {
+        // Real-home mode: the gate seeded ~/.hermes with the fixture.
+        if Self.usesRealHome { return true }
         let path = ProcessInfo.processInfo.environment[Self.fixtureHomeEnvVar] ?? ""
         guard !path.isEmpty else { return false }
         let marker = (path as NSString).appendingPathComponent(Self.testHomeMarkerFilename)

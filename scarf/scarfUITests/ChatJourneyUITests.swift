@@ -119,10 +119,11 @@ final class ChatJourneyUITests: ScarfUITestCase {
         // a leak that also broke the journey must still be diagnosed as
         // a leak.
         let after = Self.modificationDate(ofFileAt: Self.realStateDBPath)
-        XCTAssertEqual(
+        // In real-home mode the app is meant to write ~/.hermes.
+        if !Self.usesRealHome { XCTAssertEqual(
             after, realStateDBModified,
             "\(Self.realStateDBPath) was written while the chat journey ran — the isolated home leaked and this test just added a session to the developer's real Hermes history. Check SCARF_HERMES_HOME/HERMES_HOME on every launch."
-        )
+        ) }
         realStateDBModified = nil
         try super.tearDownWithError()
     }
@@ -238,6 +239,13 @@ final class ChatJourneyUITests: ScarfUITestCase {
             // the log when the answer is "the reply is there but the
             // label does not look how the test expected".
             print("[ChatJourney] transcript labels on screen at timeout: \(visibleTranscriptLabels(app))")
+            // The ACP error's full text (Hermes's whole explanation, e.g. a
+            // gateway start failure's output tail) is behind "Show details".
+            let showDetails = app.windows.buttons.matching(NSPredicate(format: "title == %@ OR label == %@", "Show details", "Show details")).firstMatch
+            if showDetails.exists {
+                showDetails.click()
+                attachScreenshot(app, named: "chat-error-details", keepAlways: true)
+            }
             print("[ChatJourney] AX tree at timeout:\n\(app.windows.firstMatch.debugDescription)")
             // The banner is the app's own explanation (bad credentials,
             // a refused session, a dead ACP process) and is far more
@@ -371,6 +379,55 @@ final class ChatJourneyUITests: ScarfUITestCase {
         XCTAssertEqual(assistants, 1, "Expected exactly one (fresh) answer after /retry; the old one must be gone.")
         XCTAssertTrue(bubbleText(app, role: "You", containing: "BRAVO").exists)
         attachScreenshot(app, named: "retry-replaced-the-answer", keepAlways: false)
+    }
+
+    // MARK: - Journey: ACP config options (Hermes v0.22.6+)
+
+    /// Gateway-backed ACP advertises `configOptions` on session/new and
+    /// takes `session/set_config_option` (acp_adapter/gateway_server.py:582-616
+    /// @ v0.23.0). The reasoning-effort chip is drawn only from what Hermes
+    /// sent and its label only ever changes from Hermes's reply (no
+    /// optimistic update in `ChatSession.setConfigOption`), so a changed
+    /// label proves the round trip. The model badge offers "Reset to default
+    /// model" (`/model reset`, `hasModelReset`).
+    @MainActor
+    func testReasoningEffortPickerRoundTripsAndModelResetIsOffered() throws {
+        try requireLive()
+        try requireUsableProvider()
+        try requireHermes(atLeast: (0, 22, 6), for: "ACP config options")
+
+        let app = launchExpanded()
+        addTeardownBlock { [weak self] in
+            MainActor.assumeIsolated { self?.gracefulQuit(app) }
+        }
+        try openSection(app, "Chat")
+
+        sendFromComposer(app, "Reply with exactly: OK")
+        XCTAssertTrue(awaitBubble(app, role: "Assistant", containing: "OK", timeout: Self.replyTimeout),
+                      "No assistant reply containing OK.")
+        XCTAssertTrue(awaitIdle(app), "The chat never went idle; reasoning changes are idle-only.")
+
+        let chip = element(app, "chat.config.reasoning_effort")
+        XCTAssertTrue(chip.waitForExistence(timeout: 20),
+                      "No chat.config.reasoning_effort chip on a v0.22.6+ gateway-backed chat — configOptions never arrived or were dropped.")
+        let before = (chip.value as? String ?? "").lowercased()
+        let target = before == "high" ? "low" : "high"
+        chip.click()
+        let item = app.menuItems.matching(NSPredicate(format: "title ==[c] %@", target)).firstMatch
+        XCTAssertTrue(item.waitForExistence(timeout: 10), "The reasoning menu has no '\(target)' row.")
+        item.click()
+        let followed = waitUntil(timeout: 30, describing: "the reasoning chip to read '\(target)'") {
+            (chip.value as? String ?? "").lowercased() == target
+        }
+        attachScreenshot(app, named: "reasoning chip after set", keepAlways: !followed)
+        XCTAssertTrue(followed, "Picked reasoning '\(target)' but the chip still reads '\(chip.value as? String ?? "")' — Hermes's set_config_option reply never moved it.")
+
+        let badge = element(app, "chat.model.badge")
+        XCTAssertTrue(badge.waitForExistence(timeout: 15), "No chat.model.badge in the session bar.")
+        badge.click()
+        XCTAssertTrue(element(app, "chat.model.reset").waitForExistence(timeout: 15),
+                      "The model badge offers no 'Reset to default model' on a v0.22.6+ gateway-backed chat.")
+        app.typeKey(.escape, modifierFlags: [])
     }
 
     /// Skip below Hermes v0.22.3, where `/undo` and `/retry` are not served

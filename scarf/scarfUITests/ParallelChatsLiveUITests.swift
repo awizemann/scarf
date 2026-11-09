@@ -61,7 +61,9 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
 
     override func tearDownWithError() throws {
         let after = Self.modificationDate(ofFileAt: Self.realStateDBPath)
-        XCTAssertEqual(after, realStateDBModified, "\(Self.realStateDBPath) was written: the isolated home leaked.")
+        if !Self.usesRealHome {
+            XCTAssertEqual(after, realStateDBModified, "\(Self.realStateDBPath) was written: the isolated home leaked.")
+        }
         try super.tearDownWithError()
     }
 
@@ -780,11 +782,19 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         if overSSH, ProcessInfo.processInfo.environment["SCARF_UITEST_REAL_REMOTE"] != nil {
             return lines.filter { $0.hasPrefix("real-remote-acp ") }.count
         }
-        // Hermes's own Python process, not a wrapping shell or an ssh client.
-        // SSHTransport pins a remote root home with `-p default`; a local chat
-        // runs bare `hermes acp`, so this also tells the two apart.
-        let needle = overSSH ? "/venv/bin/hermes -p default acp" : "/venv/bin/hermes acp"
-        return lines.filter { $0.contains("/venv/bin/python") && $0.hasSuffix(needle) }.count
+        // Hermes's own Python process, not a wrapping shell or an ssh client:
+        // a venv install runs `…/venv/bin/python …/venv/bin/hermes acp`, the
+        // installer's launcher `…/.hermes/tools/python…/bin/python3 -I -c
+        // <launcher that imports hermes_cli> acp`. SSHTransport pins a remote
+        // root home with `-p default`; a local chat runs bare `hermes acp`,
+        // so this also tells the two apart.
+        let remote = " -p default acp"
+        return lines.filter { line in
+            guard line.contains("/bin/python"),
+                  line.contains("/venv/bin/hermes ") || line.contains("hermes_cli")
+            else { return false }
+            return overSSH ? line.hasSuffix(remote) : line.hasSuffix(" acp") && !line.hasSuffix(remote)
+        }.count
     }
 
     private func acpProcessList() -> String {
@@ -913,6 +923,17 @@ final class ParallelChatsLiveUITests: ScarfUITestCase {
         guard !condition else { return }
         let text = message()
         attachScreenshot(app, named: "parallel-chats-failure", keepAlways: true)
+        // An ACP error's full text (Hermes's own explanation, stderr tail
+        // included) is behind "Show details": open it and log what it says.
+        let showDetails = app.windows.buttons.matching(NSPredicate(format: "title == %@ OR label == %@", "Show details", "Show details")).firstMatch
+        if showDetails.exists {
+            showDetails.click()
+            attachScreenshot(app, named: "parallel-chats-error-details", keepAlways: true)
+            let details = app.windows.descendants(matching: .staticText)
+                .allElementsBoundByIndex.compactMap { $0.value as? String }
+                .filter { $0.count > 60 && !$0.contains("This is an automated UI test") }
+            print("[ParallelChats] error details:\n\(details.joined(separator: "\n---\n"))")
+        }
         let banner = element(app, "error.banner")
         print("[ParallelChats] processes at failure:\n\(acpProcessList())")
         let hints = app.windows.descendants(matching: .staticText)

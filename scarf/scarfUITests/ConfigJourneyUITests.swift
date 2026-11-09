@@ -81,10 +81,13 @@ final class ConfigJourneyUITests: ScarfUITestCase {
     override func tearDownWithError() throws {
         // Runs even when the test failed, which is when it matters most.
         let after = Self.digest(ofFileAt: Self.realConfigPath)
-        XCTAssertEqual(
-            after, realConfigDigest,
-            "\(Self.realConfigPath) changed while a config journey ran — the isolated home leaked. Every write in this file must land in SCARF_HERMES_HOME."
-        )
+        // In real-home mode the app is meant to write ~/.hermes.
+        if !Self.usesRealHome {
+            XCTAssertEqual(
+                after, realConfigDigest,
+                "\(Self.realConfigPath) changed while a config journey ran — the isolated home leaked. Every write in this file must land in SCARF_HERMES_HOME."
+            )
+        }
         realConfigDigest = nil
         try super.tearDownWithError()
     }
@@ -517,6 +520,188 @@ final class ConfigJourneyUITests: ScarfUITestCase {
             configValue(atPath: ["timezone"]), sentinelTimezone,
             "The relaunched app changed timezone out from under the test."
         )
+    }
+
+    // MARK: - Journey: skill lock (Hermes v0.22.6+)
+
+    /// The Skills detail pane's lock switch drives `hermes curator
+    /// lock|unlock` (hermes_cli/curator.py:243-270 @ v0.23.0), which records
+    /// `{"<skill>": {"locked": true}}` in `<home>/skills/.usage.json`
+    /// (tools/skill_usage.py:580-585). Asserted against that file both ways.
+    /// Needs the fixture's seeded `openhue` skill.
+    @MainActor
+    func testSkillLockWritesUsageSidecar() throws {
+        try requireHermes(atLeast: (0, 22, 6), for: "Skill lock")
+        let skillsDir = (isolatedHome as NSString).appendingPathComponent("skills")
+        let categories = (try? FileManager.default.contentsOfDirectory(atPath: skillsDir)) ?? []
+        guard categories.contains(where: {
+            FileManager.default.fileExists(atPath: "\(skillsDir)/\($0)/openhue/SKILL.md")
+        }) else {
+            throw XCTSkip("No seeded openhue skill under \(skillsDir) — run with the fixture home (scripts/ui-fixture/make-ui-fixture.sh).")
+        }
+        XCTAssertNotEqual(lockedOnDisk("openhue"), true, "openhue is already locked before the test touched it.")
+
+        let app = launchExpanded()
+        defer { gracefulQuit(app) }
+        try openSection(app, "Skills")
+
+        let row = element(app, "skills.row.openhue")
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "The Skills list never showed skills.row.openhue.")
+        row.click()
+
+        let lock = element(app, "skills.detail.lock")
+        XCTAssertTrue(lock.waitForExistence(timeout: 20), "No skills.detail.lock switch on a v0.22.6+ host.")
+        lock.click()
+        let locked = waitUntil(timeout: 30, describing: "openhue locked in skills/.usage.json") {
+            self.lockedOnDisk("openhue") == true
+        }
+        attach(app, named: "skills — locked", keepAlways: !locked)
+        XCTAssertTrue(locked, "Switched the lock on, but skills/.usage.json has locked=\(String(describing: lockedOnDisk("openhue"))) for openhue.")
+
+        // The switch is disabled while the CLI call is in flight; wait for it to settle.
+        XCTAssertTrue(waitUntil(timeout: 20, describing: "lock switch re-enabled") { lock.isEnabled },
+                      "skills.detail.lock never re-enabled after locking.")
+        lock.click()
+        let unlocked = waitUntil(timeout: 30, describing: "openhue unlocked in skills/.usage.json") {
+            self.lockedOnDisk("openhue") == false
+        }
+        attach(app, named: "skills — unlocked", keepAlways: !unlocked)
+        XCTAssertTrue(unlocked, "Switched the lock off, but skills/.usage.json has locked=\(String(describing: lockedOnDisk("openhue"))) for openhue.")
+    }
+
+    /// `locked` for one skill in `<home>/skills/.usage.json`; nil when the
+    /// file or the record is absent.
+    private func lockedOnDisk(_ skill: String) -> Bool? {
+        let path = ((isolatedHome as NSString).appendingPathComponent("skills") as NSString)
+            .appendingPathComponent(".usage.json")
+        guard let data = FileManager.default.contents(atPath: path),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let record = root[skill] as? [String: Any]
+        else { return nil }
+        return record["locked"] as? Bool ?? false
+    }
+
+    // MARK: - Journey: plugins auto-update and update-all (Hermes v0.23.0+)
+
+    /// The Auto-update switch drives `hermes plugins auto-update on|off`
+    /// (hermes_cli/subcommands/plugins.py:80-88 @ v0.23.0), which sets
+    /// `plugins.auto_apply` in config.yaml; asserted against the file both
+    /// ways. Then "Update All…" runs Hermes's bare `plugins update` preview:
+    /// it must end in either "nothing to update" or the confirm sheet, which
+    /// this test only ever cancels (never `--yes`).
+    @MainActor
+    func testPluginsAutoUpdateWritesConfigAndUpdateAllPreviews() throws {
+        try requireHermes(atLeast: (0, 23, 0), for: "Plugins auto-update")
+        let app = launchExpanded()
+        defer { gracefulQuit(app) }
+        try openSection(app, "Plugins")
+
+        let toggle = element(app, "plugins.autoUpdate")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 30),
+                      "No plugins.autoUpdate switch on a v0.23.0 host — `plugins auto-update` printed no state Scarf could read.")
+        let before = configValue(atPath: ["plugins", "auto_apply"]) == "true"
+
+        toggle.click()
+        let flipped = waitUntil(timeout: 30, describing: "plugins.auto_apply == \(!before)") {
+            self.configValue(atPath: ["plugins", "auto_apply"]) == String(!before)
+        }
+        attach(app, named: "plugins — auto-update flipped", keepAlways: !flipped)
+        XCTAssertTrue(flipped, "Flipped Auto-update, but config.yaml has plugins.auto_apply = \(configValue(atPath: ["plugins", "auto_apply"]) ?? "<absent>").")
+
+        toggle.click()
+        XCTAssertTrue(
+            waitUntil(timeout: 30, describing: "plugins.auto_apply == \(before)") {
+                self.configValue(atPath: ["plugins", "auto_apply"]) == String(before)
+            },
+            "Flipped Auto-update back, but config.yaml has plugins.auto_apply = \(configValue(atPath: ["plugins", "auto_apply"]) ?? "<absent>")."
+        )
+
+        // --- Update All… is a preview, never an apply ----------------
+        let updateAll = element(app, "plugins.updateAll")
+        XCTAssertTrue(updateAll.waitForExistence(timeout: 20), "No plugins.updateAll button on a v0.23.0 host.")
+        updateAll.click()
+        // The outcome bar's accessibility label leads with the outcome word
+        // ("Succeeded: No plugin updates to apply", "Failed: …",
+        // OutcomeMessageBar.spoken), and a success fades after
+        // OutcomeMessage.successTTL (3 s) — so match by substring and keep
+        // the first sighting rather than asking whether it is on screen now.
+        let cancel = element(app, "plugins.updateAll.cancel")
+        let outcomes = app.windows.descendants(matching: .any).matching(NSPredicate(
+            format: "label CONTAINS %@ OR label BEGINSWITH %@ OR label BEGINSWITH %@",
+            "No plugin updates to apply", "Failed: ", "No result: "))
+        var seen: String?
+        let settled = waitUntil(timeout: 180, describing: "the update-all preview to finish") {
+            if cancel.exists { return true }
+            if outcomes.count > 0 { seen = outcomes.firstMatch.label }
+            return seen != nil
+        }
+        attach(app, named: "plugins — update-all preview", keepAlways: !settled || seen?.contains("No plugin updates") == false)
+        XCTAssertTrue(settled, "Update All… never reported a result (no outcome message, no confirm sheet).")
+        if let seen {
+            XCTAssertTrue(seen.contains("No plugin updates to apply"),
+                          "Hermes's `plugins update` preview did not succeed: '\(seen)'.")
+        }
+        if cancel.exists {
+            cancel.click()
+            XCTAssertTrue(waitForDisappearance(of: cancel, timeout: 15), "The update-all confirm sheet did not close on Cancel.")
+        }
+    }
+
+    // MARK: - Journey: Browser settings without the camofox plugin (Hermes v0.22.6+)
+
+    /// Camofox left core for the `camofox` plugin at v0.22.6
+    /// (hermes_cli/left_core_migration.py:489-495 @ v0.23.0) and
+    /// `browser.record_sessions` was removed. With `cloud_provider: camofox`
+    /// stored and no `<home>/plugins/camofox`, the Browser tab must show the
+    /// plugin-required note (proof the roster loaded) and offer neither the
+    /// Camofox section nor Record Sessions.
+    @MainActor
+    func testBrowserTabGatesLeftCoreCamofox() throws {
+        try requireHermes(atLeast: (0, 22, 6), for: "Camofox gate")
+        let pluginDir = (isolatedHome as NSString).appendingPathComponent("plugins/camofox")
+        try XCTSkipIf(FileManager.default.fileExists(atPath: pluginDir),
+                      "The test home has the camofox plugin installed; this journey covers the plugin-missing case.")
+        try Self.setBrowserCloudProvider("camofox", inConfigAt: configPath)
+
+        let app = launchExpanded()
+        defer { gracefulQuit(app) }
+        try openSection(app, "Settings")
+        try selectSettingsTab(app, "Browser")
+
+        let note = text(app, "hermes plugins install camofox")
+        let shown = note.waitForExistence(timeout: 45)
+        attach(app, named: "settings — browser, camofox stored without plugin", keepAlways: !shown)
+        XCTAssertTrue(shown, "browser.cloud_provider is camofox and the plugin is absent, but the Browser tab shows no plugin-required note.")
+        XCTAssertTrue(text(app, "Allow Private URLs").exists, "The Browser tab's Behavior section did not render.")
+        XCTAssertFalse(text(app, "Managed Persistence").exists, "The Camofox section is offered without the camofox plugin.")
+        XCTAssertFalse(text(app, "Record Sessions").exists, "Record Sessions is offered, but browser.record_sessions is gone from v0.22.6.")
+    }
+
+    /// Set `browser.cloud_provider` in a throwaway home's config.yaml before
+    /// launch: replaces it inside an existing top-level `browser:` block, or
+    /// appends a new block.
+    private static func setBrowserCloudProvider(_ value: String, inConfigAt path: String) throws {
+        let config = (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
+        var lines = config.isEmpty ? [] : config.components(separatedBy: "\n")
+        if let start = lines.firstIndex(where: { $0.hasPrefix("browser:") }) {
+            var end = start + 1
+            while end < lines.count, lines[end].isEmpty || lines[end].hasPrefix(" ") || lines[end].hasPrefix("#") { end += 1 }
+            let kept = lines[(start + 1)..<end]
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("cloud_provider:") }
+            lines.replaceSubrange(start..<end, with: ["browser:", "  cloud_provider: \(value)"] + kept)
+        } else {
+            if let last = lines.last, last.isEmpty { lines.removeLast() }
+            lines += ["browser:", "  cloud_provider: \(value)", ""]
+        }
+        try lines.joined(separator: "\n").write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// A text element by its exact label or value (SwiftUI `Text` exposes its
+    /// string as the accessibility value on macOS), scoped to the windows.
+    private func text(_ app: XCUIApplication, _ string: String) -> XCUIElement {
+        app.windows.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR value == %@", string, string))
+            .firstMatch
     }
 
     // MARK: - Navigation helpers

@@ -182,8 +182,12 @@ verify_verb() {
     if ! out="$("$HERMES_BIN" "$@" --help 2>&1)"; then
         die "verb verification failed: 'hermes $* --help' exited non-zero"
     fi
+    # Anywhere in the output, not only first: Hermes can print a notice before
+    # the help (e.g. "A previous `hermes update` pulled new code but did not
+    # restart running gateways"). An unknown verb never prints this line.
     case "$out" in
-        "usage: hermes $*"*) : ;;
+        "usage: hermes $*"*|*"
+usage: hermes $*"*) : ;;
         *) die "verb verification failed: 'hermes $* --help' did not print 'usage: hermes $*' (unknown verb?)" ;;
     esac
 }
@@ -370,8 +374,11 @@ if [ -e "$DEST_ABS" ]; then
     note "reusing existing fixture dir (clearing it)"
     # A previous run may have left its gateway running on this home.
     [ -f "$DEST_ABS/$MARKER_FILENAME" ] && cleanup_fixture_home "$DEST_ABS"
-    # Contents only; never the directory itself (it may be a caller-made mktemp -d).
-    find "$DEST_ABS" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+    # Contents only; never the directory itself (it may be a caller-made mktemp -d),
+    # and never hermes-agent/, tools/ or installs/: in a real home (ui-gate-vm.sh
+    # seeds the VM's ~/.hermes) they are the Hermes install itself: its code, its
+    # Python, and its dependency environment (the tag's scripts/install.sh).
+    find "$DEST_ABS" -mindepth 1 -maxdepth 1 ! -name hermes-agent ! -name tools ! -name installs -exec rm -rf {} +
 else
     mkdir -p "$DEST_ABS"
 fi

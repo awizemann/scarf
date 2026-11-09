@@ -167,36 +167,37 @@ scripts/ui-gate-vm.sh --hermes-tag v2026.9.24 --plans Smoke --no-build
   display leaves 1920 × 1080, so the script checks the guest's visible frame first
   and stops before copying anything in. Give the clone at least 1920x1440 while it
   is stopped (`tart set scarf-ui --display 1920x1440`).
-- **…and room on its boot volume.** Under its low-disk threshold — 10 GiB free
-  on `scarf-ui`'s 44 GB boot container (`deleted` logs `lowDiskThreshold:
-  10737418240`) — macOS purges caches each time APFS reports low disk, and the
-  purge terminates the sandboxed test runner to empty its container caches
+- **…and room on its boot volume.** Under its low-disk threshold (10 GiB free;
+  `deleted` logs `lowDiskThreshold: 10737418240`) macOS purges caches each time
+  APFS reports low disk, and the purge terminates the sandboxed test runner
   (runningboardd: `CacheDeleteAppContainerCaches requesting termination
-  assertion for com.scarfUITests.xctrunner`). The test in flight then reports
-  **"Test crashed with signal kill"**. The script reruns each such test **once,
-  alone** (`-only-testing:scarfUITests/Class/test`), and the rerun decides it:
-  `summary.md` lists both attempts (`<plan>-rerunN.log` / `.xcresult`), and a plan
-  whose only failures were kills that passed alone — and whose first run
-  executed its tests to XCTest's closing totals — reads `PASS (on rerun: N
-  killed)`. No other failure is ever rerun. The summary also records the boot
-  volume's free space before and after each plan, how often the purge fired, and
-  how many times it terminated the runner (`<plan>.guest-purge.log`).
-- The boot container can't grow (its recovery partition sits after it), so
-  `scarf-ui` gets a second disk for the run's files, below. Everything the run
-  installs or writes that can move — uv, its Python, the venv, uv/pip/XDG caches,
-  `TMPDIR`, DerivedData and logs, result bundles — lives under `~/work` and
-  `~/results` on that disk. Only the runner's container (its per-test copies of
-  the fixture home) stays on the boot volume. The script needs 5 GB free where
-  `~/work` lives and warns when the boot volume has under 11 GB.
+  assertion for com.scarfUITests.xctrunner`): the test in flight reports
+  **"Test crashed with signal kill"**. `scarf-ui` is built with a 120 GB boot
+  disk (about 70 GB free with Hermes installed), so this should not happen; the
+  script still reruns each such test **once, alone**, and the rerun decides it
+  (`summary.md` lists both attempts). The summary records the boot volume's
+  free space before and after each plan and how often the purge fired. The
+  script needs 5 GB free where `~/work` lives and warns under 11 GB on the boot
+  volume.
 - Only the `scarfUITests` target of each plan runs by default (`--ui-only`); Full's
   unit tests run headless on the host. `--with-unit-tests` runs the plans whole, and
   `--only Class[/test]` (repeatable) narrows a run to one class or test.
-- **Hermes in the guest**: the host's `uv` is copied in, installs a managed
-  Python the tag allows, and installs Hermes from the tag's `uv.lock` (`uv sync
-  --frozen --extra acp`, editable) from a depth-1 clone
-  of the tag shipped with its `.git` (Hermes derives its version from git tags).
-  The script checks `hermes --version` reports the tag's version, and puts a
-  `~/.local/bin/hermes` shim in the guest for the run.
+- **The guest runs like a user's Mac.** Hermes is installed by the tag's own
+  `scripts/install.sh --commit <tag's sha> --non-interactive --skip-browser
+  --skip-computer-use` into `~/.hermes` (with `~/.local/bin/hermes`), and the
+  script checks `hermes --version` reports the tag's version. `xcode-select`
+  points at the shared Xcode so `/usr/bin/git` works, as the Command Line Tools
+  make it work on a user's Mac. The fixture is seeded in that same `~/.hermes`
+  (`make-ui-fixture.sh` leaves the install alone: `hermes-agent/`, `tools/` and
+  `installs/`, its code, Python and dependency environment), and a copy of the
+  seeded home, minus the install, is kept (it also seeds the loopback "remote"
+  home, a second data root that Hermes prepares its own dependencies for). The app runs with **no**
+  `SCARF_HERMES_HOME`/`HERMES_HOME`. Before every test the runner asks
+  (`ScarfUITestCase.resetRealHome`, a token file in its container's tmp) and the
+  guest stops the app, the gateway and any `hermes`, then `rsync`s the seeded copy
+  back. The runner is re-signed on the host with one extra entitlement,
+  read-write to `~/.hermes`. On the host (`ui-gate.sh`) nothing changes: each
+  test gets a throwaway home and `~/.hermes` is never touched.
 - **Credentials — an allow-list, the active model provider's key only.** The
   guest's `config.yaml` is written from scratch with just `model.provider`,
   `default`/`model`, `base_url` and `api_mode` (no `api_key`, MCP servers,
@@ -239,43 +240,29 @@ purge log per plan, and the setup, fixture and cleanup logs.
 
 ### Setting up `scarf-ui` (one time)
 
+The image is built from the macOS restore image with a 120 GB disk, so its boot
+container has room (a clone of ScarfRack's 50 GB image can't grow: the recovery
+partition sits after the container and SIP blocks moving it). ScarfRack's rig
+scripts build it; only `VM_DISK_GB` in a copy of its `config.sh` changes:
+
 ```bash
-# Host: clone ScarfRack's UI-test image, give it a tall display and a work disk.
-tart clone scarfrack-uitest-27 scarf-ui
+# Host: a copy of ScarfRack's rig with a 120 GB disk, then the golden and UI-test images.
+cp -R ~/Developer/ScarfRack/tools/fresh-mac-rig ~/Developer/ScarfRack/tools/ui-test /tmp/rig/tools/
+sed -i '' 's/^VM_DISK_GB=50/VM_DISK_GB=120/' /tmp/rig/tools/fresh-mac-rig/config.sh
+(cd /tmp/rig && GOLDEN=scarf-golden-27 bash tools/fresh-mac-rig/make-golden.sh \
+  && UITEST_IMAGE=scarf-uitest-27 GOLDEN=scarf-golden-27 bash tools/ui-test/make-image.sh)
+tart clone scarf-uitest-27 scarf-ui
 tart set scarf-ui --display 1920x1440 --no-display-refit
-mkdir -p ~/.tart/scarf-ui-logs && mkfile -n 40g ~/.tart/scarf-ui-logs/scarf-work.img
-# Boot it headless with the host's Xcode shared read-only and the work disk attached:
-tart run scarf-ui --no-graphics --no-audio \
-  --dir=xcode:/Applications/Xcode-beta.app:ro \
-  --disk="$HOME/.tart/scarf-ui-logs/scarf-work.img" &
+# Boot it headless with the host's Xcode shared read-only:
+tart run scarf-ui --no-graphics --no-audio --dir=xcode:/Applications/Xcode-beta.app:ro &
 
-# Guest (over SSH, once): format the extra disk and move ~/work and ~/results onto it.
-diskutil list external                       # find the 40 GB disk, e.g. disk8
-diskutil eraseDisk APFS ScarfWork disk8
-mkdir -p /Volumes/ScarfWork/work /Volumes/ScarfWork/results
-rm -rf ~/work ~/results
-ln -s /Volumes/ScarfWork/work ~/work
-ln -s /Volumes/ScarfWork/results ~/results
+# Guest (over SSH, once): accept Xcode's licence, no Spotlight, no background updates.
+sudo DEVELOPER_DIR="/Volumes/My Shared Files/xcode/Contents/Developer" xcodebuild -license accept
+sudo mdutil -a -i off
+SU=/Library/Preferences/com.apple.SoftwareUpdate
+for k in AutomaticallyInstallMacOSUpdates ConfigDataInstall CriticalUpdateInstall; do sudo defaults write $SU $k -bool false; done
 ```
 
-Every later boot needs the same `--disk=` flag, or `~/work` points at nothing.
-
-Then give the boot volume headroom (in the guest, once; it went from 9.6 to
-11.9 GB free). Its big items can't go with SIP on: the Preboot volume's Rosetta
-cryptex (7.7 GB) and the mobile assets under `/System/Library/AssetsV2` (3.5 GB)
-are SIP-restricted.
-
-```bash
-sudo mdutil -a -i off                       # no Spotlight indexing of any volume
-sudo rm -rf /System/Volumes/Data/.Spotlight-V100/Store-V2 ~/Library/Metadata/CoreSpotlight/*
-SU=/Library/Preferences/com.apple.SoftwareUpdate   # no background update downloads
-for k in AutomaticCheckEnabled AutomaticDownload AutomaticallyInstallMacOSUpdates \
-         ConfigDataInstall CriticalUpdateInstall; do sudo defaults write $SU $k -bool false; done
-sudo defaults write /Library/Preferences/com.apple.commerce AutoUpdate -bool false
-sudo log erase --all                        # old unified logs
-sudo rm -rf /Library/Caches/com.apple.iconservices.store ~/Library/Caches/* \
-  /Library/Logs/DiagnosticReports/* ~/Library/Developer/Xcode/DerivedData/scarf-*
-# Let macOS purge what it can: briefly fill the disk, then delete the file.
-dd if=/dev/zero of=/private/var/tmp/fill bs=1m count=8800; sleep 120; rm /private/var/tmp/fill
-```
-
+Each run links the shared Xcode as `/Applications/Xcode.app` and points
+`xcode-select` at it, so `/usr/bin/git` works in the guest as the Command Line
+Tools make it work on a user's Mac (Hermes's installer and Hermes itself need git).

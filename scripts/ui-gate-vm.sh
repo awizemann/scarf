@@ -6,10 +6,17 @@
 # The UI plans take the keyboard, the pointer and the front window for as long
 # as they run. This script builds on the host once (build-for-testing, signed
 # exactly as scripts/ui-gate.sh signs), copies the products into a long-lived
-# headless Tart clone (`scarf-ui` by default), installs the requested
-# Hermes tag there, seeds the fixture home there with
-# scripts/ui-fixture/make-ui-fixture.sh, runs each plan with
-# `xcodebuild test-without-building`, and brings the result bundles back.
+# headless Tart clone (`scarf-ui` by default) and runs each plan there with
+# `xcodebuild test-without-building`, bringing the result bundles back.
+#
+# The guest is set up the way a user's Mac is, not as a test harness: Hermes
+# comes from the tag's own scripts/install.sh (pinned to the tag's commit) into
+# ~/.hermes, the fixture (scripts/ui-fixture/make-ui-fixture.sh) is seeded in
+# that same ~/.hermes, and the app runs with no home override. Before every
+# test the guest stops the gateway and puts ~/.hermes back to its seeded state
+# (ScarfUITestCase.resetRealHome asks; guest.sh's reset_loop answers). The UI-
+# test runner is re-signed with read-write access to ~/.hermes for this.
+# A host run (scripts/ui-gate.sh) is unchanged: throwaway homes, never ~/.hermes.
 #
 # Usage:
 #   scripts/ui-gate-vm.sh --hermes-tag <tag> [--plans Smoke,Full,Live]
@@ -228,11 +235,11 @@ done
 
 HERMES_SRC="${SCARF_VM_HERMES_SRC:-$HOME/.hermes/hermes-agent}"
 SOURCE_HOME="${SCARF_VM_SOURCE_HOME:-$HOME/.hermes}"
-UV_BIN="${SCARF_VM_UV:-$(command -v uv || true)}"
+
 GUEST_DEV="/Volumes/My Shared Files/xcode/Contents/Developer"
 
 command -v xcodebuild >/dev/null || die "xcodebuild not found"
-[[ -x "$UV_BIN" ]] || die "uv not found (set SCARF_VM_UV)"
+
 git -C "$HERMES_SRC" rev-parse -q --verify "refs/tags/$HERMES_TAG" >/dev/null \
   || die "tag $HERMES_TAG not found in $HERMES_SRC (set SCARF_VM_HERMES_SRC)"
 for f in config.yaml .env; do
@@ -318,7 +325,7 @@ gbash() { gssh_in "bash -s" <<<"$1"; }
 # runner's temp dirs, and a ~/.hermes a run created (marked inside, see step 3).
 # guest.sh's cleanup runs the same lines.
 HERMES_MARK=".scarf-ui-gate-vm-created"
-SWEEP='for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do [ -d "$d" ] && find "$d" -maxdepth 1 -name "scarf-uitest-home-*" -exec rm -rf {} + 2>/dev/null; done; [ -f "$HOME/.hermes/'"$HERMES_MARK"'" ] && rm -rf "$HOME/.hermes"; [ -f "$HOME/.ssh/authorized_keys" ] && sed -i "" /scarf-ui-gate-vm-loopback/d "$HOME/.ssh/authorized_keys"; [ -f "$HOME/.ssh/known_hosts" ] && ssh-keygen -q -R 127.0.0.1 >/dev/null 2>&1; rm -f "$HOME/.ssh/known_hosts.old"; f="$HOME/Library/Application Support/scarf/servers.json"; grep -q 5CA2F00D-0000-4000-9000-000000000C01 "$f" 2>/dev/null && rm -f "$f"; pkill -f scarf-ssh- ; true'
+SWEEP='for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do [ -d "$d" ] && find "$d" -maxdepth 1 -name "scarf-uitest-home-*" -exec rm -rf {} + 2>/dev/null; done; [ -f "$HOME/.hermes/'"$HERMES_MARK"'" ] && { for f in hermes hermes-acp hermes-agent; do grep -qs "$HOME/.hermes/hermes-agent/" "$HOME/.local/bin/$f" && rm -f "$HOME/.local/bin/$f"; done; pkill -f "$HOME/.hermes/hermes-agent/"; rm -rf "$HOME/.hermes"; }; [ -f "$HOME/.ssh/authorized_keys" ] && sed -i "" /scarf-ui-gate-vm-loopback/d "$HOME/.ssh/authorized_keys"; [ -f "$HOME/.ssh/known_hosts" ] && ssh-keygen -q -R 127.0.0.1 >/dev/null 2>&1; rm -f "$HOME/.ssh/known_hosts.old"; f="$HOME/Library/Application Support/scarf/servers.json"; grep -q 5CA2F00D-0000-4000-9000-000000000C01 "$f" 2>/dev/null && rm -f "$f"; pkill -f scarf-ssh- ; true'
 # The real server, driven from this Mac so its clean-up doesn't depend on the guest.
 rr_known_name() { if [[ $RR_PORT == 22 ]]; then echo "$RR_HOST"; else echo "[$RR_HOST]:$RR_PORT"; fi; }
 rr_ssh() {
@@ -369,7 +376,7 @@ cleanup() {
 # only matching FILE NAMES come back).
 verify_guest_clean() {
   local left mins found
-  left="$(gbash "${RR_HOST:+ssh-keygen -F '$(rr_known_name)' >/dev/null 2>&1 && echo known_hosts:real-remote; }ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l scarf-ui-gate-vm-loopback ~/.ssh/authorized_keys 2>/dev/null; grep -l 5CA2F00D-0000-4000-9000-000000000C01 \"\$HOME/Library/Application Support/scarf/servers.json\" 2>/dev/null; ssh-keygen -F 127.0.0.1 >/dev/null 2>&1 && echo known_hosts:127.0.0.1; pgrep -fl scarf-ssh- 2>/dev/null; grep -l 'scarf-ui-gate-vm' ~/.local/bin/hermes 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
+  left="$(gbash "${RR_HOST:+ssh-keygen -F '$(rr_known_name)' >/dev/null 2>&1 && echo known_hosts:real-remote; }ls -d ~/$GW ~/$GUEST_RESULTS-* ~/.hermes/$HERMES_MARK 2>/dev/null; grep -l scarf-ui-gate-vm-loopback ~/.ssh/authorized_keys 2>/dev/null; grep -l 5CA2F00D-0000-4000-9000-000000000C01 \"\$HOME/Library/Application Support/scarf/servers.json\" 2>/dev/null; ssh-keygen -F 127.0.0.1 >/dev/null 2>&1 && echo known_hosts:127.0.0.1; pgrep -fl scarf-ssh- 2>/dev/null; grep -ls '/.hermes/hermes-agent/' ~/.local/bin/hermes ~/.local/bin/hermes-acp ~/.local/bin/hermes-agent 2>/dev/null; find \"\$(getconf DARWIN_USER_TEMP_DIR)\" ~/Library/Containers/*/Data/tmp -maxdepth 1 -name 'scarf-uitest-home-*' 2>/dev/null; true")"
   mins=$(( ( $(date +%s) - STARTED_AT ) / 60 + 5 ))
   found=""; local searched="searched for"
   if [[ ! -s "$SCRATCH/secret-values" ]]; then
@@ -417,6 +424,26 @@ fi
     || die "no ${SCHEME}_${plan}_*.xctestrun in $DERIVED/Build/Products: run without --no-build"
 done
 
+# The UI-test runner is App-Sandboxed (Xcode's default for it): it reads
+# everywhere but writes only its own container. In the VM the tests read and
+# write the real ~/.hermes, so the runner is re-signed, with the same identity,
+# with one more entitlement: read-write to ~/.hermes. Only the VM's copy of
+# the products is changed; a host run never uses them.
+RUNNER_APP="$(ls -d "$DERIVED/Build/Products/Debug/"*-Runner.app 2>/dev/null | head -1)"
+if [[ $CREDS_ONLY -eq 0 ]]; then
+  [[ -d "$RUNNER_APP" ]] || die "no UI-test runner in $DERIVED/Build/Products/Debug: run without --no-build"
+  RUNNER_ID="$(codesign -dvv "$RUNNER_APP" 2>&1 | sed -n 's/^Authority=//p' | head -1)"
+  [[ -n "$RUNNER_ID" ]] || die "could not read the runner's signing identity"
+  codesign -d --entitlements :- "$RUNNER_APP" >"$SCRATCH/runner.entitlements" 2>/dev/null \
+    || die "could not read the runner's entitlements"
+  /usr/libexec/PlistBuddy -c "Delete :com.apple.security.temporary-exception.files.home-relative-path.read-write" "$SCRATCH/runner.entitlements" >/dev/null 2>&1 || true
+  /usr/libexec/PlistBuddy -c "Add :com.apple.security.temporary-exception.files.home-relative-path.read-write array" \
+    -c "Add :com.apple.security.temporary-exception.files.home-relative-path.read-write:0 string /.hermes/" "$SCRATCH/runner.entitlements" \
+    || die "could not add the ~/.hermes entitlement"
+  codesign --force --sign "$RUNNER_ID" --entitlements "$SCRATCH/runner.entitlements" "$RUNNER_APP" >"$RESULT/runner-resign.log" 2>&1 \
+    || die "could not re-sign the runner (log: $RESULT/runner-resign.log)"
+fi
+
 # ---------- 2. host-side staging ----------
 log "staging Hermes $HERMES_TAG (reports $EXPECT_VERSION, Python $GUEST_PY)"
 # A depth-1 clone of the tag, shipped with its .git: Hermes derives its version
@@ -424,8 +451,11 @@ log "staging Hermes $HERMES_TAG (reports $EXPECT_VERSION, Python $GUEST_PY)"
 # carry a shallow history, and a full one is ~1 GB.)
 git clone -q --depth 1 --branch "$HERMES_TAG" "file://$HERMES_SRC" "$SCRATCH/hermes" 2>/dev/null \
   || die "could not clone $HERMES_TAG from $HERMES_SRC"
-mkdir -p "$STAGE/hermes"; mv "$SCRATCH/hermes/.git" "$STAGE/hermes/.git"
-cp "$UV_BIN" "$STAGE/bin/uv"
+# The guest installs Hermes the way a user does: the tag's own installer,
+# pinned to the tag's commit (it fetches that commit from GitHub).
+HERMES_SHA="$(git -C "$HERMES_SRC" rev-parse "$HERMES_TAG^{commit}")"
+git -C "$HERMES_SRC" show "$HERMES_TAG:scripts/install.sh" >"$STAGE/install.sh" \
+  || die "$HERMES_TAG has no scripts/install.sh"
 cp "$REPO_ROOT/scripts/ui-fixture/make-ui-fixture.sh" "$STAGE/make-ui-fixture.sh"
 
 log "building the guest's credentials from $SOURCE_HOME: the active model provider's key only"
@@ -605,20 +635,17 @@ cat >"$STAGE/guest.sh" <<'GUEST'
 set -euo pipefail
 W="$1"; CMD="$2"; shift 2
 STAMP="${W##*/scarf-}"
-export DEVELOPER_DIR="/Volumes/My Shared Files/xcode/Contents/Developer"
-# No Homebrew, no CLT in the guest: git comes from the shared Xcode.
-export PATH="$W/venv/bin:$DEVELOPER_DIR/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-# Everything uv, pip, xcodebuild and Hermes cache, install or put in TMPDIR
-# stays under the run dir, so it is removed with it and kept off the boot
-# volume when ~/work lives on another disk (see the README). What can't move:
-# the test runner's container (its per-test copies of the fixture home).
-export UV_CACHE_DIR="$W/uv/cache" UV_PYTHON_INSTALL_DIR="$W/uv/python" UV_PYTHON_BIN_DIR="$W/uv/bin" \
-       UV_TOOL_DIR="$W/uv/tools" UV_NO_CONFIG=1 UV_PYTHON_PREFERENCE=only-managed \
-       PIP_CACHE_DIR="$W/pip-cache" XDG_CACHE_HOME="$W/xdg/cache" XDG_DATA_HOME="$W/xdg/data" \
-       XDG_STATE_HOME="$W/xdg/state" TMPDIR="$W/tmp"
-mkdir -p "$TMPDIR"
-UV="$W/bin/uv"; HB="$W/venv/bin/hermes"; FIXTURE="$W/fixture/fixture-home"
-SHIM="$HOME/.local/bin/hermes"; SHIM_MARK="scarf-ui-gate-vm $STAMP"
+# The guest is set up as a user's Mac: Hermes from its own installer in
+# ~/.hermes (ui-gate-vm.sh points xcode-select at the shared Xcode, so
+# /usr/bin/git works as it does with the Command Line Tools), the fixture
+# seeded in that same ~/.hermes, and the app launched with no home override.
+export DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+export PATH="$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+HH="$HOME/.hermes"; HB="$HOME/.local/bin/hermes"
+# The seeded home, everything but the install (hermes-agent/, tools/, installs/): put back before every test.
+FIXTURE="$W/home-snapshot"
+HERMES_MARK=".scarf-ui-gate-vm-created"
+CONTAINER_TMP="$HOME/Library/Containers/com.scarfUITests.xctrunner/Data/tmp"
 # A "remote" Hermes the Live plan's budget journey reaches over real SSH: this
 # guest's own sshd, on 127.0.0.1, with a throwaway key, a copy of the fixture
 # home, and one servers.json entry with a fixed id. All of it goes with the run.
@@ -663,7 +690,7 @@ acp_watch() {
       sleep 1
     done ) >/dev/null 2>&1 &
   ACP_WATCH=$!
-  trap 'kill "$ACP_WATCH" 2>/dev/null || true' EXIT
+  trap 'kill "$ACP_WATCH" ${RESET_LOOP:-} 2>/dev/null || true' EXIT
 }
 # --real-remote: the same journeys and the same server id, but on a real server.
 # The sandboxed runner can't ssh, so as with acp_watch this loop writes what it
@@ -728,50 +755,82 @@ real_remote_watch() {
       sleep 1
     done ) >/dev/null 2>&1 &
   ACP_WATCH=$!
-  trap 'kill "$ACP_WATCH" 2>/dev/null || true; rr -O exit 2>/dev/null || true' EXIT
+  trap 'kill "$ACP_WATCH" ${RESET_LOOP:-} 2>/dev/null || true; rr -O exit 2>/dev/null || true' EXIT
+}
+# Stops what runs on ~/.hermes (the app, the gateway's launchd job, any
+# hermes) and puts the seeded home back, the install untouched.
+stop_home() {
+  RW="$(cd "$W" 2>/dev/null && pwd -P || echo "$W")"
+  for d in "$W" "$RW"; do pkill -f "$d/Products/Debug/scarf.app/" 2>/dev/null || true; done
+  if [ -x "$HB" ]; then
+    argv=(gateway stop)
+    case "$("$HB" gateway stop --help 2>&1 || true)" in *"--yes"*) argv+=(--yes) ;; esac
+    "$HB" "${argv[@]}" 2>&1 | tail -1 || true
+  fi
+  for sig in TERM KILL; do
+    pkill -"$sig" -f "$HH/hermes-agent/" 2>/dev/null || true
+    [ "$sig" = KILL ] || sleep 1
+  done
+}
+reset_home() {
+  stop_home
+  rsync -a --delete --exclude=/hermes-agent --exclude=/tools --exclude=/installs "$FIXTURE/" "$HH/"
+}
+# The sandboxed runner asks for a reset (ScarfUITestCase.resetRealHome) by
+# writing a token into its container's tmp; this answers with the same token.
+reset_loop() {
+  ( last=""
+    while [ -d "$W" ]; do
+      req="$(cat "$CONTAINER_TMP/scarf-real-home-reset.request" 2>/dev/null || true)"
+      if [ -n "$req" ] && [ "$req" != "$last" ]; then
+        if reset_home >>"$W/reset.log" 2>&1; then printf '%s' "$req" >"$CONTAINER_TMP/.reset.tmp"
+        else printf 'FAIL %s' "$req" >"$CONTAINER_TMP/.reset.tmp"; fi
+        mv "$CONTAINER_TMP/.reset.tmp" "$CONTAINER_TMP/scarf-real-home-reset.done"
+        last="$req"
+      fi
+      sleep 0.3
+    done ) >/dev/null 2>&1 &
+  RESET_LOOP=$!
+  trap 'kill "$RESET_LOOP" 2>/dev/null || true' EXIT
 }
 case "$CMD" in
 setup)
-  py="$1"; expect="$2"
-  if [ -e "$SHIM" ] && ! grep -q "scarf-ui-gate-vm" "$SHIM" 2>/dev/null; then
-    echo "a hermes that is not ours is at $SHIM: refusing to replace it" >&2; exit 1
-  fi
-  git -C "$W/hermes" reset -q --hard
-  git -C "$W/hermes" describe --tags --exact-match HEAD
-  "$UV" python install "$py"
-  # The tag's own uv.lock (frozen), editable, with the acp extra: a plain
-  # `pip install -e '.[acp]'` re-resolves and can hit pins the lock settles.
-  UV_PROJECT_ENVIRONMENT="$W/venv" "$UV" sync -q --project "$W/hermes" --frozen --extra acp --python "$py"
+  sha="$1"; expect="$2"
+  [ -f "$HH/$HERMES_MARK" ] || { echo "$HH is not this run's (no $HERMES_MARK): refusing to install over it" >&2; exit 1; }
+  for f in hermes hermes-acp hermes-agent; do
+    if [ -e "$HOME/.local/bin/$f" ] || [ -L "$HOME/.local/bin/$f" ]; then
+      echo "$HOME/.local/bin/$f already exists: refusing to install over a hermes that is not this run's" >&2; exit 1
+    fi
+  done
+  bash "$W/install.sh" --commit "$sha" --non-interactive --skip-browser --skip-computer-use
   got="$("$HB" --version 2>&1 | head -1)"
   echo "hermes --version: $got"
   case "$got" in
     "Hermes Agent v$expect "*|"Hermes Agent v$expect") ;;
     *) echo "expected 'Hermes Agent v$expect …'" >&2; exit 1 ;;
   esac
-  # Scarf looks for hermes at ~/.local/bin/hermes first (HermesPathSet).
-  mkdir -p "$HOME/.local/bin"
-  cat >"$SHIM" <<EOF
-#!/bin/sh
-# $SHIM_MARK — removed when the run ends
-DEVELOPER_DIR="$DEVELOPER_DIR"; export DEVELOPER_DIR
-PATH="$W/venv/bin:\$DEVELOPER_DIR/usr/bin:\$PATH"; export PATH
-XDG_CACHE_HOME="$W/xdg/cache"; XDG_DATA_HOME="$W/xdg/data"; XDG_STATE_HOME="$W/xdg/state"
-PIP_CACHE_DIR="$W/pip-cache"; TMPDIR="$W/tmp"; export XDG_CACHE_HOME XDG_DATA_HOME XDG_STATE_HOME PIP_CACHE_DIR TMPDIR
-exec "$HB" "\$@"
-EOF
-  chmod 755 "$SHIM"
   ;;
 fixture)
-  mkdir -p "$W/fixture"
-  HERMES_BIN="$HB" HERMES_REAL_HOME="$W/source-home" bash "$W/make-ui-fixture.sh" "$FIXTURE"
+  # Seeded in place, as a user's home is; make-ui-fixture.sh keeps the install (hermes-agent/, tools/, installs/).
+  : >"$HH/.scarf-test-home-marker"
+  # The builder clears the home, marker included: put the marker back whatever
+  # it returns, so cleanup still knows this ~/.hermes is the run's.
+  rc=0; HERMES_BIN="$HB" HERMES_REAL_HOME="$W/source-home" bash "$W/make-ui-fixture.sh" "$HH" || rc=$?
+  echo "scarf-ui-gate-vm $STAMP" >"$HH/$HERMES_MARK"
+  [ "$rc" = 0 ] || exit "$rc"
+  rm -f "$HH/.scarf-test-home-marker"
+  mkdir -p "$FIXTURE"
+  rsync -a --delete --exclude=/hermes-agent --exclude=/tools --exclude=/installs "$HH/" "$FIXTURE/"
   ;;
 plan)
   plan="$1"; xctestrun="$2"; bundle="$3"; per_test="$4"; per_test_max="$5"; shift 5
   cd "$W"
+  reset_loop
   if [ "$plan" = Live ]; then
     if [ -f "$RR/conf" ]; then real_remote_up; real_remote_watch; else loopback_up; acp_watch; fi
   fi
-  TEST_RUNNER_SCARF_UITEST_FIXTURE="$FIXTURE" \
+  TEST_RUNNER_SCARF_UITEST_REAL_HOME=1 \
+  TEST_RUNNER_SCARF_UITEST_HERMES_VERSION="$("$HB" --version 2>&1 | head -1)" \
   xcodebuild test-without-building \
     -xctestrun "$W/Products/$xctestrun" \
     -destination 'platform=macOS,arch=arm64' \
@@ -783,33 +842,29 @@ plan)
     -maximum-test-execution-time-allowance "$per_test_max" "$@"
   ;;
 cleanup)
-  if [ -x "$HB" ] && [ -d "$FIXTURE" ]; then
-    argv=(gateway stop)
-    case "$("$HB" gateway stop --help 2>&1 || true)" in *"--yes"*) argv+=(--yes) ;; esac
-    HERMES_HOME="$FIXTURE" "$HB" "${argv[@]}" 2>&1 | tail -1 || true
-  fi
-  # Everything this run started: hermes (gateways included) runs from $W/venv,
-  # the app and the runner from $W/Products.
-  # ~/work may be a symlink to another disk: match the resolved path too.
+  [ -f "$HH/$HERMES_MARK" ] && stop_home
   RW="$(cd "$W" 2>/dev/null && pwd -P || echo "$W")"
   for sig in TERM KILL; do
     for d in "$W" "$RW"; do
-      pkill -"$sig" -f "$d/venv/" 2>/dev/null || true
       pkill -"$sig" -f "$d/Products/" 2>/dev/null || true
       pkill -"$sig" -f "$d plan " 2>/dev/null || true
     done
     [ "$sig" = KILL ] || sleep 2
   done
   loopback_sweep
-  if [ -f "$SHIM" ] && grep -q "$SHIM_MARK" "$SHIM"; then rm -f "$SHIM"; fi
+  # The install this run made: ~/.hermes (marked) and the installer's links to it.
+  if [ -f "$HH/$HERMES_MARK" ]; then
+    for f in hermes hermes-acp hermes-agent; do
+      # The installer's launchers: one-line scripts that exec into ~/.hermes.
+      grep -qs "$HH/hermes-agent/" "$HOME/.local/bin/$f" && rm -f "$HOME/.local/bin/$f"
+    done
+    rm -rf "$HH"
+  fi
   rmdir "$HOME/.local/bin" "$HOME/.local" 2>/dev/null || true
-  # The tests' throwaway homes (copies of the fixture, credentials included).
+  rm -f "$CONTAINER_TMP"/scarf-real-home-reset.* "$CONTAINER_TMP/.reset.tmp"
   for d in "$(getconf DARWIN_USER_TEMP_DIR)" "$HOME"/Library/Containers/*/Data/tmp; do
     [ -d "$d" ] && find "$d" -maxdepth 1 -name 'scarf-uitest-home-*' -exec rm -rf {} + 2>/dev/null || true
   done
-  # A ~/.hermes this run's app or CLI created (the guest had none before).
-  # A ~/.hermes this or an earlier run created (ui-gate-vm.sh marks it inside).
-  [ -f "$HOME/.hermes/.scarf-ui-gate-vm-created" ] && rm -rf "$HOME/.hermes"
   rm -rf "$W" "$HOME/results/scarf-$STAMP"-*
   echo "cleaned scarf-$STAMP"
   ;;
@@ -900,7 +955,7 @@ if [[ -n "$RR_HOST" ]]; then
 fi
 
 # ---------- 4. copy in ----------
-log "copying the products, uv, Hermes and the sanitized home into $REUSE:~/$GW"
+log "copying the products, the Hermes installer and the sanitized home into $REUSE:~/$GW"
 GUEST_UP=1
 # Anything the run's app or CLI writes to the real ~/.hermes must go with the
 # run, even after a crash: when the guest has none, the run creates it with a
@@ -915,7 +970,13 @@ rm -rf "$STAGE/source-home" "$STAGE/real-remote"
 
 # ---------- 5. Hermes and the fixture in the guest ----------
 log "installing Hermes $HERMES_TAG in the guest (log: $RESULT/guest-setup.log)"
-gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' setup '$GUEST_PY' '$EXPECT_VERSION'" >"$RESULT/guest-setup.log" 2>&1 \
+# A user who installs Hermes has git (the Command Line Tools); the guest gets
+# it from the shared Xcode, system-wide, so /usr/bin/git works for Hermes and
+# for the app's own hermes calls alike.
+# (/usr/bin's shims only accept an Xcode inside a *.app, hence the link.)
+gsudo "ln -sfn \"/Volumes/My Shared Files/xcode\" /Applications/Xcode.app" && gsudo "xcode-select -s /Applications/Xcode.app" >/dev/null 2>&1 \
+  || die "could not point xcode-select at the shared Xcode (/Applications/Xcode.app) in $REUSE"
+gssh "bash ~/$GW/guest.sh '$GUEST_HOME/$GW' setup '$HERMES_SHA' '$EXPECT_VERSION'" >"$RESULT/guest-setup.log" 2>&1 \
   || { tail -20 "$RESULT/guest-setup.log" >&2; die "Hermes install in the guest failed"; }
 grep '^hermes --version' "$RESULT/guest-setup.log" >&2 || true
 
@@ -1114,7 +1175,7 @@ done
   echo "- Git commit: $GIT_HASH"
   echo "- VM: $REUSE"
   echo "- Scope: $([[ $UI_ONLY -eq 1 ]] && echo "UI tests only (-only-testing:scarfUITests)" || echo "whole plans, unit tests included")"
-  echo "- Hermes: $HERMES_TAG ($(grep '^hermes --version' "$RESULT/guest-setup.log" | sed 's/^hermes --version: //'), Python $GUEST_PY)"
+  echo "- Hermes: $HERMES_TAG ($(grep '^hermes --version' "$RESULT/guest-setup.log" | sed 's/^hermes --version: //'), installed by its own install.sh into ~/.hermes)"
   echo
   echo "| Plan | Result | Tests (first run) | Wall time |"
   echo "| --- | --- | --- | --- |"
