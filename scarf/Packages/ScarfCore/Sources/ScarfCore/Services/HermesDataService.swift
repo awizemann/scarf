@@ -51,6 +51,7 @@ public actor HermesDataService {
     private var hasDisplayKindColumn = false
     private var hasDisplayMetadataColumn = false
     private var hasCreatedSourceColumn = false
+    private var hasSessionsCwdColumn = false
 
     /// Cached `state_meta.fts_tool_full_content_high_water`, read once
     /// per open on the first search that needs it. `.some(nil)` means
@@ -144,6 +145,7 @@ public actor HermesDataService {
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
         hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
         hasCreatedSourceColumn = await backend.hasCreatedSourceColumn
+        hasSessionsCwdColumn = await backend.hasSessionsCwdColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -167,6 +169,7 @@ public actor HermesDataService {
         hasDisplayKindColumn = await backend.hasDisplayKindColumn
         hasDisplayMetadataColumn = await backend.hasDisplayMetadataColumn
         hasCreatedSourceColumn = await backend.hasCreatedSourceColumn
+        hasSessionsCwdColumn = await backend.hasSessionsCwdColumn
         ftsToolPrefixHighWaterProbe = nil
         adoptOpenError(await backend.lastOpenError)
         return ok
@@ -2065,7 +2068,7 @@ public actor HermesDataService {
     /// (hermes_state_common.py:490 @ v0.22.5). Probed by name (C4); nil
     /// when the column is absent, the row is missing, or the value is NULL.
     public func fetchSessionCwd(id: String) async -> String? {
-        guard await sessionsTableHasColumn("cwd") else { return nil }
+        guard hasSessionsCwdColumn else { return nil }
         do {
             let rows = try await backend.query(
                 "SELECT cwd FROM sessions WHERE id = ? LIMIT 1", params: [.text(id)])

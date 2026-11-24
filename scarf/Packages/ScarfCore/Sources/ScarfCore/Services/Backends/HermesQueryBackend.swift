@@ -159,6 +159,11 @@ public protocol HermesQueryBackend: Sendable {
     /// the SELECT is byte-identical to the prior shape.
     var hasCreatedSourceColumn: Bool { get async }
 
+    /// True iff `sessions.cwd` exists, read from the preflight's
+    /// `PRAGMA table_info(sessions)` (C4) so `fetchSessionCwd` doesn't
+    /// run its own probe.
+    var hasSessionsCwdColumn: Bool { get async }
+
     /// User-presentable error from the most recent `open()` (or the
     /// most recent failed query for the remote backend's
     /// connectivity-loss codepath). `nil` means everything is healthy.

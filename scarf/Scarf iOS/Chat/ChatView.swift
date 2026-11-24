@@ -3786,30 +3786,35 @@ final class ChatController {
             // Only the not-restorable load answer falls back; any other
             // load error lands in the catch below as a failed state with
             // Retry, never a silent new session.
-            let source = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.fetchSource") {
-                await SessionResume.fetchSource(context: context, sessionId: sessionID)
-            }
-            // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
-            // too, and refuses an unknown one with a JSON-RPC error.
-            let gatewayBacked = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.capabilities") {
-                await capabilitiesProvider(context).hasGatewayBackedACP
-            }
-            let outcome = try await ScarfMon.measureAsync(.sessionLoad, "ios.resume.sessionLoad") {
-              try await SessionResume.resolve(
-                sessionId: sessionID,
-                source: source,
-                gatewayBacked: gatewayBacked,
-                load: { [context] id in
-                    // Gateway-backed hosts: a non-project chat loads in its
-                    // own folder, so Hermes doesn't move it to `cwd`.
-                    let loaded = try await SessionResume.loadInSessionFolder(
-                        defaultCwd: cwd, projectPath: resolved?.path, gatewayBacked: gatewayBacked,
-                        sessionCwd: { await SessionResume.fetchCwd(context: context, sessionId: id) },
-                        load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: id) })
-                    return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
-                },
-                newSession: { try await client.newSession(cwd: cwd) }
-              )
+            //
+            // One private state.db lookup answers both the source and the
+            // session folder (gh#150: one preflight per reopen, not two).
+            let outcome = try await SessionResume.withSessionLookup(context: context) { lookup in
+                let source = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.fetchSource") {
+                    await lookup.source(sessionID)
+                }
+                // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
+                // too, and refuses an unknown one with a JSON-RPC error.
+                let gatewayBacked = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.capabilities") {
+                    await capabilitiesProvider(context).hasGatewayBackedACP
+                }
+                return try await ScarfMon.measureAsync(.sessionLoad, "ios.resume.sessionLoad") {
+                  try await SessionResume.resolve(
+                    sessionId: sessionID,
+                    source: source,
+                    gatewayBacked: gatewayBacked,
+                    load: { id in
+                        // Gateway-backed hosts: a non-project chat loads in its
+                        // own folder, so Hermes doesn't move it to `cwd`.
+                        let loaded = try await SessionResume.loadInSessionFolder(
+                            defaultCwd: cwd, projectPath: resolved?.path, gatewayBacked: gatewayBacked,
+                            sessionCwd: { await lookup.cwd(id) },
+                            load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: id) })
+                        return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
+                    },
+                    newSession: { try await client.newSession(cwd: cwd) }
+                  )
+                }
             }
             let resolvedID = outcome.sessionId
             let loadedHead = outcome.loadedHead

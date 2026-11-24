@@ -52,6 +52,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
     private(set) public var hasDisplayKindColumn = false
     private(set) public var hasDisplayMetadataColumn = false
     private(set) public var hasCreatedSourceColumn = false
+    private(set) public var hasSessionsCwdColumn = false
     private(set) public var lastOpenError: String?
 
     /// True when `open()` had to fall back to a READWRITE handle guarded by
@@ -299,6 +300,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
         hasDisplayKindColumn = false
         hasDisplayMetadataColumn = false
         hasCreatedSourceColumn = false
+        hasSessionsCwdColumn = false
     }
 
     private func detectSchema() {
@@ -347,6 +349,7 @@ public actor LocalSQLiteBackend: HermesQueryBackend {
                     case "ended_at": sawEndedAt = true
                     // v0.21.6 creating surface of a `source='local'` row.
                     case "created_source": hasCreatedSourceColumn = true
+                    case "cwd": hasSessionsCwdColumn = true
                     default: break
                     }
                 }

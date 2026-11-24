@@ -3787,32 +3787,36 @@ final class ChatSession {
         // The sidebar row already carries `sessions.source` for a listed
         // session — skip the state.db round trip (an SSH hop on a remote).
         let listed = host?.recentSessions.first { $0.id == sessionId }?.source
-        let source: String?
-        if let listed { source = listed } else {
-            source = await SessionResume.fetchSource(context: context, sessionId: sessionId)
-        }
-        // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
-        // too, and refuses an unknown one with a JSON-RPC error. The probed
-        // capabilities, awaited: a guess here would skip a loadable session.
-        let gatewayBacked = await capabilitiesForProjectContext().hasGatewayBackedACP
-        return try await SessionResume.resolve(
-            sessionId: sessionId,
-            source: source,
-            gatewayBacked: gatewayBacked,
-            load: { [context] id in
-                let loaded = try await SessionResume.loadInSessionFolder(
-                    defaultCwd: cwd, projectPath: projectPath, gatewayBacked: gatewayBacked,
-                    sessionCwd: { await SessionResume.fetchCwd(context: context, sessionId: id) },
-                    load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: id) })
-                return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
-            },
-            newSession: { [weak self] in
-                if let self, self.startStillCurrent(intent, client: client) {
-                    self.acpStatus = ACPPhase.creatingNewSession
-                }
-                return try await client.newSession(cwd: cwd)
+        // One private state.db lookup answers both the source and the
+        // session folder, opened only if one is asked (gh#150).
+        return try await SessionResume.withSessionLookup(context: context) { lookup in
+            let source: String?
+            if let listed { source = listed } else {
+                source = await lookup.source(sessionId)
             }
-        )
+            // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
+            // too, and refuses an unknown one with a JSON-RPC error. The probed
+            // capabilities, awaited: a guess here would skip a loadable session.
+            let gatewayBacked = await capabilitiesForProjectContext().hasGatewayBackedACP
+            return try await SessionResume.resolve(
+                sessionId: sessionId,
+                source: source,
+                gatewayBacked: gatewayBacked,
+                load: { id in
+                    let loaded = try await SessionResume.loadInSessionFolder(
+                        defaultCwd: cwd, projectPath: projectPath, gatewayBacked: gatewayBacked,
+                        sessionCwd: { await lookup.cwd(id) },
+                        load: { try await client.loadSessionWithProvenance(cwd: $0, sessionId: id) })
+                    return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
+                },
+                newSession: { [weak self] in
+                    if let self, self.startStillCurrent(intent, client: client) {
+                        self.acpStatus = ACPPhase.creatingNewSession
+                    }
+                    return try await client.newSession(cwd: cwd)
+                }
+            )
+        }
     }
 
     /// Raise the persistent transcript notice for a resume that continued

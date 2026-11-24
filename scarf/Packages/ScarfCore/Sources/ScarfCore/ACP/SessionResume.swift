@@ -178,11 +178,79 @@ public enum SessionResume {
     /// Read `sessions.cwd` for `sessionId` (read-only, C3; the column is
     /// probed, C4). Nil when the column, row or DB can't be read, or NULL.
     public static func fetchCwd(context: ServerContext, sessionId: String) async -> String? {
-        let service = HermesDataService(context: context)
-        guard await service.open() else { return nil }
-        let cwd = await service.fetchSessionCwd(id: sessionId)
-        await service.close()
-        return cwd
+        await withSessionLookup(context: context) { await $0.cwd(sessionId) }
+    }
+
+    // MARK: - One lookup per reopen
+
+    /// Reads `sessions.source` / `sessions.cwd` for a reopen on ONE private
+    /// `HermesDataService` (read-only, C3), opened lazily on the first
+    /// question — so a reopen that asks both pays one preflight, and one
+    /// that asks nothing pays none. Private, so it can't close the chat
+    /// view model's own connection under a history load. Use it through
+    /// ``withSessionLookup(context:_:)``, which closes it.
+    public actor SessionLookup {
+        private let makeService: @Sendable () -> HermesDataService
+        private var service: HermesDataService?
+        private var opened: Bool?
+
+        init(makeService: @escaping @Sendable () -> HermesDataService) {
+            self.makeService = makeService
+        }
+
+        /// The open service, or nil when `open()` failed (not retried).
+        private func openService() async -> HermesDataService? {
+            if let opened { return opened ? service : nil }
+            let fresh = makeService()
+            service = fresh
+            let ok = await fresh.open()
+            opened = ok
+            return ok ? fresh : nil
+        }
+
+        /// `sessions.source`, or nil when the row or the DB can't be read.
+        public func source(_ sessionId: String) async -> String? {
+            await openService()?.fetchSession(id: sessionId)?.source
+        }
+
+        /// `sessions.cwd` (column probed by the preflight, C4), or nil when
+        /// the column, row or DB can't be read, or NULL.
+        public func cwd(_ sessionId: String) async -> String? {
+            await openService()?.fetchSessionCwd(id: sessionId)
+        }
+
+        /// Closes only a service that opened, like the one-shot lookups did.
+        func close() async {
+            if opened == true { await service?.close() }
+            service = nil
+        }
+    }
+
+    /// Run `body` with a ``SessionLookup`` and close it afterwards, also
+    /// when `body` throws.
+    public static func withSessionLookup<T>(
+        context: ServerContext,
+        _ body: (SessionLookup) async throws -> T,
+        isolation: isolated (any Actor)? = #isolation
+    ) async rethrows -> T {
+        try await withSessionLookup(makeService: { HermesDataService(context: context) }, body)
+    }
+
+    /// Test seam: inject the private service (e.g. over a mock backend).
+    static func withSessionLookup<T>(
+        makeService: @escaping @Sendable () -> HermesDataService,
+        _ body: (SessionLookup) async throws -> T,
+        isolation: isolated (any Actor)? = #isolation
+    ) async rethrows -> T {
+        let lookup = SessionLookup(makeService: makeService)
+        do {
+            let result = try await body(lookup)
+            await lookup.close()
+            return result
+        } catch {
+            await lookup.close()
+            throw error
+        }
     }
 
     /// Resolve a resume: skip the load for a non-ACP source, load
@@ -241,11 +309,7 @@ public enum SessionResume {
     /// view model's own connection under a history load. Nil when the row
     /// or the DB can't be read.
     public static func fetchSource(context: ServerContext, sessionId: String) async -> String? {
-        let service = HermesDataService(context: context)
-        guard await service.open() else { return nil }
-        let source = await service.fetchSession(id: sessionId)?.source
-        await service.close()
-        return source
+        await withSessionLookup(context: context) { await $0.source(sessionId) }
     }
 
     /// The analytics `kind` for a fallback (`session_resume_fallback`).

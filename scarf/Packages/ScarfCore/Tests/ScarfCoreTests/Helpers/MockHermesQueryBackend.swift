@@ -32,6 +32,7 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     var hasDisplayKindColumn: Bool = false
     var hasDisplayMetadataColumn: Bool = false
     var hasCreatedSourceColumn: Bool = false
+    var hasSessionsCwdColumn: Bool = false
     var lastOpenError: String? = nil
 
     /// Map of SQL prefix → rows. Lookup picks the longest matching
@@ -76,6 +77,7 @@ final actor MockHermesQueryBackend: HermesQueryBackend {
     func setHasDisplayKindColumn(_ value: Bool) { hasDisplayKindColumn = value }
     func setHasDisplayMetadataColumn(_ value: Bool) { hasDisplayMetadataColumn = value }
     func setHasCreatedSourceColumn(_ value: Bool) { hasCreatedSourceColumn = value }
+    func setHasSessionsCwdColumn(_ value: Bool) { hasSessionsCwdColumn = value }
     func setLastOpenError(_ value: String?) { lastOpenError = value }
 
     /// Build a one-row result keyed on `prefix`. `columns` is the
