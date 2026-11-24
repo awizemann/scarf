@@ -5,10 +5,10 @@ permalink: scarf/decisions/health-status-tab-reads-hermes-status-rows-by-their-m
 tags: [health, hermes-status, parsing]
 source_paths: [scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Health/Views/HealthView.swift]
 source_paths_inferred: false
-source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
+source_sha: 0083b12fee5bcf6729fb661bcc185f569991e120
 created: 2026-09-26
 updated: 2026-09-26
-reviewed: 2026-10-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

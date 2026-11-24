@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-v0-21-4-non-zero-exits-that-are-not-failure
 tags: [hermes-cli, hermes-v0-21-4, capability-gating, verdicts]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileDeleteVerdict.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPeerCLI.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesCronJob.swift, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift, scarf/scarf/Features/Profiles/ViewModels/ProfilesViewModel.swift]
 source_paths_inferred: false
-source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
+source_sha: 0083b12fee5bcf6729fb661bcc185f569991e120
 created: 2026-09-26
 updated: 2026-09-26
-reviewed: 2026-11-01
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

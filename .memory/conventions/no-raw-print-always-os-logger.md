@@ -5,10 +5,10 @@ permalink: scarf/conventions/no-raw-print-always-os-logger
 tags: [logging, conventions, rule, audit-2026-06-13]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift, scarf/scarf/Features/Projects/Views/Widgets/WebviewWidgetView.swift]
 source_paths_inferred: false
-source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
+source_sha: 0083b12fee5bcf6729fb661bcc185f569991e120
 created: 2026-06-13
 updated: 2026-06-13
-reviewed: 2026-10-27
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -4,9 +4,11 @@ type: note
 permalink: scarf/operations/real-ssh-server-option-for-the-vm-ui-gate-and-what-hermes
 source_paths: [scripts/ui-gate-vm.sh, scripts/ui-fixture/real-remote-server.py]
 source_paths_inferred: false
-source_sha: ecd49dbc13fd15797d5b5c384937c18952edd5a9
+source_sha: 0083b12fee5bcf6729fb661bcc185f569991e120
 created: 2026-11-01
 updated: 2026-11-01
+reviewed: 2026-11-24
+reviewed_by: audit:claude-code (background)
 ---
 
 Added for v3.8.0. Loopback never showed the slow-start lost-prompt bug; the real server did on its first full run.

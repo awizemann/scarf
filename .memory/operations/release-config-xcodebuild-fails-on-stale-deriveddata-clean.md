@@ -5,10 +5,10 @@ permalink: scarf/operations/release-config-xcodebuild-fails-on-stale-deriveddata
 tags: [build, release, xcodebuild]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPTools.swift]
 source_paths_inferred: false
-source_sha: ebfef32ea30937a78516be06e7bba5bbf07f0ac3
+source_sha: 0083b12fee5bcf6729fb661bcc185f569991e120
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -4,10 +4,10 @@ type: note
 permalink: scarf/architecture/project-get-exposes-kanbantenant-and-cronnameprefix-via
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPTools.swift, scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPToolCatalog.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/KanbanTenantReader.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectCronAttribution.swift]
 source_paths_inferred: false
-source_sha: 4beace9d6d71c2aae455ed7eae5b600642f0f3b0
+source_sha: 0083b12fee5bcf6729fb661bcc185f569991e120
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-09-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 
