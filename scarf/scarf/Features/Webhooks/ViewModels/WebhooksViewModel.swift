@@ -194,21 +194,18 @@ final class WebhooksViewModel {
         let name: String
         let url: String
         let secret: String
+        /// v0.23.2+ prints only a mask; when the full value could not be read
+        /// from the host's subscriptions file this holds that file's path and
+        /// `secret` is empty — the sheet explains instead of showing the mask.
+        var unreadablePath: String? = nil
     }
 
     /// Set after a successful subscribe; the view presents it as a
     /// copy-once sheet. Cleared when the user dismisses.
     var createdSecret: CreatedWebhookSecret?
 
-    func subscribe(name: String, prompt: String, events: String, description: String, skills: String, deliver: String, chatID: String, secret: String) {
+    func subscribe(name: String, prompt: String, events: String, description: String, skills: String, deliver: String, chatID: String, secret: String, signature: HermesWebhookSignature? = nil, capabilities: HermesCapabilities = .empty) {
         guard !name.isEmpty else { return }
-        var args = ["webhook", "subscribe"]
-        if !prompt.isEmpty { args += ["--prompt", prompt] }
-        if !events.isEmpty { args += ["--events", events] }
-        if !description.isEmpty { args += ["--description", description] }
-        if !skills.isEmpty { args += ["--skills", skills] }
-        if !deliver.isEmpty { args += ["--deliver", deliver] }
-        if !chatID.isEmpty { args += ["--deliver-chat-id", chatID] }
         // `--secret` puts a user-typed HMAC secret in this process's argv,
         // where it is visible to any local `ps`/`/proc` reader for the life
         // of the CLI run. Hermes offers no stdin or env path for it on
@@ -217,8 +214,11 @@ final class WebhooksViewModel {
         // the placeholder recommends) makes Hermes mint the secret itself
         // and avoids the exposure entirely. Same trade-off, and same note,
         // as the WhatsApp token argv in F2.
-        if !secret.isEmpty { args += ["--secret", secret] }
-        args += ["--", name]
+        // `--signature` is appended only on v0.23.2+ hosts (U2).
+        let args = HermesWebhookSubscribe.argv(
+            name: name, prompt: prompt, events: events, description: description, skills: skills,
+            deliver: deliver, chatID: chatID, secret: secret,
+            signature: signature, capabilities: capabilities)
         // Frozen before the closure: a captured `var` is a Release-only
         // Sendable error (SWIFT_TREAT_WARNINGS_AS_ERRORS).
         let argv = args
@@ -228,6 +228,7 @@ final class WebhooksViewModel {
         let storedName = name.trimmingCharacters(in: .whitespaces)
             .lowercased()
             .replacingOccurrences(of: " ", with: "-")
+        let context = self.context
         Task.detached { [fileService, self] in
             let result = await OffPool.run {
                 fileService.runHermesCLI(args: argv, timeout: 60)
@@ -240,7 +241,13 @@ final class WebhooksViewModel {
             // genuine create/update the CLI always prints `Secret:`
             // (whether it minted the value or echoed the one we passed), and
             // on every failure path it prints nothing of the sort. (F9)
-            let created = Self.parseCreatedSecret(result.output, name: storedName)
+            let created = await OffPool.run {
+                Self.resolveCreatedSecret(result.output, name: storedName) { path in
+                    context.readData(path)
+                } subscriptionsPath: {
+                    HermesWebhookSubscribe.subscriptionsPath(home: context.paths.home)
+                }
+            }
             await MainActor.run {
                 Analytics.record(.configItemChanged(
                     area: .webhook, action: .created, outcome: .init(succeeded: created != nil)))
@@ -293,18 +300,26 @@ final class WebhooksViewModel {
     /// (no sheet) rather than a blank one: showing an empty "your secret"
     /// box would be worse than staying quiet.
     nonisolated static func parseCreatedSecret(_ output: String, name: String) -> CreatedWebhookSecret? {
-        var secret = ""
-        var url = ""
-        for raw in output.components(separatedBy: "\n") {
-            let trimmed = raw.trimmingCharacters(in: .whitespaces)
-            if secret.isEmpty, trimmed.hasPrefix("Secret:") {
-                secret = String(trimmed.dropFirst("Secret:".count)).trimmingCharacters(in: .whitespaces)
-            } else if url.isEmpty, trimmed.hasPrefix("URL:") {
-                url = String(trimmed.dropFirst("URL:".count)).trimmingCharacters(in: .whitespaces)
-            }
+        resolveCreatedSecret(output, name: name, readData: { _ in nil }, subscriptionsPath: { "" })
+    }
+
+    /// `parseCreatedSecret` plus the v0.23.2+ masked case (U1): `Secret:` then
+    /// carries `mask_secret(...)` and `(full value in <home>/webhook_subscriptions.json)`
+    /// (`hermes_cli/webhook.py:325` @ v0.23.4), so the real value is read from
+    /// that file through the server's transport. Detected by the printed form,
+    /// not the host version. The secret is never logged or persisted.
+    nonisolated static func resolveCreatedSecret(
+        _ output: String, name: String,
+        readData: (String) -> Data?, subscriptionsPath: () -> String
+    ) -> CreatedWebhookSecret? {
+        guard let created = HermesWebhookSubscribe.parseCreated(output) else { return nil }
+        switch HermesWebhookSubscribe.resolveSecret(
+            created.secret, name: name, subscriptionsPath: subscriptionsPath(), readData: readData) {
+        case .value(let secret):
+            return CreatedWebhookSecret(name: name, url: created.url, secret: secret)
+        case .unreadable(let path):
+            return CreatedWebhookSecret(name: name, url: created.url, secret: "", unreadablePath: path)
         }
-        guard !secret.isEmpty else { return nil }
-        return CreatedWebhookSecret(name: name, url: url, secret: secret)
     }
 
     /// Remove one dynamic webhook route, judged by what Hermes PRINTED
