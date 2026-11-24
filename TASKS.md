@@ -119,6 +119,8 @@
 - [ ] v0.23 T: real-host testing + fresh-eyes audit (id: t-cfebb471) (added: 2026-11-06)
 - [ ] Fix env-dependent ScarfCore test failures (ProjectDoctor, RealPyYAML) (id: t-3eed315b) (added: 2026-11-06)
 - [ ] Fix two pre-existing Bot scarfTests failures (id: t-0922ddb6) (added: 2026-11-06)
+- [ ] scarfTests runner hangs before connecting (id: t-24fcd8cd) (added: 2026-11-24) (priority: high)
+- [ ] ScarfGo: model sheet shown when the server is unreachable (id: t-7e71a22a) (added: 2026-11-24)
 
 ## Doing
 
@@ -130,6 +132,18 @@
 
 ## Done
 
+- [x] v0.23.4: restart-when-idle drain watch (id: t-6df6b15b) (added: 2026-11-24)
+- [x] v0.23.4: cron wrap_response carry (id: t-59a3f24e) (added: 2026-11-24)
+- [x] v0.23.4: Yuanbao plugin copy + voice_mention_patterns (id: t-3ef01f2f) (added: 2026-11-24)
+- [x] v0.23.4: cache_ttl auto + clarify_timeout setting (id: t-eb850cfd) (added: 2026-11-24)
+- [x] v0.23.4: profile list delete-incomplete rows (id: t-f60e1969) (added: 2026-11-24)
+- [x] v0.23.4: webhook masked secret + signature picker (id: t-5a44b9cd) (added: 2026-11-24)
+- [x] gh#150: one DB preflight per session resume (id: t-ca7f5621) (added: 2026-11-24)
+- [x] gh#150: take model preflight off the chat-start path (id: t-4e9178c6) (added: 2026-11-24) (priority: high)
+- [x] gh#150: per-step timers on ScarfGo chat start/resume (id: t-471afa7e) (added: 2026-11-24) (priority: high)
+- [x] gh#154: audit, commit, reply to reporter (id: t-3364eb53) (added: 2026-11-24)
+- [x] gh#154: live test on local + remote v0.23 (id: t-42c014ef) (added: 2026-11-24)
+- [x] gh#154: match v0.23 `-c` launcher gateways (id: t-96f1b172) (added: 2026-11-24) (priority: high)
 - [x] UI-gate failures on on-screen runs (resolved: run in Tart VM) (id: t-ea88fc8c) (added: 2026-11-07) (priority: high)
 - [x] v0.23 S4: ACP reasoning/tier pickers + /model reset (id: t-b253e9c5) (added: 2026-11-06)
 - [x] v0.23 S7: sessions refresh-prompts + skill lock (id: t-fddb538a) (added: 2026-11-06)
