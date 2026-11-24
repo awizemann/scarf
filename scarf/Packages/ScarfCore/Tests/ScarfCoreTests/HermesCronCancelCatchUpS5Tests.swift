@@ -93,4 +93,33 @@ import Foundation
         #expect(copy.extra["catch_up"] == nil)
         #expect(!HermesCronJob.authoredExtraKeys.contains("catch_up"))
     }
+
+    // MARK: - wrap_response (cron/job_definition.py:19 @ v0.23.4)
+
+    static let v0232 = HermesCapabilities.parseLine("Hermes Agent v0.23.2 (2026.11.10)")
+
+    @Test(arguments: [true, false])
+    func duplicateCarriesWrapResponseOnV0232(_ value: Bool) throws {
+        let job = try Self.job(#", "wrap_response": \#(value)"#)
+        #expect(job.wrapResponse == value)
+        let copy = job.duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"], capabilities: Self.v0232)
+        #expect(copy.extra["wrap_response"] == .bool(value))
+        #expect(copy.wrapResponse == value)
+    }
+
+    @Test func duplicateOmitsInheritedWrapResponse() throws {
+        for json in [#", "wrap_response": null"#, ""] {
+            let copy = try Self.job(json)
+                .duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"], capabilities: Self.v0232)
+            #expect(copy.extra["wrap_response"] == nil)
+        }
+    }
+
+    /// C1: below v0.23.2 the key is ignored, exactly as before.
+    @Test func olderHostIgnoresWrapResponse() throws {
+        let copy = try Self.job(#", "wrap_response": true"#)
+            .duplicatedAsNewJob(id: "j2", existingNames: ["Nightly"], capabilities: Self.v0226)
+        #expect(copy.extra["wrap_response"] == nil)
+        #expect(!HermesCronJob.authoredExtraKeys.contains("wrap_response"))
+    }
 }

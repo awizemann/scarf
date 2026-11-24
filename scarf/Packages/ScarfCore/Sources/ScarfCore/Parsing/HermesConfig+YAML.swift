@@ -1051,7 +1051,11 @@ public extension HermesConfig {
             mattermost: mattermost,
             whatsapp: whatsapp,
             homeAssistant: homeAssistant,
-            cacheTTL: str("prompt_caching.cache_ttl", default: "5m"),
+            // Absent → "" so the display layer can pick the host's default
+            // ("auto" on v0.23.3+, "5m" before) — `displayCacheTTL`.
+            cacheTTL: strEnum("prompt_caching.cache_ttl"),
+            clarifyTimeout: intOpt("agent.clarify_timeout"),
+            clarifyLegacyTimeout: intOpt("clarify.timeout"),
             // `display.runtime_footer.enabled` (nested block,
             // config_defaults.py) is the only key Hermes has ever read for
             // this. A fallback read of `agent.runtime_metadata_footer` used

@@ -79,6 +79,13 @@ public enum HermesProfileList {
                 sawHeader = true
                 continue
             }
+            // v0.23.4 trailer (`profile_cmd.py:_profile_list` @ 3ac54e1):
+            // `Deletion of profile '<id>' did not finish: …` explanations
+            // (`profiles_remove.delete_incomplete_message`) and `⚠ Profile
+            // '<id>' shares its … credential …` warnings
+            // (`profile_channels.shared_credential_warning`) are prose, not
+            // rows. Without this the first would parse as a profile "Deletion".
+            if line.hasPrefix("Deletion of profile ") || line.hasPrefix("⚠") { continue }
             var working = line
             var isMarked = false
             if working.hasPrefix("◆") || working.hasPrefix("*") {
@@ -89,6 +96,9 @@ public enum HermesProfileList {
                 .map { $0.trimmingCharacters(in: .whitespaces) }
                 .filter { !$0.isEmpty }
             guard let field0 = fields.first else { continue }
+            // `  <id>  —  delete incomplete`: a half-deleted profile Hermes
+            // hides from the normal rows. It isn't usable, so it isn't listed.
+            if fields.contains("delete incomplete") { continue }
             let ns = field0 as NSString
             let matches = idParenPattern.matches(in: field0, range: NSRange(location: 0, length: ns.length))
             let id: String

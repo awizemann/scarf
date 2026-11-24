@@ -229,9 +229,14 @@ struct PlatformsView: View {
     /// shell command and a docs link rather than a per-field form
     /// because the auth dance is OAuth-style and lives outside Scarf.
     private var yuanbaoPanel: some View {
+        let yuanbaoCopy = KnownPlatforms.yuanbaoSetupCopy(on: capabilities)
+        return yuanbaoPanelBody(yuanbaoCopy)
+    }
+
+    private func yuanbaoPanelBody(_ yuanbaoCopy: (type: String, setup: String)) -> some View {
         SettingsSection(title: "Yuanbao 元宝", icon: KnownPlatforms.icon(for: "yuanbao")) {
-            ReadOnlyRow(label: "Type", value: "Native gateway adapter (v0.12+)")
-            ReadOnlyRow(label: "Setup", value: "Run `hermes setup` and select Yuanbao to walk the OAuth flow.")
+            ReadOnlyRow(label: "Type", value: yuanbaoCopy.type)
+            ReadOnlyRow(label: "Setup", value: yuanbaoCopy.setup)
             ReadOnlyRow(label: "Multi-image", value: "Supported via the gateway's centralized media routing.")
             ReadOnlyRow(label: "Configured", value: viewModel.hasConfigBlock(for: viewModel.selected) ? "Yes" : "No")
         }

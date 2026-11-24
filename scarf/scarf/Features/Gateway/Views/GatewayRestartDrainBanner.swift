@@ -25,7 +25,9 @@ struct GatewayRestartDrainBanner: View {
                     if watcher.isWatching {
                         Button("Stop Waiting") { watcher.stopWatching() }
                             .controlSize(.small)
-                            .help("Stops Scarf watching. Hermes still restarts the gateway when the turn ends.")
+                            .help(watcher.waitsForIdle
+                                  ? "Stops Scarf watching. Hermes still restarts the gateway once it's idle."
+                                  : "Stops Scarf watching. Hermes still restarts the gateway when the turn ends.")
                     } else {
                         Button("Dismiss") { watcher.reset() }
                             .controlSize(.small)
@@ -41,7 +43,14 @@ struct GatewayRestartDrainBanner: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                 }
-                if watcher.isWatching, let started = watcher.startedAt {
+                if watcher.isWatching, watcher.waitsForIdle, let started = watcher.startedAt {
+                    // v0.23.2+: no upper bound; the timeout only spaces out
+                    // log warnings (`gateway/restart_when_idle.py`).
+                    Text("Waiting since \(started, style: .time). Hermes keeps serving and restarts the gateway when nothing is running; it doesn't interrupt work in progress.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if watcher.isWatching, let started = watcher.startedAt {
                     // Hermes caps this wait with `agent.restart_after_turn_timeout`
                     // (30 minutes by default).
                     Text("Waiting since \(started, style: .time). Hermes stops waiting after agent.restart_after_turn_timeout (30 minutes by default).")

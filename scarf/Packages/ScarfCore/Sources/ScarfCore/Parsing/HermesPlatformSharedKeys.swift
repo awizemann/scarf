@@ -57,6 +57,11 @@ public enum HermesPlatformSharedKeys {
     /// Discord/Slack) and the transforms do not change WHERE the key is read
     /// from, which is all this type answers.
     ///
+    /// `voice_mention_patterns` joined the list at `v0.23.2` (absent from
+    /// `v0.23.1`, present in `v0.23.4`'s `_SHARED_KEYS`). The set is not
+    /// version-gated: nothing in Scarf writes the key, and on an older host
+    /// the name only decides where a write WOULD land.
+    ///
     /// Membership is what tells a writer whether it must resolve the bridge
     /// source at all: a non-shared key (`reply_to_mode`, `reply_broadcast`,
     /// tokens) keeps its own literal spelling.
@@ -65,7 +70,8 @@ public enum HermesPlatformSharedKeys {
         "reply_prefix", "reply_in_thread", "cron_continuable_surface",
         "require_mention", "send_read_receipts",
         "allowed_chats", "group_allowed_chats", "allowed_topics",
-        "free_response_channels", "mention_patterns", "exclusive_bot_mentions",
+        "free_response_channels", "mention_patterns", "voice_mention_patterns",
+        "exclusive_bot_mentions",
         "observe_unmentioned_group_messages",
         "dm_policy", "allow_from", "allow_admin_from", "user_allowed_commands",
         "group_policy", "group_allow_from", "group_allow_admin_from",

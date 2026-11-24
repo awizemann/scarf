@@ -109,6 +109,29 @@ import Testing
         #expect(HermesProfileList.parse("").isEmpty)
     }
 
+    /// Built from the print statements in `_profile_list` @ Hermes v0.23.4
+    /// (3ac54e1): normal rows, then `  {canon:<15} {'—':<28} {'delete incomplete':<12}`
+    /// rows, a blank line, `delete_incomplete_message` lines, a blank line,
+    /// then `⚠ Profile …` credential warnings.
+    @Test func v0234DeleteIncompleteRowsAndTrailerAreNotProfiles() {
+        let output = """
+
+         Profile          Model                        Gateway      Alias        Distribution
+         ───────────────    ───────────────────────────    ───────────    ───────────    ────────────────────
+         ◆default         —                            stopped      —            —
+          work            —                            running      work         —
+          half-gone       —                            delete incomplete
+
+        Deletion of profile 'half-gone' did not finish: /Users/me/.hermes/profiles/half-gone still holds its files. Finish it with `hermes profile delete half-gone`, or keep it with `hermes profile rename half-gone <new-name>`.
+
+        ⚠ Profile 'work' shares its telegram credential with default: the bot can only belong to one profile. Give 'work' its own bot (hermes -p work setup, or the dashboard Messaging page) or remove the token from 'work'; a multiplexed gateway parks the duplicate and `hermes gateway migrate --multiplex` refuses until it is gone.
+
+        """
+        let rows = HermesProfileList.parse(output)
+        #expect(rows.map(\.id) == ["default", "work"])
+        #expect(rows.first?.isMarked == true)
+    }
+
     @Test func activeProfileFileContents() {
         #expect(HermesProfileList.activeProfile(fromFileContents: "research\n") == "research")
         #expect(HermesProfileList.activeProfile(fromFileContents: "") == "default")

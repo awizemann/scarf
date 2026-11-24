@@ -23,6 +23,13 @@ struct WebhooksView: View {
     @State private var addDeliver = "log"
     @State private var addChatID = ""
     @State private var addSecret = ""
+    @State private var addSignature: HermesWebhookSignature = .generic
+    @Environment(\.hermesCapabilities) private var capabilitiesStore
+    /// `webhook subscribe --signature` exists on v0.23.2+ only; older hosts
+    /// keep the form (and argv) exactly as before.
+    private var hasSignatureOption: Bool {
+        capabilitiesStore?.capabilities.hasWebhookSignatureOption ?? false
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -291,6 +298,23 @@ struct WebhooksView: View {
                     .font(.system(.caption, design: .monospaced))
                     .accessibilityLabel("Secret")
             }
+            if hasSignatureOption {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Signature").font(.caption).foregroundStyle(.secondary)
+                    Picker("Signature", selection: $addSignature) {
+                        Text("Generic").tag(HermesWebhookSignature.generic)
+                        Text("GitHub").tag(HermesWebhookSignature.github)
+                        Text("GitLab").tag(HermesWebhookSignature.gitlab)
+                        Text("Linear").tag(HermesWebhookSignature.linear)
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.segmented)
+                    .accessibilityLabel("Signature scheme")
+                    Text("Only this header family is accepted; every other scheme is rejected.")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
             HStack {
                 Spacer()
                 Button("Cancel") {
@@ -310,7 +334,15 @@ struct WebhooksView: View {
                         skills: addSkills,
                         deliver: addDeliver,
                         chatID: addChatID,
-                        secret: addSecret
+                        secret: addSecret,
+                        // Re-subscribing an existing route without `--signature`
+                        // keeps its pin (`_route_signature`, hermes_cli/webhook.py:180
+                        // @ v0.23.4); only an explicit non-default choice changes it.
+                        signature: !hasSignatureOption ? nil
+                            : (addSignature == .generic
+                               && viewModel.webhooks.contains { $0.name == addName.trimmingCharacters(in: .whitespaces) })
+                               ? nil : addSignature,
+                        capabilities: capabilitiesStore?.capabilities ?? .empty
                     )
                     // Cleared immediately: `subscribe` has already copied it
                     // into the argv it will run, and the form is otherwise
@@ -343,10 +375,23 @@ struct WebhooksView: View {
             if !created.url.isEmpty {
                 copyRow(label: "URL", value: created.url)
             }
-            copyRow(label: "Secret", value: created.secret)
-            Text("Sign each request body with HMAC-SHA256 using this secret.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            if let path = created.unreadablePath {
+                // v0.23.2+ prints only a masked secret; reading the full
+                // value from the host failed, so say where it lives rather
+                // than presenting the mask as if it were the secret.
+                Label {
+                    Text("Scarf couldn't read the secret from the host. Its full value is in \(path).")
+                        .font(.caption)
+                        .textSelection(.enabled)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                }
+            } else {
+                copyRow(label: "Secret", value: created.secret)
+                Text("Sign each request body with HMAC-SHA256 using this secret.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             HStack {
                 Spacer()
                 Button("Done") { viewModel.createdSecret = nil }
@@ -397,5 +442,6 @@ struct WebhooksView: View {
     private func resetAddForm() {
         addName = ""; addPrompt = ""; addEvents = ""; addDescription = ""
         addSkills = ""; addDeliver = "log"; addChatID = ""; addSecret = ""
+        addSignature = .generic
     }
 }

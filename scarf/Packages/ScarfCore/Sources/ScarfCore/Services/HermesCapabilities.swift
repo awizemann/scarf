@@ -3012,6 +3012,62 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// [--force]` is older (present at v0.22.5) and is not gated here.
     public var hasPluginsAutoUpdateVerb: Bool { isV0230OrLater }
 
+    // MARK: v0.23.1–v0.23.4 flags
+    //
+    // Patch-level floors, each checked tag by tag (v0.23.0 → v0.23.4).
+
+    /// Yuanbao left core: `plugins/platforms/yuanbao/` is gone at v0.23.1
+    /// (present at v0.23.0) and ships as a Hermes Labs plugin
+    /// (`plugin-catalog/yuanbao.yaml`). `hermes setup` no longer offers it.
+    public var hasYuanbaoLeftCore: Bool { isV0231OrLater }
+
+    /// `hermes webhook subscribe --signature generic|github|gitlab|linear`;
+    /// new routes default to `generic` (`_route_signature`,
+    /// `hermes_cli/webhook.py:180` @ v0.23.4). Absent at v0.23.1.
+    public var hasWebhookSignatureOption: Bool { isV0232OrLater }
+
+    /// `webhook subscribe` prints the secret masked, with the full value only
+    /// in `<home>/webhook_subscriptions.json` (`hermes_cli/webhook.py:325`
+    /// @ v0.23.4). Plain secret at v0.23.1.
+    public var hasWebhookMaskedSecret: Bool { isV0232OrLater }
+
+    /// Cron jobs carry a tri-state `wrap_response` (`cron/jobs_tristate.py`,
+    /// `cron/job_definition.py:19` @ v0.23.4). Absent at v0.23.1.
+    public var hasCronWrapResponse: Bool { isV0232OrLater }
+
+    /// A graceful restart waits for idle and keeps serving
+    /// (`gateway/restart_when_idle.py` @ v0.23.2); before, `draining` refused
+    /// new turns up to `agent.restart_after_turn_timeout`.
+    public var hasGatewayRestartWhenIdle: Bool { isV0232OrLater }
+
+    /// `prompt_caching.cache_ttl` defaults to `"auto"`
+    /// (`hermes_cli/config_defaults.py:689` @ v0.23.3); `"5m"` at v0.23.2.
+    /// `"auto"` itself is accepted on older hosts too.
+    public var hasPromptCacheTTLAutoDefault: Bool { isV0233OrLater }
+
+    /// Offer `prompt_caching.cache_ttl: auto` in Settings. Hermes accepts it
+    /// from v2026.9.24 (0.21.5: `AUTO_CACHE_TTL`, `agent/prompt_caching.py:121`;
+    /// `agent/agent_init.py:678`), but the option is surfaced from v0.23.3,
+    /// where it became the default, so pre-target hosts render as before (C1).
+    public var hasPromptCacheTTLAuto: Bool { hasPromptCacheTTLAutoDefault }
+
+    /// Show the `agent.clarify_timeout` Settings field. The key exists from
+    /// v2026.5.16 (0.14.0, `hermes_cli/config.py:519`), but the field is
+    /// surfaced from v0.23.1, where the default dropped 3600 → 90 s and it
+    /// started to matter, so pre-target hosts render as before (C1).
+    public var hasClarifyTimeout: Bool { isV0231OrLater }
+
+    /// `agent.clarify_timeout` defaults to 90 s
+    /// (`hermes_cli/config_defaults.py:218` @ v0.23.1, migration
+    /// `hermes_cli/config_migrations.py:879`); 3600 at v0.23.0.
+    public var hasClarifyTimeout90Default: Bool { isV0231OrLater }
+
+    /// `resolve_clarify_timeout`: legacy `clarify.timeout` wins when set,
+    /// else `agent.clarify_timeout`; `<= 0` means unlimited
+    /// (`tools/clarify_gateway.py:385-396` @ v2026.7.30 = 0.19.1). Absent at
+    /// v2026.7.20, which reads only `agent.clarify_timeout`.
+    public var hasClarifyTimeoutResolver: Bool { isV0191OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience
@@ -3229,6 +3285,11 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// Whether the connected host is on v0.23.0 or newer. Floor for the
     /// v0.23.0 group, same rationale as `isV0216OrLater`.
     public var isV0230OrLater: Bool { atLeastSemver(0, 23, 0) }
+
+    /// Patch-level floors for the v0.23.1–v0.23.3 groups.
+    public var isV0231OrLater: Bool { atLeastSemver(0, 23, 1) }
+    public var isV0232OrLater: Bool { atLeastSemver(0, 23, 2) }
+    public var isV0233OrLater: Bool { atLeastSemver(0, 23, 3) }
 
     /// Exactly v0.22.1 — the release whose additions v0.22.2 reverted.
     private var isExactlyV0221: Bool { semver == SemVer(major: 0, minor: 22, patch: 1) }

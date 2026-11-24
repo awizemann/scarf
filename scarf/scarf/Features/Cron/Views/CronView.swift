@@ -132,7 +132,8 @@ struct CronView: View {
             workdir: hasCronWorkdir, noAgent: hasCronNoAgent,
             failureDeliver: hasCronFailureDeliver, modelPin: hasCronModelPin,
             interpreter: capabilitiesStore?.capabilities.hasCronInterpreter ?? false,
-            catchUp: hasCronCatchUp
+            catchUp: hasCronCatchUp,
+            wrapResponse: capabilitiesStore?.capabilities.hasCronWrapResponse ?? false
         )
     }
     /// v0.21.1 — `last_dispatch` / `last_delivery_unverified` read-only
@@ -1473,6 +1474,9 @@ struct CronJobEditor: View {
         /// v0.22.6 `--catch-up {on,off}`. `nil` = unset (follows
         /// `cron.catch_up_missed`). Seeded from `HermesCronJob.catchUp`.
         var catchUp: Bool? = nil
+        /// v0.23.2 per-job `wrap_response` (nil = inherit). Seeded from
+        /// `HermesCronJob.wrapResponse`; carried by a duplicate, no toggle.
+        var wrapResponse: Bool? = nil
     }
 
     let mode: Mode
@@ -1778,6 +1782,7 @@ struct CronJobEditor: View {
                 if case .edit = mode { form.pinModel = job.isModelPinned }
                 if case .duplicate = mode { form.interpreter = job.interpreter ?? "" }
                 form.catchUp = job.catchUp
+                form.wrapResponse = job.wrapResponse
             }
         }
     }

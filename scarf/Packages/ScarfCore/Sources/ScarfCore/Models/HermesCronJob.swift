@@ -580,7 +580,16 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
             if capabilities.hasCronCatchUpGrace {
                 authored.formUnion(Self.catchUpGraceAuthoredKeys)
             }
+            // v0.23.2 per-job `wrap_response` (`cron/job_definition.py:19`
+            // @ v0.23.4). A null (inherit) value is dropped below so the
+            // copy follows `cron.wrap_response` rather than storing a null.
+            if capabilities.hasCronWrapResponse {
+                authored.formUnion(Self.wrapResponseAuthoredKeys)
+            }
             carried = carried.filter { authored.contains($0.key) }
+            if capabilities.hasCronWrapResponse, case .null? = carried["wrap_response"] {
+                carried.removeValue(forKey: "wrap_response")
+            }
         }
         for runtimeKey in ["paused_at", "paused_reason", "monitor_state",
                            "last_status", "last_dispatch", "last_delivery_unverified",
@@ -682,6 +691,19 @@ public struct HermesCronJob: Identifiable, Sendable, Codable, Equatable {
     nonisolated static let catchUpGraceAuthoredKeys: Set<String> = [
         "timezone", "grace_minutes", "catch_up",
     ]
+
+    /// The v0.23.2 authored field (`cron/job_definition.py:19` @ v0.23.4),
+    /// carried by a duplicate only on a `hasCronWrapResponse` host.
+    nonisolated static let wrapResponseAuthoredKeys: Set<String> = ["wrap_response"]
+
+    /// v0.23.2 per-job tri-state response wrapper (`cron create
+    /// --wrap-response|--no-wrap-response`, `cron edit
+    /// --inherit-wrap-response`, `hermes_cli/subcommands/cron.py:29-40` @
+    /// v0.23.4). `nil` = inherit the global `cron.wrap_response`.
+    public nonisolated var wrapResponse: Bool? {
+        if case .bool(let b)? = extra["wrap_response"] { return b }
+        return nil
+    }
 
     /// v0.22.6 per-job missed-run policy (`cron create|edit --catch-up
     /// {on,off}`, `hermes_cli/subcommands/cron.py:15-26` @ v0.23.0). `nil`

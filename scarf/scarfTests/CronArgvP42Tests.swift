@@ -70,4 +70,17 @@ import ScarfCore
                 == ["--remove-skill=browse", "--add-skill=--sum"])
     }
 
+    // MARK: - v0.23.2 wrap_response (hermes_cli/subcommands/cron.py:29-37 @ v0.23.2)
+
+    private static func create(_ wrap: Bool?) -> [String] {
+        CronViewModel.createJobArguments(
+            schedule: "0 9 * * *", prompt: "p", name: "", deliver: "",
+            skills: [], script: "", repeatCount: "", wrapResponse: wrap)
+    }
+
+    @Test func wrapResponseFlagsFollowTheTriState() {
+        #expect(Self.create(true) == ["cron", "create", "--wrap-response", "--", "0 9 * * *", "p"])
+        #expect(Self.create(false) == ["cron", "create", "--no-wrap-response", "--", "0 9 * * *", "p"])
+        #expect(Self.create(nil) == ["cron", "create", "--", "0 9 * * *", "p"])
+    }
 }

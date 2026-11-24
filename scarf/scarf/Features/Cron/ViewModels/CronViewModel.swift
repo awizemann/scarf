@@ -1058,6 +1058,8 @@ final class CronViewModel {
         var interpreter = false
         /// v0.22.6 `--catch-up {on,off}` (`hasCronCatchUpGrace`).
         var catchUp = false
+        /// v0.23.2 `--wrap-response` / `--no-wrap-response` (`hasCronWrapResponse`).
+        var wrapResponse = false
     }
 
     /// The editor's Create and Duplicate save. The capability stripping lives
@@ -1083,7 +1085,8 @@ final class CronViewModel {
             pinModel: support.modelPin && !form.noAgent && form.pinModel,
             // v0.21.6 `--interpreter`, carried by a duplicate only.
             interpreter: support.interpreter ? form.interpreter : "",
-            catchUp: support.catchUp ? form.catchUp : nil
+            catchUp: support.catchUp ? form.catchUp : nil,
+            wrapResponse: support.wrapResponse ? form.wrapResponse : nil
         )
     }
 
@@ -1131,7 +1134,7 @@ final class CronViewModel {
         )
     }
 
-    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", catchUp: Bool? = nil, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+    func createJob(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", catchUp: Bool? = nil, wrapResponse: Bool? = nil, onOutcome: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         // A8 (v0.21.1): Hermes rejects a one-shot whose `run_at` is past the
         // grace window with a non-zero exit. Say so before the round-trip —
         // and only on a host that would actually refuse (see `isV0211OrLater`).
@@ -1148,7 +1151,8 @@ final class CronViewModel {
                 schedule: schedule, prompt: prompt, name: name, deliver: deliver,
                 skills: skills, script: script, repeatCount: repeatCount,
                 workdir: workdir, noAgent: noAgent, failureDeliver: failureDeliver,
-                pinModel: pinModel, interpreter: interpreter, catchUp: catchUp
+                pinModel: pinModel, interpreter: interpreter, catchUp: catchUp,
+                wrapResponse: wrapResponse
             ),
             success: "Job created",
             analytics: .created,
@@ -1170,7 +1174,7 @@ final class CronViewModel {
     /// that compose a create — and the tests that pin their composition —
     /// assert the PRODUCTION command line rather than a parallel builder that
     /// can drift from it.
-    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", catchUp: Bool? = nil) -> [String] {
+    nonisolated static func createJobArguments(schedule: String, prompt: String, name: String, deliver: String, skills: [String], script: String, repeatCount: String, workdir: String = "", noAgent: Bool = false, failureDeliver: String = "", pinModel: Bool = false, interpreter: String = "", catchUp: Bool? = nil, wrapResponse: Bool? = nil) -> [String] {
         var args = ["cron", "create"]
         if !name.isEmpty { args.append(HermesCLIOption.joined("--name", name)) }
         if !deliver.isEmpty { args.append(HermesCLIOption.joined("--deliver", deliver)) }
@@ -1204,6 +1208,11 @@ final class CronViewModel {
         // :55` @ v0.23.0). `nil` = follow `cron.catch_up_missed`; the caller
         // passes `nil` on a host without `hasCronCatchUpGrace`.
         if let catchUp { args.append(HermesCLIOption.joined("--catch-up", catchUp ? "on" : "off")) }
+        // v0.23.2 `--wrap-response` / `--no-wrap-response`
+        // (`hermes_cli/subcommands/cron.py:29-37,:70` @ v0.23.2). `nil` =
+        // inherit `cron.wrap_response`; the caller passes `nil` on a host
+        // without `hasCronWrapResponse`.
+        if let wrapResponse { args.append(wrapResponse ? "--wrap-response" : "--no-wrap-response") }
         // End-of-options before the positionals (`schedule`, optional
         // `prompt`). A prompt that legitimately opens with a dash —
         // "--deliver isn't working, investigate" — is otherwise claimed by

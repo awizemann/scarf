@@ -703,7 +703,8 @@ final class MessagingGatewayViewModel {
                 self.drainWatcher.onFinished = { [weak self] in self?.load(force: true) }
                 self.drainWatcher.start(
                     from: drain,
-                    budgetSeconds: budget)
+                    budgetSeconds: budget,
+                    waitsForIdle: caps.hasGatewayRestartWhenIdle)
                 self.load(force: true)
                 return
             }

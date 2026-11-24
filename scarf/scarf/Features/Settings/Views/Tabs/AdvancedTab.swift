@@ -545,17 +545,18 @@ struct AdvancedTab: View {
     }
 
     /// Caching, redaction, and runtime-metadata footer — all v0.12+
-    /// knobs. The cache_ttl picker is two options today (5m default,
-    /// 1h opt-in); when Hermes adds more they should be surfaced here
-    /// without changing the writer (`hermes config set` accepts arbitrary
+    /// knobs. The cache_ttl picker offers 5m/1h, plus "auto" on v0.21.5+
+    /// (`HermesConfig.cacheTTLOptions`); an absent key shows the host default
+    /// ("auto" on v0.23.3+, else "5m"). The writer is unchanged (`hermes config set` accepts arbitrary
     /// scalars, Hermes validates).
     @ViewBuilder
     private var v012CachingSection: some View {
+        let caps = capabilities
         SettingsSection(title: "Caching", icon: "lock.shield") {
             PickerRow(
                 label: "Prompt Cache TTL",
-                selection: viewModel.config.cacheTTL,
-                options: ["5m", "1h"]
+                selection: viewModel.config.displayCacheTTL(capabilities: caps),
+                options: viewModel.config.cacheTTLOptions(capabilities: caps)
             ) { viewModel.setSetting("prompt_caching.cache_ttl", value: $0) }
 
             // `redaction.enabled` had no reader in Hermes at any version

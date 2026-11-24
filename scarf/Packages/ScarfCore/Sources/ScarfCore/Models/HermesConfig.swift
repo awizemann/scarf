@@ -1570,6 +1570,56 @@ public struct HermesConfig: Sendable {
     /// exist before that.
     ///
     /// Display-only. Unknown host version resolves to the older 60.
+    /// Effective `prompt_caching.cache_ttl` for the picker: the PRESENT value
+    /// verbatim, otherwise the host's default — `"auto"` from v0.23.3
+    /// (`hermes_cli/config_defaults.py:689` @ v0.23.3; `"5m"` @ v0.23.2),
+    /// `"5m"` before. Display-only; nothing is written for an absent key.
+    public func displayCacheTTL(capabilities: HermesCapabilities) -> String {
+        if !cacheTTL.isEmpty { return cacheTTL }
+        return capabilities.hasPromptCacheTTLAutoDefault ? "auto" : "5m"
+    }
+
+    /// Picker options for `prompt_caching.cache_ttl`. `"auto"` is accepted
+    /// from v0.21.5 (`AUTO_CACHE_TTL = "auto"`, `agent/prompt_caching.py:121`,
+    /// branch at `agent/agent_init.py:678` @ v2026.9.24; absent @ v2026.9.21,
+    /// where unknown values fall back to `"5m"`). A present value outside the
+    /// set (hand-edited) is appended so the picker never renders blank.
+    public func cacheTTLOptions(capabilities: HermesCapabilities) -> [String] {
+        var options = ["5m", "1h"]
+        if capabilities.hasPromptCacheTTLAuto { options.append("auto") }
+        let current = displayCacheTTL(capabilities: capabilities)
+        if !options.contains(current) { options.append(current) }
+        return options
+    }
+
+    /// The key a clarify-timeout edit must write so it takes effect: the
+    /// legacy `clarify.timeout` when it is set on a host that honours it
+    /// (v0.19.1+, where it wins), else `agent.clarify_timeout`.
+    public func clarifyTimeoutConfigKey(capabilities: HermesCapabilities) -> String {
+        capabilities.hasClarifyTimeoutResolver && clarifyLegacyTimeout != nil
+            ? "clarify.timeout" : "agent.clarify_timeout"
+    }
+
+    /// Effective `agent.clarify_timeout` (seconds) for display: a PRESENT
+    /// value as Hermes reads it (`int(raw)`, `<= 0` = unlimited), otherwise
+    /// the host's own default — **90** from v0.23.1
+    /// (`hermes_cli/config_defaults.py:218` @ v0.23.1, migration
+    /// `config_migrations.py:879` rewrites 3600 → 90), **3600** from v0.18.0
+    /// (`hermes_cli/config.py` @ v2026.7.1), **600** from v0.14.0 where the
+    /// key first appears (`hermes_cli/config.py:519` @ v2026.5.16).
+    ///
+    /// From v0.19.1 Hermes resolves legacy `clarify.timeout` first, then
+    /// `agent.clarify_timeout`, and `<= 0` means unlimited
+    /// (`resolve_clarify_timeout`, `tools/clarify_gateway.py:385-396` @
+    /// v2026.7.30; `:281-291` @ v0.23.4). A non-positive value displays as 0.
+    public func displayClarifyTimeout(capabilities: HermesCapabilities) -> Int {
+        let resolver = capabilities.hasClarifyTimeoutResolver
+        let present = resolver ? (clarifyLegacyTimeout ?? clarifyTimeout) : clarifyTimeout
+        if let present { return resolver ? max(0, present) : present }
+        if capabilities.hasClarifyTimeout90Default { return 90 }
+        return capabilities.isV018OrLater ? 3600 : 600
+    }
+
     public func displayApprovalTimeout(capabilities: HermesCapabilities) -> Int {
         if approvalTimeout > 0 { return approvalTimeout }
         return capabilities.isV0191OrLater ? 300 : 60
@@ -1839,10 +1889,19 @@ public struct HermesConfig: Sendable {
     // Defaults match the Hermes v0.12 defaults so that an absent key in
     // config.yaml looks identical to a freshly-installed v0.12 host.
 
-    /// `prompt_caching.cache_ttl` — `"5m"` (default) or `"1h"`. Hermes
-    /// v0.12 added the 1-hour ceiling for users with prompt-cache-heavy
-    /// workloads (long agent loops with stable system prompts).
+    /// `prompt_caching.cache_ttl` as written in config.yaml — `""` when the
+    /// key is absent (the parser no longer substitutes a default, because the
+    /// host's default depends on its version). Resolve with
+    /// `displayCacheTTL(capabilities:)`. Hermes v0.12 added the 1-hour tier;
+    /// v0.21.5 added `"auto"`; v0.23.3 made `"auto"` the default.
     public var cacheTTL: String
+    /// `agent.clarify_timeout` (seconds) when present in config.yaml, `nil`
+    /// when absent. Resolve with `displayClarifyTimeout(capabilities:)`.
+    public var clarifyTimeout: Int?
+    /// Legacy top-level `clarify.timeout` when present. Honoured — and
+    /// winning over `agent.clarify_timeout` — from v0.19.1
+    /// (`resolve_clarify_timeout`, `tools/clarify_gateway.py:385` @ v2026.7.30).
+    public var clarifyLegacyTimeout: Int?
     /// `display.runtime_footer.enabled` — opt-in compact footer on the
     /// final reply of a turn (e.g. `model · 68% · ~/projects`). Off by
     /// default; useful for cost auditing and screen-recording demos.
@@ -2090,7 +2149,9 @@ public struct HermesConfig: Sendable {
         mattermost: MattermostSettings,
         whatsapp: WhatsAppSettings,
         homeAssistant: HomeAssistantSettings,
-        cacheTTL: String = "5m",
+        cacheTTL: String = "",
+        clarifyTimeout: Int? = nil,
+        clarifyLegacyTimeout: Int? = nil,
         runtimeMetadataFooter: Bool = false,
         displayBusyAckEnabled: Bool = true,
         gatewayPlatforms: [String: GatewayPlatformSettings] = [:],
@@ -2124,6 +2185,8 @@ public struct HermesConfig: Sendable {
         toolLoopNonInteractiveHardStop: Bool = true
     ) {
         self.cacheTTL = cacheTTL
+        self.clarifyTimeout = clarifyTimeout
+        self.clarifyLegacyTimeout = clarifyLegacyTimeout
         self.runtimeMetadataFooter = runtimeMetadataFooter
         self.displayBusyAckEnabled = displayBusyAckEnabled
         self.gatewayPlatforms = gatewayPlatforms
