@@ -207,6 +207,23 @@ public enum KnownPlatforms {
         HermesToolPlatform(name: "photon", displayName: "iMessage via Photon", icon: "antenna.radiowaves.left.and.right", minimumVersion: HermesCapabilities.photonPlatformFloor),
     ]
 
+    /// The `Type` / `Setup` copy for the Yuanbao panel.
+    ///
+    /// Yuanbao left Hermes core at v0.23.1 (`plugins/platforms/yuanbao/` is
+    /// gone; it ships as the `yuanbao` Hermes Labs plugin from
+    /// `plugin-catalog/yuanbao.yaml` @ `v0.23.4`, which also declares
+    /// `YUANBAO_APP_ID` / `YUANBAO_APP_SECRET` as its required env). On those
+    /// hosts the answer is the Plugins tab, the same path the Teams panel
+    /// gives; older hosts keep the original `hermes setup` copy unchanged.
+    public static func yuanbaoSetupCopy(on capabilities: HermesCapabilities) -> (type: String, setup: String) {
+        guard capabilities.hasYuanbaoLeftCore else {
+            return ("Native gateway adapter (v0.12+)",
+                    "Run `hermes setup` and select Yuanbao to walk the OAuth flow.")
+        }
+        return ("Plugin-shipped gateway platform (Hermes Labs plugin)",
+                "Install the `yuanbao` plugin from the Plugins tab, then set YUANBAO_APP_ID and YUANBAO_APP_SECRET for your Yuanbao bot.")
+    }
+
     /// The rows the Platforms list and the Tools tab's platform menu should
     /// offer, in roster order.
     ///

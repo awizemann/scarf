@@ -45,3 +45,27 @@ import Foundation
         }
     }
 }
+
+/// Yuanbao left core at v0.23.1: setup copy points at the plugin; older hosts
+/// keep the original copy. `voice_mention_patterns` joined `_SHARED_KEYS` at v0.23.2.
+@Suite struct HermesYuanbaoLeftCoreCopyTests {
+
+    @Test func olderHostsKeepTheHermesSetupCopy() {
+        let c = KnownPlatforms.yuanbaoSetupCopy(on: HermesCapabilitiesV0234Tests.caps("0.23.0"))
+        #expect(c.type == "Native gateway adapter (v0.12+)")
+        #expect(c.setup == "Run `hermes setup` and select Yuanbao to walk the OAuth flow.")
+    }
+
+    @Test func leftCoreHostsPointAtThePluginsTab() {
+        for v in ["0.23.1", "0.23.4"] {
+            let c = KnownPlatforms.yuanbaoSetupCopy(on: HermesCapabilitiesV0234Tests.caps(v))
+            #expect(c.setup.contains("Plugins tab"), "\(v)")
+            #expect(c.setup.contains("`yuanbao`"), "\(v)")
+            #expect(!c.setup.contains("hermes setup"), "\(v)")
+        }
+    }
+
+    @Test func voiceMentionPatternsIsASharedKey() {
+        #expect(HermesPlatformSharedKeys.names.contains("voice_mention_patterns"))
+    }
+}
