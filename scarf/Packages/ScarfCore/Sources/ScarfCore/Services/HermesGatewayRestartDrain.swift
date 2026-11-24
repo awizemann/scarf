@@ -16,6 +16,17 @@ import Foundation
 /// `restart_drain_timeout + restart_after_turn_timeout + 15`
 /// (`gateway/restart.py:358-361`) — about 30 minutes by default.
 ///
+/// From v0.23.2 (``HermesCapabilities/hasGatewayRestartWhenIdle``) the
+/// restart is "restart when idle" (`gateway/restart_when_idle.py`,
+/// `await_idle`/`request_restart` @ v0.23.4): the gateway keeps serving and
+/// admits new turns until nothing is running, with no upper bound —
+/// `agent.restart_after_turn_timeout` only spaces out WARNING log lines.
+/// It still publishes `gateway_state: "draining"` + `restart_requested`
+/// while it waits (`_scale_to_zero_status("draining", …)` in `await_idle`).
+/// So on those hosts the CLI's budget is not Hermes's wait, and the watch
+/// does not give up while the gateway still says it is waiting
+/// (``WatchDeadline``).
+///
 /// Scarf's restart spawn is capped at 60 s (charter C10), so a restart sent
 /// while a chat turn or cron job ran used to end in "Gateway restart
 /// failed: Command timed out…" while Hermes was in fact doing exactly what
@@ -232,6 +243,48 @@ public enum HermesGatewayRestartDrain {
     public static let pendingNote = String(
         localized: "Waiting for the current turn to finish — Hermes restarts the gateway as soon as it ends."
     )
+
+    /// When Scarf's watch stops waiting.
+    ///
+    /// Before v0.23.2 the deadline is fixed: Hermes's wait plus a grace.
+    /// On a restart-when-idle host Hermes waits for idle with no upper
+    /// bound, so while the gateway still reports `.draining` the watch never
+    /// expires, and once it stops draining the replacement gets at least
+    /// the grace to report in.
+    public struct WatchDeadline: Equatable, Sendable {
+        public private(set) var deadline: Double
+        public let graceSeconds: Double
+        public let waitsForIdle: Bool
+
+        /// `now` and later `now`s are seconds on one monotonic clock.
+        public init(budgetSeconds: Int, graceSeconds: Int, waitsForIdle: Bool, now: Double) {
+            self.deadline = now + Double(budgetSeconds + graceSeconds)
+            self.graceSeconds = Double(graceSeconds)
+            self.waitsForIdle = waitsForIdle
+        }
+
+        public mutating func expired(phase: Phase, now: Double) -> Bool {
+            if waitsForIdle, case .draining = phase {
+                deadline = max(deadline, now + graceSeconds)
+                return false
+            }
+            return now >= deadline
+        }
+    }
+
+    /// The watch banner's headline while the gateway is draining.
+    public static func drainingHeadline(waitsForIdle: Bool) -> String {
+        waitsForIdle
+            ? String(localized: "Restart scheduled — the gateway restarts once it's idle. Chats keep working until then…")
+            : String(localized: "Waiting for the current turn to finish before restarting the gateway…")
+    }
+
+    /// The watch banner's headline after Stop Waiting.
+    public static func leftHeadline(waitsForIdle: Bool) -> String {
+        waitsForIdle
+            ? String(localized: "Stopped watching. Hermes still restarts the gateway once it's idle.")
+            : String(localized: "Stopped watching. Hermes still restarts the gateway when the current turn ends.")
+    }
 
     static func formatElapsed(_ seconds: Double) -> String {
         let total = Int(seconds)

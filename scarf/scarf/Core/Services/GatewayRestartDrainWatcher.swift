@@ -12,7 +12,9 @@ import ScarfCore
 ///
 /// It is bounded by Hermes's own wait (`budgetSeconds`, ~30 min by default)
 /// plus a grace period, after which it stops and says the gateway has not
-/// reported back. The user can leave at any time with ``stopWatching()``;
+/// reported back. On a restart-when-idle host (v0.23.2+) Hermes's wait has
+/// no bound, so the watch keeps going while the gateway still says it is
+/// draining (``HermesGatewayRestartDrain/WatchDeadline``). The user can leave at any time with ``stopWatching()``;
 /// that only ends Scarf's watch — Hermes restarts the gateway either way.
 @Observable
 @MainActor
@@ -34,6 +36,8 @@ final class GatewayRestartDrainWatcher {
 
     private(set) var status: Status = .idle
     private(set) var startedAt: Date?
+    /// The restart waits for idle and the gateway keeps serving (v0.23.2+).
+    private(set) var waitsForIdle = false
 
     /// Called once when the watch ends — by itself (restarted, failed, not
     /// revived, gave up) or by Stop Waiting. The pane reloads its status
@@ -78,13 +82,20 @@ final class GatewayRestartDrainWatcher {
     }
 
     /// Begin watching from the draining snapshot the restart left behind.
-    func start(from snapshot: HermesGatewayRestartDrain.Snapshot, budgetSeconds: Int?) {
+    func start(from snapshot: HermesGatewayRestartDrain.Snapshot, budgetSeconds: Int?, waitsForIdle: Bool = false) {
         task?.cancel()
         startedAt = Date()
+        self.waitsForIdle = waitsForIdle
         status = .watching(.draining(work: snapshot.activeWork))
         let drainingPID = snapshot.pid
-        let limit = (budgetSeconds ?? HermesGatewayRestartDrain.defaultBudgetSeconds) + graceSeconds
-        let deadline = ContinuousClock.now + .seconds(limit)
+        let origin = ContinuousClock.now
+        func elapsed() -> Double {
+            let d = ContinuousClock.now - origin
+            return Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18
+        }
+        var deadline = HermesGatewayRestartDrain.WatchDeadline(
+            budgetSeconds: budgetSeconds ?? HermesGatewayRestartDrain.defaultBudgetSeconds,
+            graceSeconds: graceSeconds, waitsForIdle: waitsForIdle, now: 0)
         let read = readState
         let interval = interval
         let revivalGrace = Duration.seconds(revivalGraceSeconds)
@@ -121,7 +132,7 @@ final class GatewayRestartDrainWatcher {
                     goneSince = nil
                     self.status = .watching(phase)
                 }
-                if ContinuousClock.now >= deadline {
+                if deadline.expired(phase: phase, now: elapsed()) {
                     self.finish(.gaveUp)
                     return
                 }
@@ -158,7 +169,7 @@ final class GatewayRestartDrainWatcher {
         case .idle:
             return nil
         case .watching(.draining):
-            return String(localized: "Waiting for the current turn to finish before restarting the gateway…")
+            return HermesGatewayRestartDrain.drainingHeadline(waitsForIdle: waitsForIdle)
         case .watching(.waitingForServiceManager):
             return String(localized: "The old gateway has stopped — waiting for the service manager to start it again…")
         case .watching(.starting):
@@ -173,7 +184,7 @@ final class GatewayRestartDrainWatcher {
         case .gaveUp:
             return String(localized: "Hermes's restart wait has passed and the gateway hasn't reported back — check its status.")
         case .left:
-            return String(localized: "Stopped watching. Hermes still restarts the gateway when the current turn ends.")
+            return HermesGatewayRestartDrain.leftHeadline(waitsForIdle: waitsForIdle)
         case .notRevived:
             return String(localized: "The old gateway stopped, but no new one has started. Start the gateway to bring it back.")
         }

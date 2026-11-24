@@ -330,7 +330,8 @@ final class PlatformsViewModel: OutcomeMessageHosting {
                         }
                         self.load(force: true)
                     }
-                    self.drainWatcher.start(from: drain, budgetSeconds: report.budgetSeconds)
+                    self.drainWatcher.start(from: drain, budgetSeconds: report.budgetSeconds,
+                                            waitsForIdle: report.waitsForIdle)
                 }
                 self.load(force: true)
             }

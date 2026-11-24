@@ -1597,14 +1597,15 @@ struct HermesFileService: Sendable {
     /// gateway is draining (waiting for the current turn before it restarts,
     /// S07-F3), `drain` is the state-file snapshot a caller watches from.
     nonisolated func restartGatewayReport(interrupt: Bool = false) -> (
-        outcome: HermesCLIOutcome, drain: HermesGatewayRestartDrain.Snapshot?, budgetSeconds: Int?
+        outcome: HermesCLIOutcome, drain: HermesGatewayRestartDrain.Snapshot?, budgetSeconds: Int?,
+        waitsForIdle: Bool
     ) {
         // Never into a gateway with no service behind it: Hermes would stop
         // it and run the replacement inside this spawn, which the timeout
         // below then kills (see ``HermesGatewayRestartGuard``).
         let supervised: Bool
         switch restartDecision(stopThenStart: false) {
-        case .refuse(let refusal): return (refusal, nil, nil)
+        case .refuse(let refusal): return (refusal, nil, nil, false)
         case .restart(let externallySupervised): supervised = externallySupervised
         }
         // 60 s, or longer on a pre-0.21 launchd host whose restart is the
@@ -1627,8 +1628,8 @@ struct HermesFileService: Sendable {
             verb: .restart, output: result.output, exitCode: result.exitCode,
             externallySupervised: supervised, drainingAfterTimeout: drain != nil
         )
-        guard outcome.confidence == .unconfirmed, let drain else { return (outcome, nil, nil) }
-        return (outcome, drain.snapshot, drain.budgetSeconds)
+        guard outcome.confidence == .unconfirmed, let drain else { return (outcome, nil, nil, false) }
+        return (outcome, drain.snapshot, drain.budgetSeconds, capabilities.hasGatewayRestartWhenIdle)
     }
 
     /// The v0.22.3+ live-session refusal a `stop`/`restart` outcome carries,
