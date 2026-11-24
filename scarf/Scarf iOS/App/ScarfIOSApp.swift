@@ -316,6 +316,7 @@ final class RootModel {
         // Drop the pooled SSH connection before wiping credentials so we
         // don't hold a live session to a server we're forgetting.
         await CitadelTransportPool.shared.evict(id)
+        ModelPreflightCache.shared.invalidate(id)
         var failures: [String] = []
         do {
             try await keyStore.delete(for: id)

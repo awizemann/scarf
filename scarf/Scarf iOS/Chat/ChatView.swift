@@ -2051,8 +2051,34 @@ final class ChatController {
     /// kept tapping (the typing TestFlight crash report). Reading
     /// detached pushes the I/O off MainActor; the result and the
     /// `pendingStartIntent` / `modelPreflightReason` writes hop back.
+    ///
+    /// gh#150: a positive verdict is memoised per server for the process
+    /// (`ModelPreflightCache`), so later starts skip the config read; the
+    /// "Connecting…" overlay is up while a real read runs, and the prior
+    /// state comes back when the preflight fails so the sheet can show.
     private func passModelPreflight(intent: PendingStart) async -> Bool {
+        // Cache hits get their own counter so near-zero samples don't
+        // dilute the real read's timing in a diagnostics export.
+        if ModelPreflightCache.shared.isKnownConfigured(context.id) {
+            ScarfMon.event(.sessionLoad, "ios.modelPreflight.cacheHit", count: 1)
+            return true
+        }
+        if case .resume = intent {
+            return await ScarfMon.measureAsync(.sessionLoad, "ios.resume.modelPreflight") {
+                await runModelPreflight(intent: intent)
+            }
+        }
+        return await ScarfMon.measureAsync(.sessionLoad, "ios.start.modelPreflight") {
+            await runModelPreflight(intent: intent)
+        }
+    }
+
+    private func runModelPreflight(intent: PendingStart) async -> Bool {
         let ctx = context
+        let server = ctx.id
+        if ModelPreflightCache.shared.isKnownConfigured(server) { return true }
+        let priorState = state
+        state = .connecting
         // Direct read → `cat "$(hermes config path)"` wrapper fallback →
         // `hermes config show` model-line probe. The probe is the only
         // read that works when Hermes runs inside a container (gh#112) —
@@ -2065,7 +2091,10 @@ final class ChatController {
             return HermesConfigReader.probeModelConfig(context: ctx) ?? .empty
         }.value
         let result = ModelPreflight.check(config)
+        ModelPreflightCache.shared.record(result, for: server)
         if result.isConfigured { return true }
+        // Only undo our own overlay — something else may have moved state.
+        if state == .connecting { state = priorState }
         pendingStartIntent = intent
         modelPreflightReason = result.reason
         return false
@@ -2082,6 +2111,7 @@ final class ChatController {
         let intent = pendingStartIntent
         modelPreflightReason = nil
         pendingStartIntent = nil
+        ModelPreflightCache.shared.invalidate(context.id)
 
         let trimmedModel = model.trimmingCharacters(in: .whitespaces)
         let trimmedProvider = provider.trimmingCharacters(in: .whitespaces)
@@ -2424,7 +2454,9 @@ final class ChatController {
         }
 
         do {
-            try await client.start()
+            try await ScarfMon.measureAsync(.sessionLoad, "ios.start.acpClientStart") {
+                try await client.start()
+            }
         } catch {
             state = .failed(error.localizedDescription)
             await vm.recordACPFailure(error, client: client)
@@ -2443,7 +2475,9 @@ final class ChatController {
         // directory — Hermes defaults to that for tool scoping.
         do {
             let home = await context.resolvedUserHome()
-            let sessionId = try await client.newSession(cwd: home)
+            let sessionId = try await ScarfMon.measureAsync(.sessionLoad, "ios.start.newSession") {
+                try await client.newSession(cwd: home)
+            }
             vm.setSessionId(sessionId)
             loadDraft()
             state = .ready
@@ -3453,7 +3487,9 @@ final class ChatController {
         // from the process cwd at spawn), the environment hint on v0.16+
         // (#142). Non-fatal: a block write failure surfaces a banner and
         // the chat proceeds without the block.
-        await prepareProjectContext(projectPath: project.path, projectName: project.name)
+        await ScarfMon.measureAsync(.sessionLoad, "ios.start.prepareProjectContext") {
+            await prepareProjectContext(projectPath: project.path, projectName: project.name)
+        }
         await start(projectPath: project.path, projectName: project.name)
     }
 
@@ -3563,7 +3599,9 @@ final class ChatController {
         }
 
         do {
-            try await client.start()
+            try await ScarfMon.measureAsync(.sessionLoad, "ios.start.acpClientStart") {
+                try await client.start()
+            }
         } catch {
             state = .failed(error.localizedDescription)
             await vm.recordACPFailure(error, client: client)
@@ -3577,7 +3615,9 @@ final class ChatController {
             // Use the project's path as cwd when provided; else the
             // remote user's home, matching the pre-M9 default.
             let cwd = await context.acpSessionCwd(projectPath: projectPath)
-            let sessionId = try await client.newSession(cwd: cwd)
+            let sessionId = try await ScarfMon.measureAsync(.sessionLoad, "ios.start.newSession") {
+                try await client.newSession(cwd: cwd)
+            }
             // The project's bound model preset, before the composer
             // unlocks — the Mac does the same (S11-F3).
             if let projectPath {
@@ -3634,6 +3674,9 @@ final class ChatController {
     private func _startResumingImpl(sessionID: String) async {
         guard await passModelPreflight(intent: .resume(sessionID: sessionID)) else { return }
         await stop()
+        // `stop()` drops to .idle; keep the overlay up through the project
+        // resolve and context prep below (gh#150).
+        state = .connecting
         vm.reset()
         failedResumeSessionID = nil
         resumeFallbackOriginID = nil
@@ -3654,7 +3697,8 @@ final class ChatController {
         // Resolve both the path AND the name so we can (a) render the
         // header chip with the name and (b) load any project-scoped
         // slash commands at the project's `.scarf/slash-commands/` dir.
-        let resolved: (path: String, name: String)? = await Task.detached {
+        let resolved: (path: String, name: String)? = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.projectResolve") {
+          await Task.detached {
             let attribution = SessionAttributionService(context: ctx)
             guard let path = attribution.projectPath(for: sessionID) else { return nil }
             let registry = ProjectDashboardService(context: ctx).loadRegistry()
@@ -3662,7 +3706,8 @@ final class ChatController {
                   !name.isEmpty
             else { return nil }
             return (path: path, name: name)
-        }.value
+          }.value
+        }
         currentProjectName = resolved?.name
         currentGitBranch = nil
         vm.loadProjectScopedCommands(at: resolved?.path)
@@ -3691,7 +3736,9 @@ final class ChatController {
         // current for the project's next new chat — cron, slash-command
         // and project-name changes apply to new chats.
         if let resumePath = resolved?.path {
-            await prepareProjectContext(projectPath: resumePath, projectName: resolved?.name ?? "")
+            await ScarfMon.measureAsync(.sessionLoad, "ios.resume.prepareProjectContext") {
+                await prepareProjectContext(projectPath: resumePath, projectName: resolved?.name ?? "")
+            }
         }
 
         state = .connecting
@@ -3702,7 +3749,9 @@ final class ChatController {
         }
 
         do {
-            try await client.start()
+            try await ScarfMon.measureAsync(.sessionLoad, "ios.resume.acpClientStart") {
+                try await client.start()
+            }
         } catch {
             // Superseded (another resume / New chat installed its own
             // client meanwhile): that path owns the state now.
@@ -3737,11 +3786,16 @@ final class ChatController {
             // Only the not-restorable load answer falls back; any other
             // load error lands in the catch below as a failed state with
             // Retry, never a silent new session.
-            let source = await SessionResume.fetchSource(context: context, sessionId: sessionID)
+            let source = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.fetchSource") {
+                await SessionResume.fetchSource(context: context, sessionId: sessionID)
+            }
             // Gateway-backed ACP loads `local` (and legacy CLI/TUI/GUI) rows
             // too, and refuses an unknown one with a JSON-RPC error.
-            let gatewayBacked = await capabilitiesProvider(context).hasGatewayBackedACP
-            let outcome = try await SessionResume.resolve(
+            let gatewayBacked = await ScarfMon.measureAsync(.sessionLoad, "ios.resume.capabilities") {
+                await capabilitiesProvider(context).hasGatewayBackedACP
+            }
+            let outcome = try await ScarfMon.measureAsync(.sessionLoad, "ios.resume.sessionLoad") {
+              try await SessionResume.resolve(
                 sessionId: sessionID,
                 source: source,
                 gatewayBacked: gatewayBacked,
@@ -3755,7 +3809,8 @@ final class ChatController {
                     return (loaded.sessionId, loaded.provenance?.currentHermesSessionId)
                 },
                 newSession: { try await client.newSession(cwd: cwd) }
-            )
+              )
+            }
             let resolvedID = outcome.sessionId
             let loadedHead = outcome.loadedHead
             if let projectPath = resolved?.path {
@@ -3772,13 +3827,15 @@ final class ChatController {
             // A rotated compression chain is listed under its tip; load
             // the whole lineage as one transcript, as the Mac does (R11
             // carry-over). Empty for an ordinary session.
-            await vm.loadSessionHistory(
-                sessionId: sessionID,
-                acpSessionId: resolvedID == sessionID ? nil : resolvedID,
-                lineage: RichChatViewModel.lineage(
-                    SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID),
-                    for: sessionID, addingLoadedHead: loadedHead)
-            )
+            await ScarfMon.measureAsync(.sessionLoad, "ios.resume.loadSessionHistory") {
+                await vm.loadSessionHistory(
+                    sessionId: sessionID,
+                    acpSessionId: resolvedID == sessionID ? nil : resolvedID,
+                    lineage: RichChatViewModel.lineage(
+                        SessionLineageIndex.shared.lineage(server: context.id, sessionID: sessionID),
+                        for: sessionID, addingLoadedHead: loadedHead)
+                )
+            }
             // Superseded while the history loaded: the newer start owns the
             // view model — don't paint this resume's notice onto it.
             guard self.client === client else { await client.stop(); return }
