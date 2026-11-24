@@ -71,14 +71,14 @@ Connecting takes about a minute: add a server (same details as `ssh user@host`),
 
 Scarf for macOS collects **usage statistics** (event names + fixed-vocabulary properties, never content, paths, or hostnames) to guide development. A random per-install identifier is stored on your Mac and sent only as a hash, so active installs can be counted and followed over time without knowing who you are. Opt out any time in **Settings → Advanced → Usage Analytics**. ScarfGo for iOS collects nothing. Details in the [Privacy Policy](https://awizemann.github.io/scarf/privacy/). The one voice feature that sends data to a third party is [Live Voice (GPT-Live mode)](https://github.com/awizemann/scarf/wiki/Chat#voice-conversation-mac-and-scarfgo), and only when you start it: your voice streams directly from your Mac or phone to OpenAI, with recent chat messages as context and Hermes's replies so the voice can speak them, and both apps ask before the first session.
 
-## What's New in 3.9.0
+## What's New in 3.9.1
 
-- **Ready for Hermes v0.23.0** — every new surface is checked against the release itself, and older hosts keep their current UI.
-- **Reasoning and speed pickers in Chat** — set reasoning effort (Hermes v0.22.6+) and the fast service tier (v0.23.0) from the chat header, and reset a chat to your default model.
-- **Stop a running cron job** — plus a per-job "Missed runs" choice (skip or run once on return) on Hermes v0.22.6+.
-- **Update All plugins** — preview what would change, then apply in one go (v0.22.3+); turn on plugin auto-update (v0.23.0).
-- **GitHub Copilot and Camofox moved to plugins in Hermes** — Scarf offers them once their plugin is installed and enabled, and tells you when it isn't.
-- Full notes: [releases/v3.9.0/RELEASE_NOTES.md](releases/v3.9.0/RELEASE_NOTES.md).
+- **Ready for Hermes v0.23.4** — every change is checked against Hermes v0.23.1–v0.23.4, and older hosts keep their current UI.
+- **Gateway status fixed on Hermes v0.23** — gateways started by Hermes's new launcher no longer show as stopped (gh#154).
+- **Faster chat reopen in ScarfGo** — one database lookup per reopen, a remembered model check, and per-step timings in Diagnostics (gh#150).
+- **Webhooks show the real secret again** on Hermes v0.23.2+, with a new Signature picker.
+- **New settings** — prompt-cache TTL "auto" (v0.23.3) and a Clarify timeout (v0.23.1+).
+- Full notes: [releases/v3.9.1/RELEASE_NOTES.md](releases/v3.9.1/RELEASE_NOTES.md).
 
 All previous releases: [Release Notes Index](https://github.com/awizemann/scarf/wiki/Release-Notes-Index).
 
