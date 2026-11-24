@@ -216,6 +216,136 @@ struct GatewayPlatformsR07Tests {
         #expect(!Self.ereMatches(p, wrapped))
     }
 
+    // MARK: - gh#154: v0.23 `-c` launchers
+
+    /// `_launcher_script("hermes", Path("/opt/hermes-agent"), None)` as
+    /// generated from the tagged v0.23.4 source (identical at v0.23.0), with
+    /// the long `_hermes_closure_repair` body cut down; head and tail verbatim.
+    static let launcherSource = #"""
+import os, re, sys
+import contextlib, hashlib, io, pathlib, shutil, subprocess
+os.environ.pop('PYTHONHOME', None)
+os.environ.pop('PYTHONPATH', None)
+sys.path.insert(0, '/opt/hermes-agent')
+def _hermes_closure_repair():
+    import contextlib, hashlib, io, shutil, subprocess
+    from pathlib import Path
+    root = Path('/opt/hermes-agent')
+    git = root / '.git'
+    raise SystemExit(1)
+if sys.argv[1:2] == ['--print-runtime-command']:
+    sys.dont_write_bytecode = True
+    from pathlib import Path
+    try:
+        from hermes_cli import _early_recovery
+    except Exception as exc:
+        if _hermes_closure_repair() or not isinstance(exc, ImportError):
+            raise
+        _early_recovery = None  # a tree without the repair: the imports below report real damage
+    if _early_recovery is not None and _early_recovery.restore_interrupted_pull(Path('/opt/hermes-agent')):
+        _early_recovery.relaunch_after_restore()
+    from hermes_constants import get_default_hermes_root
+    os.environ['HERMES_HOME'] = os.environ.get('HERMES_HOME') or str(get_default_hermes_root())
+    from hermes_cli._launchers import print_runtime_command
+    print_runtime_command(Path('/opt/hermes-agent'), sys.argv[2:])
+    sys.exit(0)
+sys._hermes_pin_default_home = True
+try:
+    import hermes_bootstrap
+except Exception:
+    _hermes_closure_repair()
+    raise
+if not os.environ.get('HERMES_HOME'):
+    from hermes_constants import get_default_hermes_root
+    os.environ['HERMES_HOME'] = str(get_default_hermes_root())
+if sys.argv[1:2] == ['--run-module']:
+    import runpy
+    if len(sys.argv) < 3: sys.exit('hermes: --run-module needs a module')
+    module = sys.argv.pop(2)
+    del sys.argv[1]
+    runpy.run_module(module, run_name='__main__', alter_sys=True)
+    sys.exit(0)
+from hermes_cli.main import main
+sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+sys.exit(main())
+"""#
+    /// The same launcher minted for `hermes-acp` (`ENTRY_POINTS`, `_launchers.py:107-110`).
+    static let acpLauncherSource = launcherSource.replacingOccurrences(
+        of: "from hermes_cli.main import main", with: "from acp_adapter.entry import main")
+    /// `runtime_command(..., ["gateway", "run"])` @ v0.23.4, generated.
+    static let runtimeSource = "import os, sys, runpy; os.environ.pop('PYTHONHOME', None); os.environ.pop('PYTHONPATH', None); os.environ.pop('VIRTUAL_ENV', None); sys.path.insert(0, '/opt/hermes-agent'); sys._hermes_pin_default_home = True; import hermes_bootstrap; os.environ.get('HERMES_HOME') or os.environ.__setitem__('HERMES_HOME', str(__import__('hermes_constants').get_default_hermes_root())); runpy.run_module('hermes_cli.main', run_name='__main__', alter_sys=True)"
+    /// `posix_launcher("hermes", "hermes_cli.main:main", …)`'s `-c` program.
+    static let dockerSource = "import os, site, sys; sys.argv[0]='hermes'; site.addsitedir(os.environ['HERMES_SITE']); from hermes_cli.main import main; sys.exit(main())"
+    static let storePy = "/Users/u/.hermes/store/python/3.11/bin/python3"
+
+    /// `pgrep -f` sees argv joined by spaces, newlines kept.
+    static func launched(_ source: String, _ args: String, switch sw: String = "-I") -> String {
+        "\(storePy) \(sw) -c \(source) \(args)"
+    }
+
+    @Test func v023LaunchersMatchTheirOwnProfileOnly() {
+        let def = HermesGatewayProcessMatch.pgrepPattern(profile: nil)
+        let ops = HermesGatewayProcessMatch.pgrepPattern(profile: "ops")
+        let src = Self.launcherSource
+        // Default profile: bin/hermes, runtime_command, Docker -P.
+        #expect(Self.ereMatches(def, Self.launched(src, "gateway run")))
+        #expect(Self.ereMatches(def, Self.launched(src, "gateway run --replace")))
+        #expect(Self.ereMatches(def, Self.launched(Self.runtimeSource, "gateway run")))
+        #expect(Self.ereMatches(def, Self.launched(Self.dockerSource, "gateway run", switch: "-P")))
+        #expect(!Self.ereMatches(def, Self.launched(src, "-p ops gateway run")))
+        // Named profile, every flag spelling and position.
+        #expect(Self.ereMatches(ops, Self.launched(src, "-p ops gateway run")))
+        #expect(Self.ereMatches(ops, Self.launched(src, "--profile=ops gateway run")))
+        #expect(Self.ereMatches(ops, Self.launched(src, "--profile ops gateway run --external-supervisor")))
+        #expect(Self.ereMatches(ops, Self.launched(src, "gateway run -p ops")))
+        #expect(Self.ereMatches(ops, Self.launched(Self.runtimeSource, "-p ops gateway run")))
+        #expect(Self.ereMatches(ops, Self.launched(Self.dockerSource, "-p ops gateway run", switch: "-P")))
+        #expect(!Self.ereMatches(ops, Self.launched(src, "gateway run")))
+        #expect(!Self.ereMatches(ops, Self.launched(src, "-p work gateway run")))
+        #expect(!Self.ereMatches(ops, Self.launched(src, "gateway run -p ops-2")))
+    }
+
+    @Test func v023LaunchersRefuseLookalikes() {
+        for profile in [nil, "ops"] as [String?] {
+            let p = HermesGatewayProcessMatch.pgrepPattern(profile: profile)
+            let flag = profile == nil ? "" : "-p ops "
+            let real = Self.launched(Self.launcherSource, "\(flag)gateway run")
+            // A watcher whose own -c program carries the launcher argv.
+            #expect(!Self.ereMatches(p, "/usr/bin/python3 -c import time; time.sleep(9) \(real)"))
+            #expect(!Self.ereMatches(p, "/usr/bin/python3 -I -c import os, sys; os.execv(sys.argv[1], sys.argv[1:]) \(real)"))
+            // The same launcher, other entry points / verbs.
+            #expect(!Self.ereMatches(p, Self.launched(Self.acpLauncherSource, "\(flag)gateway run")))
+            #expect(!Self.ereMatches(p, Self.launched(Self.launcherSource, "--run-module hermes_cli.stderr_timestamp -- \(flag)gateway run")))
+            #expect(!Self.ereMatches(p, Self.launched(Self.launcherSource, "\(flag)gateway status")))
+            #expect(!Self.ereMatches(p, Self.launched(Self.launcherSource, "\(flag)chat")))
+            #expect(!Self.ereMatches(p, Self.launched(
+                Self.runtimeSource.replacingOccurrences(of: "'hermes_cli.main'", with: "'hermes_cli.stderr_timestamp'"),
+                "-- \(flag)gateway run")))
+            #expect(!Self.ereMatches(p, Self.launched(
+                Self.dockerSource.replacingOccurrences(of: "hermes_cli.main", with: "acp_adapter.entry"),
+                "\(flag)gateway run", switch: "-P")))
+            // The SSH probe's own shell.
+            #expect(!Self.ereMatches(p, "bash -c pgrep -f '\(p)'"))
+            #expect(!p.contains("'"))
+        }
+    }
+
+    @Test func v023LauncherLineAsPsPrintsIt() {
+        let shown = Self.launched(Self.launcherSource, "gateway run").replacingOccurrences(of: "\n", with: "?")
+        #expect(HermesGatewayProcessMatch.commandLineIsGateway(shown, profile: nil))
+        #expect(HermesGatewayProcessMatch.commandLineIsGateway(shown, profile: "ops"))
+        let flagged = Self.launched(Self.launcherSource, "-p ops gateway run").replacingOccurrences(of: "\n", with: "?")
+        #expect(HermesGatewayProcessMatch.commandLineIsGateway(flagged, profile: "ops"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway(flagged, profile: "work"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway(flagged, profile: nil))
+        let acp = Self.launched(Self.acpLauncherSource, "gateway run").replacingOccurrences(of: "\n", with: "?")
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway(acp, profile: nil))
+        // macOS `ps -ww -o command=` prints a newline as `\012`.
+        let mac = Self.launched(Self.launcherSource, "-p ops gateway run").replacingOccurrences(of: "\n", with: #"\012"#)
+        #expect(HermesGatewayProcessMatch.commandLineIsGateway(mac, profile: "ops"))
+        #expect(!HermesGatewayProcessMatch.commandLineIsGateway(mac, profile: nil))
+    }
+
     @Test func firstPIDSkipsBlankLines() {
         #expect(HermesGatewayProcessMatch.firstPID(inPgrepOutput: "\n 8550\n9000\n") == 8550)
         #expect(HermesGatewayProcessMatch.firstPID(inPgrepOutput: "") == nil)

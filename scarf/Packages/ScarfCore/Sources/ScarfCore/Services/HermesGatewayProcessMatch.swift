@@ -34,6 +34,31 @@ import Foundation
 ///    `osascript -e …` and `python -m hermes_cli.stderr_timestamp …` can't
 ///    match while `…/python -m hermes_cli.main …` and `…/python …/bin/hermes
 ///    …` still do, including paths with spaces.
+/// 4. **v0.23 launchers run the gateway from inline `-c` source** (line
+///    numbers @ v0.23.0; the launcher sources are the same at v0.23.4, which
+///    adds a sealed macOS-bundle `bin/hermes` — the `posix_launcher` shape
+///    below — and a `--run-module` branch, neither of which runs
+///    `hermes_cli.main` differently). Services start it via `installation_command`
+///    (`hermes_cli/_launchers.py:87-99`): the published `bin/hermes`, a
+///    `#!/bin/sh` `exec <python> -I -c '<_launcher_script source>' "$@"`
+///    (`_write_shell` `:519-520`, `_mint_shell_launcher` `:535-536`, source
+///    `_launcher_script` `:445-516`), or `runtime_command` (`:39-72`,
+///    `<python> -I -c 'import os, sys, runpy; … runpy.run_module(...)'`). The
+///    bundled/Docker `bin/hermes` execs `"$PYTHON" -P -c 'import os, site,
+///    sys; …'` (`posix_launcher`, `scripts/build/launchers.py:25-75`). The
+///    live process is therefore `<python> -I -c <source> [-p name] gateway
+///    run`. Mirroring Hermes's own recognizer (`_BOOTSTRAPS`,
+///    `gateway/status_inline_source.py:79-111`), each launcher form requires
+///    the FIRST `-c` program (`plainArgs` admits no `-c` before it) to begin
+///    with that launcher's first statement and to end by running
+///    `hermes_cli.main`, followed directly by the usual profile/`gateway run`
+///    tail — so a watcher carrying a launcher argv, the `hermes-acp` entry,
+///    `--run-module X`, or the shell probing with `bash -c "pgrep …"` can't
+///    match. The source spans lines: without `REG_NEWLINE`, ERE `.` matches a
+///    newline, and also the `?` (procps) or `\012` (macOS) that `ps`
+///    prints for one. Quote characters
+///    are matched with `.` so the pattern carries no `'` (it is spliced into
+///    single-quoted shell over SSH).
 ///
 /// Profile names are `[a-z0-9][a-z0-9_-]*` (``HermesProfileScope/isValidName(_:)``),
 /// so a name needs no escaping inside the pattern.
@@ -44,7 +69,27 @@ public enum HermesGatewayProcessMatch {
     /// which begins with `-`, except Python's argument-less switches
     /// (`python -u -m …`, `python -I …/bin/hermes …`). `-e` (osascript),
     /// `-c` and `-m` are not among them, which is what keeps the wrappers out.
-    private static let plainArgs = "([^[:space:]]|[[:space:]]+[^-[:space:]]|[[:space:]]+-[BEIOSbdiqsuv])*"
+    private static let plainArgs = "([^[:space:]]|[[:space:]]+[^-[:space:]]|[[:space:]]+-[BEIOPSbdiqsuv])*"
+
+    /// The v0.23 `-c` launchers (shape 4 above), each up to the end of its
+    /// source. `.` stands for a quote; `nl` for a newline as `pgrep` sees it,
+    /// as procps `ps` prints it (`?`), or as macOS `ps` prints it (`\012`).
+    private static let launcherHeads: [String] = {
+        let c = "^\(plainArgs)\(ws)+-c\(ws)+"
+        let nl = "(.|\\\\012)"
+        return [
+            // `_launcher_script` (`_launchers.py:475` first line, `:513-515` entry).
+            c + "import os, re, sys\(nl).*\(nl)from hermes_cli\\.main import main\(nl)"
+                + "sys\\.argv\\[0\\] = re\\.sub\\([^[:cntrl:]]*\\)\(nl)sys\\.exit\\(main\\(\\)\\)\(nl)?",
+            // `runtime_command` (`_launchers.py:62-72`).
+            c + "import os, sys, runpy; .*; runpy\\.run_module\\(.hermes_cli\\.main., "
+                + "run_name=.__main__., alter_sys=True\\)",
+            // `posix_launcher` (`scripts/build/launchers.py:46-48`, `:73`).
+            c + "import os, site, sys; sys\\.argv\\[0\\]=.[A-Za-z0-9_.-]+.; "
+                + "site\\.addsitedir\\(os\\.environ\\[.HERMES_SITE.\\]\\); "
+                + "from hermes_cli\\.main import main; sys\\.exit\\(main\\(\\)\\)",
+        ]
+    }()
 
     private static func flag(_ name: String) -> String {
         "\(ws)+(-p|--profile)(\(ws)+|=)\(name)"
@@ -63,15 +108,15 @@ public enum HermesGatewayProcessMatch {
         let before = named.map { flag($0) } ?? "(\(flag("default")))?"
         let run = "\(ws)+gateway\(ws)+run"
         let end = "(\(ws)|$)"
-        var forms = [
-            "^\(plainArgs)\(ws)+-m\(ws)+hermes_cli\\.main\(before)\(run)\(end)",
-            "^(\(plainArgs)[[:space:]/])?hermes\(before)\(run)\(end)",
-        ]
+        let heads = [
+            "^\(plainArgs)\(ws)+-m\(ws)+hermes_cli\\.main",
+            "^(\(plainArgs)[[:space:]/])?hermes",
+        ] + launcherHeads
+        var forms = heads.map { "\($0)\(before)\(run)\(end)" }
         if let named {
             // The flag after the subcommand: `hermes gateway run -p <name>`.
             let after = "\(run)(\(ws)+[^[:space:]]+)*\(flag(named))\(end)"
-            forms.append("^\(plainArgs)\(ws)+-m\(ws)+hermes_cli\\.main\(after)")
-            forms.append("^(\(plainArgs)[[:space:]/])?hermes\(after)")
+            forms += heads.map { "\($0)\(after)" }
         }
         return forms.joined(separator: "|")
     }

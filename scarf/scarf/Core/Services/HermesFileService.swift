@@ -3203,14 +3203,15 @@ struct HermesFileService: Sendable {
 
     /// The PID in this profile's own `gateway.pid`, accepted only when that
     /// process is alive and its command line is a gateway this profile can
-    /// own (`ps -o command=`), so a stale file whose PID was reused by
+    /// own (`ps -ww -o command=`; `-ww` so a multi-KB v0.23 launcher line is
+    /// not cut before `gateway run`), so a stale file whose PID was reused by
     /// something else is refused. Read-only; `nil` whenever anything is in
     /// doubt (no file, `ps` unavailable, a different command line).
     nonisolated private func pidFromProfilePidFile(profile: String?) -> pid_t? {
         guard let data = readFileData(context.paths.home + "/gateway.pid"),
               let pid = HermesGatewayProcessMatch.pid(fromPidFile: data, profile: profile),
               let ps = try? transport.runProcess(
-                  executable: "/bin/ps", args: ["-p", String(pid), "-o", "command="],
+                  executable: "/bin/ps", args: ["-ww", "-p", String(pid), "-o", "command="],
                   stdin: nil, timeout: 5),
               ps.exitCode == 0
         else { return nil }
