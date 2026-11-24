@@ -3045,6 +3045,29 @@ public struct HermesCapabilities: Sendable, Equatable {
     /// `"auto"` itself is accepted on older hosts too.
     public var hasPromptCacheTTLAutoDefault: Bool { isV0233OrLater }
 
+    /// Offer `prompt_caching.cache_ttl: auto` in Settings. Hermes accepts it
+    /// from v2026.9.24 (0.21.5: `AUTO_CACHE_TTL`, `agent/prompt_caching.py:121`;
+    /// `agent/agent_init.py:678`), but the option is surfaced from v0.23.3,
+    /// where it became the default, so pre-target hosts render as before (C1).
+    public var hasPromptCacheTTLAuto: Bool { hasPromptCacheTTLAutoDefault }
+
+    /// Show the `agent.clarify_timeout` Settings field. The key exists from
+    /// v2026.5.16 (0.14.0, `hermes_cli/config.py:519`), but the field is
+    /// surfaced from v0.23.1, where the default dropped 3600 → 90 s and it
+    /// started to matter, so pre-target hosts render as before (C1).
+    public var hasClarifyTimeout: Bool { isV0231OrLater }
+
+    /// `agent.clarify_timeout` defaults to 90 s
+    /// (`hermes_cli/config_defaults.py:218` @ v0.23.1, migration
+    /// `hermes_cli/config_migrations.py:879`); 3600 at v0.23.0.
+    public var hasClarifyTimeout90Default: Bool { isV0231OrLater }
+
+    /// `resolve_clarify_timeout`: legacy `clarify.timeout` wins when set,
+    /// else `agent.clarify_timeout`; `<= 0` means unlimited
+    /// (`tools/clarify_gateway.py:385-396` @ v2026.7.30 = 0.19.1). Absent at
+    /// v2026.7.20, which reads only `agent.clarify_timeout`.
+    public var hasClarifyTimeoutResolver: Bool { isV0191OrLater }
+
     // MARK: Convenience predicates
 
     /// Whether the connected host is on the v0.11 line or newer. Convenience

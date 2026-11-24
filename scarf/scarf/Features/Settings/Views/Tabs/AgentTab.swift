@@ -131,6 +131,24 @@ struct AgentTab: View {
                 range: 5...600,
                 step: 5
             ) { viewModel.setApprovalTimeout($0) }
+            // `agent.clarify_timeout` (v0.14+): how long a clarify question
+            // waits for an answer. Absent key shows the host default (90 on
+            // v0.23.1+, 3600 from v0.18, 600 before) without writing it.
+            // Hermes reads `int(raw)`. On v0.19.1+ legacy `clarify.timeout`
+            // wins when set (so edits go there) and 0 means no limit.
+            if capabilities.hasClarifyTimeout {
+                let unlimitedOK = capabilities.hasClarifyTimeoutResolver
+                StepperRow(
+                    label: unlimitedOK ? "Clarify Timeout (s, 0 = no limit)" : "Clarify Timeout (s)",
+                    value: viewModel.config.displayClarifyTimeout(capabilities: capabilities),
+                    range: (unlimitedOK ? 0 : 1)...86400,
+                    step: 30
+                ) {
+                    viewModel.setSetting(
+                        viewModel.config.clarifyTimeoutConfigKey(capabilities: capabilities),
+                        value: String($0))
+                }
+            }
         }
 
         SettingsSection(title: "Messaging Gateway", icon: "antenna.radiowaves.left.and.right") {
