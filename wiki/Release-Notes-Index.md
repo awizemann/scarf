@@ -12,7 +12,7 @@ Every Scarf release in chronological order. The notes themselves live in `releas
 
 | Version | Date | GitHub release | Notes file |
 |---|---|---|---|
-| **v3.9.1** | _unreleased_ | [v3.9.1](https://github.com/awizemann/scarf/releases/tag/v3.9.1) | [`releases/v3.9.1/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.9.1/RELEASE_NOTES.md) |
+| **v3.9.1** | 2026-11-24 | [v3.9.1](https://github.com/awizemann/scarf/releases/tag/v3.9.1) | [`releases/v3.9.1/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.9.1/RELEASE_NOTES.md) |
 | **v3.9.0** | 2026-11-09 | [v3.9.0](https://github.com/awizemann/scarf/releases/tag/v3.9.0) | [`releases/v3.9.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.9.0/RELEASE_NOTES.md) |
 | **v3.8.0** | 2026-10-31 | [v3.8.0](https://github.com/awizemann/scarf/releases/tag/v3.8.0) | [`releases/v3.8.0/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.8.0/RELEASE_NOTES.md) |
 | **v3.7.1** | 2026-10-27 | [v3.7.1](https://github.com/awizemann/scarf/releases/tag/v3.7.1) | [`releases/v3.7.1/RELEASE_NOTES.md`](https://github.com/awizemann/scarf/blob/main/releases/v3.7.1/RELEASE_NOTES.md) |
