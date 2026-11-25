@@ -119,7 +119,6 @@
 - [ ] v0.23 T: real-host testing + fresh-eyes audit (id: t-cfebb471) (added: 2026-11-06)
 - [ ] Fix env-dependent ScarfCore test failures (ProjectDoctor, RealPyYAML) (id: t-3eed315b) (added: 2026-11-06)
 - [ ] Fix two pre-existing Bot scarfTests failures (id: t-0922ddb6) (added: 2026-11-06)
-- [ ] scarfTests runner hangs before connecting (id: t-24fcd8cd) (added: 2026-11-24) (priority: high)
 - [ ] ScarfGo: model sheet shown when the server is unreachable (id: t-7e71a22a) (added: 2026-11-24)
 
 ## Doing
@@ -132,6 +131,7 @@
 
 ## Done
 
+- [x] Test-mode Scarf launches hang (unit runner + UI gate) (id: t-24fcd8cd) (added: 2026-11-24) (priority: high)
 - [x] v0.23.4: restart-when-idle drain watch (id: t-6df6b15b) (added: 2026-11-24)
 - [x] v0.23.4: cron wrap_response carry (id: t-59a3f24e) (added: 2026-11-24)
 - [x] v0.23.4: Yuanbao plugin copy + voice_mention_patterns (id: t-3ef01f2f) (added: 2026-11-24)
