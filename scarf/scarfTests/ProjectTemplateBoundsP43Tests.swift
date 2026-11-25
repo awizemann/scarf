@@ -188,6 +188,13 @@ struct ProjectTemplateBoundsP43Tests {
             Issue.record("expected a refusal, got \(vm.stage)")
             return
         }
+        // The removal is the detached task's `defer`, which runs just AFTER
+        // it publishes `.failed` on the main actor — so give it a moment
+        // rather than racing it.
+        let removalDeadline = Date().addingTimeInterval(5)
+        while FileManager.default.fileExists(atPath: downloaded.path), Date() < removalDeadline {
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
         #expect(!FileManager.default.fileExists(atPath: downloaded.path),
                 "the refused download is still on disk")
     }
