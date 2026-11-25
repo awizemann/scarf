@@ -2084,12 +2084,27 @@ final class ChatController {
         // read that works when Hermes runs inside a container (gh#112) —
         // without it, Docker users hit the "pick a model" sheet on every
         // start even though config.yaml is fully configured.
-        let config: HermesConfig = await Task.detached {
+        // Every read failing looks the same as "no model configured", so a
+        // host we can't reach at all (SSH down, refused host key) would get
+        // the "pick a model" sheet (t-7e71a22a). When nothing answered, one
+        // more probe tells the two apart; it only runs on that failure path.
+        let read: (config: HermesConfig, unreachable: String?) = await Task.detached {
             if let raw = HermesConfigReader.readRawConfig(context: ctx) {
-                return HermesConfig(yaml: raw)
+                return (HermesConfig(yaml: raw), nil)
             }
-            return HermesConfigReader.probeModelConfig(context: ctx) ?? .empty
+            if let probed = HermesConfigReader.probeModelConfig(context: ctx) {
+                return (probed, nil)
+            }
+            if case .transportFailed(let detail) = HermesConfigReader.diagnoseProbeFailure(context: ctx) {
+                return (.empty, detail)
+            }
+            return (.empty, nil)
         }.value
+        if let detail = read.unreachable {
+            if state == .connecting { state = .failed("Can't reach the server: \(detail)") }
+            return false
+        }
+        let config = read.config
         let result = ModelPreflight.check(config)
         ModelPreflightCache.shared.record(result, for: server)
         if result.isConfigured { return true }

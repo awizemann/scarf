@@ -29,6 +29,10 @@ struct ScarfApp: App {
         // flips this between off / signpost-only / full.
         AppScarfMonBoot.configure(mode: ScarfMonBoot.currentMode())
 
+        // Before any window exists, so SwiftUI's per-build frame keys from
+        // earlier builds are gone before it starts observing preferences.
+        StaleWindowFrameKeys.prune()
+
         // Point ScarfCore's analytics seam at this target's facade. The
         // package itself links no analytics SDK (it's shared verbatim with
         // iOS, which installs nothing and stays a no-op); this is the single
