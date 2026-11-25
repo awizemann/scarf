@@ -6,10 +6,10 @@ tags: [architecture, rules]
 aliases: [Core Engineering Constraints, scarf/architecture/core-engineering-constraints]
 source_paths: [scarf/scarf.xcodeproj/project.pbxproj, scarf/Packages/ScarfCore/Package.swift]
 source_paths_inferred: false
-source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-05-29
 updated: 2026-10-05
-reviewed: 2026-11-01
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

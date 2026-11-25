@@ -5,10 +5,10 @@ permalink: scarf/architecture/a-platform-s-shared-keys-are-bridged-from-one-sect
 tags: [hermes, gateway, config, platforms, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPlatformSharedKeys.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/scarf/Features/Platforms/ViewModels/PlatformSetup/PlatformSetupHelpers.swift]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-11
 updated: 2026-09-28
-reviewed: 2026-10-28
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

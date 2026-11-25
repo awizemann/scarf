@@ -3,11 +3,13 @@ title: ScarfGo chat-open timing labels and the model preflight cache
 type: note
 permalink: scarf/architecture/scarfgo-chat-open-timing-labels-and-the-model-preflight
 tags: [scarfgo, performance, gh150]
-source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflightCache.swift]
+source_paths: [scarf/Scarf iOS/Chat/ChatView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ModelPreflightCache.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/ACP/SessionResume.swift, scarf/Scarf iOS/App/ScarfIOSApp.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/Backends/HermesQueryBackend.swift]
 source_paths_inferred: false
-source_sha: 4e80a38fb68c74e784721f0626a350dbfceaab77
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-11-24
 updated: 2026-11-24
+reviewed: 2026-11-24
+reviewed_by: audit:claude-code (background)
 ---
 
 gh#150. How to read where a ScarfGo chat open spends its time, and why the model check no longer runs per chat.
@@ -22,3 +24,8 @@ gh#150. How to read where a ScarfGo chat open spends its time, and why the model
 - [decision] A chat reopen looks up source and cwd through one private, lazily opened data service (SessionResume.withSessionLookup), shared by iOS and Mac; the cwd column comes from the preflight's hasSessionsCwdColumn flag, not a separate PRAGMA. Gateway-backed reopen: 5 -> 3 SSH execs before history #performance
 - [fact] Reopen baseline 2026-11-24 (simulator, localhost SSH, Hermes v0.21.5): total 4.7 s = session/load 3.4 s (Hermes) + acpClientStart 1.0 s + fetchSource 121 ms + loadSessionHistory 157 ms #performance
 - [gotcha] Testing ScarfGo against a throwaway sshd: regenerating its host key makes ScarfGo's pinning refuse the server, and the model preflight then shows "pick a model" instead of a connection error (task t-7e71a22a). Read a ScarfGo public key with `xcrun simctl pbpaste booted`, not from a screenshot #testing
+
+## Relations
+- relates_to [[scarf/architecture/scarf-go-i-os-companion-app]]
+- relates_to [[scarf/architecture/ios-session-resume-must-fall-back-to-newsession-for-non-acp]]
+- relates_to [[scarf/architecture/chat-session-layer-mechanism-map-and-2026-07-13-diagnosis]]

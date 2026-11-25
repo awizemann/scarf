@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-profile/hermes-home-resolution-source-verif
 tags: [hermes, profiles, HERMES_HOME, integration, verified]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesProfileScope.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesProfileList.swift]
 source_paths_inferred: false
-source_sha: b97c2ea41ac22e1a530ce324d87d59b5546d5605
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-06-25
 updated: 2026-09-27
-reviewed: 2026-09-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

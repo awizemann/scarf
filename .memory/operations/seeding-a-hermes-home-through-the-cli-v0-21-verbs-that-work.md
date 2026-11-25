@@ -35,6 +35,5 @@ reviewed_by: audit:claude-code (background)
 - [gotcha] `sqlite3 -readonly` **fails** on both fixture databases in WAL mode: a read-only open must create the `-shm` shared-memory file, so `sqlite3 -readonly kanban.db` exits with "unable to open database file (14)". Always pass `-readonly` only on a COPY of the database, or checkpoint it first. The fixture script deliberately opens read-write (only against the throwaway home) and uses PRAGMA probes rather than trying to inspect read-only. #sqlite-wal
 
 ## Relations
-- documented_in [[scarf-wiki/UI-Test Fixture]]
 - relates_to [[Hermes v0.21 Compatibility Decisions]]
-- relates_to [[hermes-v0-22-gateway-in-fixture-seeding]]
+- relates_to [[UI-test fixture home builder (make-ui-fixture.sh) contract]]

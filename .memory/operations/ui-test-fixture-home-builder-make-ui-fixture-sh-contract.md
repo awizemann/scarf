@@ -5,10 +5,10 @@ permalink: scarf/operations/ui-test-fixture-home-builder-make-ui-fixture-sh-cont
 tags: [testing, ui-tests, fixture, release-gate, hermes]
 source_paths: [scripts/ui-fixture/make-ui-fixture.sh, scarf/scarfUITests/UITestIsolation.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProfileResolver.swift]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-08
 updated: 2026-09-08
-reviewed: 2026-10-28
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

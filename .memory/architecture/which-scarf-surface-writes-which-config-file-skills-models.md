@@ -5,10 +5,10 @@ permalink: scarf/architecture/which-scarf-surface-writes-which-config-file-skill
 tags: [settings, models, skills, config, testing]
 source_paths: [scarf/scarf/Features/Settings/ViewModels/SettingsViewModel.swift, scarf/scarf/Features/Models/Views/ModelPresetsView.swift, scarf/scarf/Features/Skills/Views/SkillsView.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/SkillsScanner.swift]
 source_paths_inferred: false
-source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
+source_sha: fa6bc426c2cedade2ae1b43b16c7f4448e547996
 created: 2026-09-08
 updated: 2026-09-27
-reviewed: 2026-10-30
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 
@@ -16,6 +16,7 @@ reviewed_by: audit:claude-code (background)
 - [fact] The Models SECTION does NOT write config.yaml. It is CRUD over Scarf's own preset catalog at `<home>/scarf/model_presets.json` (`ModelPresetService`); presets are a per-project overlay applied over ACP `session/set_model`, not a global default. Asserting config.yaml against it is a category error #models
 - [fact] Switching the ACTIVE model is Settings → General → Model: `applyModelPickerSelection` → `LocalModelConfigPlan` → `hermes config set`, writing `model.default` and `model.provider` (NOT `model.name`) into `<home>/config.yaml`. The two always move together — a provider left behind routes chats to the wrong endpoint #settings
 - [fact] See [[Hermes skill discovery: any-depth walk, byte-identical name collisions, platforms gate]] for how `~/.hermes/skills/` discovery and `HermesSkill.id`/`category` derivation work. `skill.id` is the path below `skills/` (not `<category>/<name>`) #skills
+- [fact] Skills locking (v0.22.6+): the Skills section manages skill locks via `setLocked()` toggles that call `hermes curator lock|unlock`. Lock state is persisted to `<home>/.hermes/skills/.usage.json`'s `locked` field, re-read after each toggle. When locked, agent tools (skill_manage, write_file, patch, terminal) cannot modify that skill; human editing remains allowed #skills #locking
 - [gotcha] Scarf's Skills → Uninstall passes `skill.id` to a CLI that accepts only the BARE name, and the CLI's rejection EXITS 0 — so `finishUninstall` reported success and nothing was removed. Verified against v0.21; FIXED 2026-09-08 (t-ec6d2e6d): the view passes the bare name and `uninstallSucceeded(exitCode:output:)` treats an `Error:` line as failure. `skills uninstall --yes` arrives at v0.20.5 (v2026.8.19), not v0.21 — the floor confirmed at SkillsViewModel:727, so the stdin "y" confirmation stays as the pre-0.20.5 fallback #skills #gotcha
 - [convention] The Settings persistence journey uses `timezone` specifically because it lives in config.yaml. `SCARF_HERMES_HOME` does not isolate `UserDefaults`, so a UserDefaults-backed setting both pollutes the developer's own preferences and "persists" for a reason unrelated to the home under test #testing
 

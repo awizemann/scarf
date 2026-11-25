@@ -5,10 +5,10 @@ permalink: scarf/architecture/a-yaml-reader-is-opted-in-per-key-and-only-for-wha
 tags: [yaml, config-parsing, verification]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesYAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/YAMLScalar.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesConfig+YAML.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Parsing/HermesPlatformSharedKeys.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Models/HermesApprovalMode.swift, scarf/scarf/Core/Services/HermesFileService.swift]
 source_paths_inferred: false
-source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-11
 updated: 2026-09-13
-reviewed: 2026-10-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

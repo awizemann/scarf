@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-environment-hint-replaces-the-agents-md-man
 tags: [issue-142, hermes-v0.16]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectContextBlock.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCapabilities.swift, scarf/scarf/Resources/BuiltinSkills.bundle/scarf-template-author/SKILL.md]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-29
 updated: 2026-09-29
-reviewed: 2026-10-28
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

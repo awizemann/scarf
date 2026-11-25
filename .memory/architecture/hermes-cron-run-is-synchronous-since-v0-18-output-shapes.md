@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-cron-run-is-synchronous-since-v0-18-output-
 tags: [hermes, cron, cli-contract]
 source_paths: [scarf/scarf/Features/Cron/ViewModels/CronViewModel.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift]
 source_paths_inferred: false
-source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-26
 updated: 2026-09-27
-reviewed: 2026-10-28
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

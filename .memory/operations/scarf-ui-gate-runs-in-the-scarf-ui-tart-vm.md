@@ -5,10 +5,10 @@ permalink: scarf/operations/scarf-ui-gate-runs-in-the-scarf-ui-tart-vm
 tags: [testing, ui-tests, tart, vm, release-gate]
 source_paths: [scripts/ui-gate-vm.sh, scripts/release.sh, scripts/ui-gate.sh]
 source_paths_inferred: false
-source_sha: daa40485a10bcf22688d5e4b8f16e43de182a70c
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-10-26
 updated: 2026-11-08
-reviewed: 2026-11-01
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

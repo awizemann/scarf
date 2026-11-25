@@ -5,10 +5,10 @@ permalink: scarf/architecture/chat-credential-hint-mirrors-hermes-has-any-provid
 tags: [chat, credentials, providers, hermes-release-audit]
 source_paths: [scarf/scarf/Core/Services/HermesFileService.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesProviderCredentials.swift, scripts/check-hermes-tables.py]
 source_paths_inferred: false
-source_sha: 715d1990fc5a6dda09da81f8db215204c834f01d
+source_sha: fa6bc426c2cedade2ae1b43b16c7f4448e547996
 created: 2026-09-26
 updated: 2026-09-27
-reviewed: 2026-10-28
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

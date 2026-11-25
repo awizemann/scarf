@@ -5,10 +5,10 @@ permalink: scarf/decisions/ui-release-gate-xcuitest-is-the-gate-harness-is-explo
 tags: [testing, release, harness, xcuitest]
 source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarf/ContentView.swift, scripts/release.sh, scripts/ui-gate.sh, scripts/ui-fixture/make-ui-fixture.sh]
 source_paths_inferred: false
-source_sha: 01db68bc58591526915adb0ff47c6983d3a81118
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-08
 updated: 2026-09-21
-reviewed: 2026-10-30
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,10 +5,10 @@ permalink: scarf/conventions/a-source-scan-test-must-be-calibrated-against-the-t
 tags: [testing, concurrency, c10, verification]
 source_paths: [scarf/scarfTests/MainActorSpawnDisciplineP22Tests.swift, scarf/scarf.xcodeproj/project.pbxproj, scarf/scarf/Features/Health/ViewModels/HealthViewModel.swift]
 source_paths_inferred: false
-source_sha: 178b92c056ebda6d04e15fb81c822a7fe87e35a4
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-10
 updated: 2026-09-13
-reviewed: 2026-11-01
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

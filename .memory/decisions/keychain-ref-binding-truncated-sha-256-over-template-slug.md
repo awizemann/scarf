@@ -5,10 +5,10 @@ permalink: scarf/decisions/keychain-ref-binding-truncated-sha-256-over-template-
 tags: [security, keychain, templates, projects, migration]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/ProjectConfigKeychain.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/LegacyKeychainRefMigrator.swift, scarf/scarf/Core/Services/ProjectConfigService.swift, scarf/scarf/Core/Services/ProjectTemplateUninstaller.swift, scarf/scarf/Core/Services/KeychainEnvMirror.swift, scarf/Packages/ScarfCore/Sources/ScarfProjectsMCPKit/ProjectMCPTools.swift]
 source_paths_inferred: false
-source_sha: aa52c61e7884fb14e0e7c3c5b993e16136ded73f
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-04
 updated: 2026-09-04
-reviewed: 2026-09-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

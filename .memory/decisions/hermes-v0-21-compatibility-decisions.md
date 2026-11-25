@@ -77,6 +77,6 @@ Removal flags use INVERSE semantics (`true` = still show it) and differ delibera
 - related_to [[Hermes v0.21.0 Audit Findings]]
 - related_to [[Hermes Version Management]]
 - extends [[Hermes v0.20.5 Compatibility Decisions]]
-- **REFINED BY (P55):** Capability floor re-walk; `hasKanban` moved from v0.12 to v0.13 floor (archive: [[Hermes Kanban Command Floor]]) — Scarf's gate is current
+- **REFINED BY (P55):** Capability floor re-walk; `hasKanban` moved from v0.12 to v0.13 floor — Scarf's gate is current
 - **REFINED BY (P57b):** Boolean parsing logic rewrite for quoted-scalar handling; `boolTrueDefault`, `busyAckEnabled()`, `mattermostRequireMention()` now quote-aware
 - **REFINED BY (P59):** Gate group reorganization; follow-on flag corrections

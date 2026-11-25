@@ -5,10 +5,10 @@ permalink: scarf/architecture/judging-a-hermes-verb-by-its-output-the-exit-0-ref
 tags: [hermes-cli, verification, capability-gating, round-4]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesCLIOutcome.swift]
 source_paths_inferred: false
-source_sha: e9c088bdcbf280bdbe34fe7d16b1b2ff3c08eaeb
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-11
 updated: 2026-09-27
-reviewed: 2026-10-29
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

@@ -5,10 +5,10 @@ permalink: scarf/architecture/hermes-messages-fts-contract-an-8-kb-tool-prefix-a
 tags: [hermes, state-db, search, fts, hermes-v0-21-1, hermes-v0-21-4]
 source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesSearchIndex.swift, scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesDataService.swift, scarf/Packages/ScarfCore/Tests/ScarfCoreTests/HermesV0211SearchIndexTests.swift]
 source_paths_inferred: false
-source_sha: 066664901806e40290fd1d630d87d06f20d97157
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-08
 updated: 2026-09-26
-reviewed: 2026-10-28
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 

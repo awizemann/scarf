@@ -3,11 +3,13 @@ title: Hermes v0.23 gateways run from inline -c launchers; process matcher must 
 type: note
 permalink: scarf/architecture/hermes-v0-23-gateways-run-from-inline-c-launchers-process
 tags: [gateway, hermes-v0.23]
-source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesGatewayProcessMatch.swift, scarf/scarf/Core/Services/HermesFileService.swift]
+source_paths: [scarf/Packages/ScarfCore/Sources/ScarfCore/Services/HermesGatewayProcessMatch.swift]
 source_paths_inferred: false
-source_sha: e73652f3b166faf9c11a2b1e2da486784ff07ab4
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-11-24
 updated: 2026-11-24
+reviewed: 2026-11-24
+reviewed_by: audit:claude-code (background)
 ---
 
 gh#154. Scarf's HERMES card/menu bar/Stop fallback find the gateway by matching its command line (pgrep -f / ps). v0.23 changed that command line.

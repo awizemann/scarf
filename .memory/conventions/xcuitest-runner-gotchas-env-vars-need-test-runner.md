@@ -5,10 +5,10 @@ permalink: scarf/conventions/xcuitest-runner-gotchas-env-vars-need-test-runner
 tags: [testing, xcuitest, swiftui, a11y, gotcha]
 source_paths: [scarf/scarfUITests/UITestIsolation.swift, scarf/scarf/ContentView.swift]
 source_paths_inferred: false
-source_sha: 20115cd33082b0187505ec369e7081dafdb1a70c
+source_sha: d6fad1d094f9131d4ed3245996ff6ca75a784dcd
 created: 2026-09-08
 updated: 2026-09-21
-reviewed: 2026-10-27
+reviewed: 2026-11-24
 reviewed_by: audit:claude-code (background)
 ---
 
