@@ -6,6 +6,116 @@
     <description>Scarf macOS app updates</description>
     <language>en</language>
     <item>
+      <title>Version 3.9.1</title>
+      <sparkle:version>80</sparkle:version>
+      <sparkle:shortVersionString>3.9.1</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <pubDate>Wed, 25 Nov 2026 01:03:06 +0000</pubDate>
+      <description><![CDATA[
+<!DOCTYPE html><html><head><meta charset="utf-8"><style>body {
+  font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #1d1d1f;
+  margin: 0;
+  padding: 0 4px;
+}
+h2 {
+  font-size: 17px;
+  margin: 16px 0 6px 0;
+  border-bottom: 1px solid #e5e5e7;
+  padding-bottom: 3px;
+}
+h3 {
+  font-size: 14px;
+  margin: 14px 0 4px 0;
+  color: #424245;
+}
+h4 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 10px 0 2px 0;
+}
+p { margin: 6px 0; }
+ul { margin: 6px 0; padding-left: 20px; }
+li { margin: 3px 0; }
+code {
+  background: #f5f5f7;
+  border-radius: 3px;
+  padding: 1px 4px;
+  font-family: "SF Mono", Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+pre {
+  background: #f5f5f7;
+  border-radius: 5px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+pre code { background: transparent; padding: 0; }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
+hr {
+  border: none;
+  border-top: 1px solid #e5e5e7;
+  margin: 16px 0;
+}
+strong { color: #1d1d1f; }
+@media (prefers-color-scheme: dark) {
+  body { color: #f5f5f7; background: #1c1c1e; }
+  h2 { border-bottom-color: #38383a; }
+  h3 { color: #c7c7cc; }
+  code, pre { background: #2c2c2e; }
+  hr { border-top-color: #38383a; }
+  a { color: #4499ff; }
+  strong { color: #f5f5f7; }
+}
+</style></head><body>
+<p># Scarf v3.9.1</p>
+<p><strong>Scarf now supports Hermes v0.23.4, and the Gateway screen sees gateways started by Hermes v0.23.</strong> Every change below is checked against the Hermes v0.23.1–v0.23.4 releases themselves, and each appears only on a Hermes that has it. On an older host, Scarf looks and behaves exactly as 3.9.0 did.</p>
+<h2>Gateway status on Hermes v0.23 (gh#154)</h2>
+<p>Hermes v0.23 starts its gateway through a small inline launcher (<code>python -c …</code>) instead of the <code>hermes gateway</code> command. Scarf looked only for the old command line, so a running gateway showed as stopped. Scarf now recognises both forms, and reads the full command line (<code>ps -ww</code>) so long paths aren&#x27;t cut off.</p>
+<h2>Faster chat reopen in ScarfGo (gh#150)</h2>
+<ul>
+  <li>Reopening a chat now looks the session up in Hermes&#x27;s database once, instead of three to five times.</li>
+  <li>The &quot;is a model set up?&quot; check is remembered per server, so it no longer runs on every chat open.</li>
+  <li>Each step of opening a chat is now timed in <strong>Settings → Diagnostics → Performance</strong>, so slow opens can be pinned down.</li>
+</ul>
+<h2>Hermes v0.23.1–v0.23.4</h2>
+<ul>
+  <li><strong>Webhooks (v0.23.2+).</strong> Hermes now masks a new webhook&#x27;s secret in its output; Scarf reads the real secret so the copy-once sheet shows it again. A new <strong>Signature</strong> picker sets the signing scheme, and re-adding an existing webhook keeps its current scheme unless you choose another.</li>
+  <li><strong>Profiles (v0.23.4).</strong> An interrupted profile delete no longer shows up as a phantom &quot;Deletion&quot; profile.</li>
+  <li><strong>Prompt caching (v0.23.3).</strong> The cache TTL setting offers <strong>auto</strong>, Hermes&#x27;s new default.</li>
+  <li><strong>Clarify timeout (v0.23.1+).</strong> A new field in Agent settings; 0 means no limit. It respects the older <code>clarify.timeout</code> key if you set it before.</li>
+  <li><strong>Yuanbao (v0.23.1+).</strong> Yuanbao moved out of Hermes core into a plugin; Scarf now points you to the Plugins tab to set it up.</li>
+  <li><strong>Cron (v0.23.2+).</strong> Duplicating a job keeps its reply-formatting setting.</li>
+  <li><strong>Gateway restart (v0.23.2+).</strong> When Hermes waits for idle before restarting, Scarf says so, and no longer reports a false failure after about 32 minutes.</li>
+</ul>
+<h2>Smaller fixes</h2>
+<ul>
+  <li>Remembered Hermes versions are kept in one capped settings entry instead of growing without limit.</li>
+  <li>Copies of Scarf launched in test mode disable <strong>Check for Updates</strong> instead of showing a Sparkle error.</li>
+</ul>
+<h2>Under the hood</h2>
+<ul>
+  <li>New tests cover each Hermes v0.23.x version floor, the webhook output parsing, profile-list parsing, settings, and the gateway restart wording.</li>
+</ul>
+<h2>Upgrade notes</h2>
+<ul>
+  <li>Updates arrive via Sparkle&#x27;s built-in updater; or grab the zip from this release.</li>
+  <li>macOS 15.0+ (Apple Silicon and Intel).</li>
+  <li>Compatible with Hermes v0.6.0 through v0.23.4. Features named above need the Hermes version given next to them.</li>
+  <li>The ScarfGo chat-reopen improvements reach iPhone with the next TestFlight build.</li>
+</ul>
+</body></html>
+      ]]></description>
+      <enclosure url="https://github.com/awizemann/scarf/releases/download/v3.9.1/Scarf-v3.9.1-Universal.zip"
+                 sparkle:edSignature="d2HCfVeCBaw6XHTnOhaiqDl14VxjQCrW3nUOsnTqLxTvbj5l2JA7mn9p24GWhT8c7bD6khMxR0rljR03QSLHBA=="
+                 length="37539500"
+                 type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 3.9.0</title>
       <sparkle:version>79</sparkle:version>
       <sparkle:shortVersionString>3.9.0</sparkle:shortVersionString>
