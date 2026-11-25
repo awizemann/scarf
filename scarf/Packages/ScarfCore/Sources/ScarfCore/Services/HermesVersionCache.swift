@@ -164,18 +164,41 @@ public final class HermesVersionCache: @unchecked Sendable {
     /// One time: move the old per-connection keys into the single store,
     /// keeping real connections and dropping temp-folder homes, then delete
     /// every old key. Caller holds `storeLock`.
+    ///
+    /// The old keys go in ONE removal, not one `removeObject` each: every
+    /// `removeObject` posts a defaults-change notification, and SwiftUI's
+    /// `@AppStorage` observers answer each one by re-reading the whole
+    /// domain. With ~1,700 old keys in a 5,000-key domain that took seconds
+    /// per key on the main thread during the first window's creation, so
+    /// test launches were killed mid-migration, the flag was never written,
+    /// and every launch started over (t-24fcd8cd).
     private func migrateLegacyKeysIfNeeded() {
         guard !defaults.bool(forKey: Self.migratedKey) else { return }
         var store = remembered()
+        var legacyNames: [String] = []
         for (name, value) in defaults.dictionaryRepresentation() where name.hasPrefix(Self.legacyKeyPrefix) {
             let key = String(name.dropFirst(Self.legacyKeyPrefix.count))
             if let line = value as? String, !Self.isThrowawayHome(key), store[key] == nil {
                 store[key] = ["line": line, "at": 0.0]
             }
-            defaults.removeObject(forKey: name)
+            legacyNames.append(name)
         }
+        Self.removeAll(legacyNames, from: defaults)
         defaults.set(Self.capped(store), forKey: Self.storeKey)
         defaults.set(true, forKey: Self.migratedKey)
+    }
+
+    /// Removes `names` with a single preferences write for the app's own
+    /// domain. An injected suite (tests) has no domain name to batch on, so
+    /// it falls back to one removal per key; suites are small.
+    static func removeAll(_ names: [String], from defaults: UserDefaults) {
+        guard !names.isEmpty else { return }
+        if defaults === UserDefaults.standard {
+            CFPreferencesSetMultiple(nil, names as CFArray, kCFPreferencesCurrentApplication,
+                                     kCFPreferencesCurrentUser, kCFPreferencesAnyHost)
+        } else {
+            names.forEach(defaults.removeObject(forKey:))
+        }
     }
 
     // MARK: - Reads

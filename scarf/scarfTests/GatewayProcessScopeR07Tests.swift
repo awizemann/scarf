@@ -160,7 +160,7 @@ struct GatewayProcessScopeR07Tests {
         let transport = Transport(files: [Self.workHome + "/gateway.pid": Self.workPidFile]) { exe, args in
             if exe.contains("pgrep") { return Self.result("", 1) }
             if exe.hasSuffix("/ps") {
-                #expect(args == ["-p", "888", "-o", "command="])
+                #expect(args == ["-ww", "-p", "888", "-o", "command="])
                 return Self.result("/home/u/.hermes/venv/bin/python -m hermes_cli.main gateway run --replace\n", 0)
             }
             return Self.result("", 1)
