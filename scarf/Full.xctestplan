@@ -21,7 +21,8 @@
         "containerPath" : "container:scarf.xcodeproj",
         "identifier" : "5349594E2F7B83B700BD31AD",
         "name" : "scarfTests"
-      }
+      },
+      "parallelizable" : false
     },
     {
       "target" : {

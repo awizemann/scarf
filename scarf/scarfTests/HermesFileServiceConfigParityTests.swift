@@ -719,6 +719,13 @@ struct AllConfigWritersParityTests {
                    computedKeys: ["model.provider", "model.default"]),
             Writer(path: "scarf/Features/Settings/Views/Tabs/AdvancedTab.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
+            // Clarify Timeout (v3.9.1): one `setSetting(` whose key is
+            // `HermesConfig.clarifyTimeoutConfigKey(capabilities:)` — the
+            // legacy `clarify.timeout` when set on a v0.19.1+ host (it wins
+            // there), else `agent.clarify_timeout`.
+            Writer(path: "scarf/Features/Settings/Views/Tabs/AgentTab.swift",
+                   nonLiteralKeySites: 1,
+                   computedKeys: ["clarify.timeout", "agent.clarify_timeout"]),
             Writer(path: "scarf/Core/Services/HermesFileService.swift",
                    nonLiteralKeySites: 0, computedKeys: []),
             // Shared executor: keys arrive from each platform VM's configKV.
